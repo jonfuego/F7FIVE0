@@ -167,6 +167,20 @@ To offer the app to your users, put an APK in `C:\F7FIVE0\data\downloads`.
 Everyone then sees a **Download for Android** button on their Account page.
 See [mobile/README.md](mobile/README.md) for building the APK.
 
+## Ports
+
+F7FIVE0 uses three ports: the web port people connect to (3001 by default,
+asked during setup) and two internal ones on 127.0.0.1 (API 8001, stream
+8002). If the internal defaults are taken, setup picks the next free ones
+(8101, 8102, ...). If the web port is taken, setup stops and names the
+program using it, so pick another. Upgrades keep the ports saved in `.env`.
+
+Running next to another media server on the same PC:
+
+```powershell
+.\installer\install.ps1 -WebPort 3101 -ApiPort 8101 -StreamPort 8102
+```
+
 ## Passkeys
 
 People can add a passkey (fingerprint, face, or device PIN) on their Account

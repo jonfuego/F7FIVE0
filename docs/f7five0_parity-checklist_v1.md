@@ -110,3 +110,13 @@ F7FIVE0 was forked from arcHIVE at about 1.2.0 (Alembic head 0021). The parity g
 - [ ] Podcasts
 - [ ] iPhone / iPad
 - [ ] Apple TV
+
+## Test plan notes (2026-09-30)
+
+- Test hostname: `f750.fuegofam.com` (Jon: "F750.fuegofam.com"). Never enter `media.fuegofam.com` in F7FIVE0 setup while arcHIVE is live: the Cloudflare option runs `route dns --overwrite-dns`.
+- Side by side with arcHIVE on the same PC: `install.ps1 -WebPort 3101 -ApiPort 8101 -StreamPort 8102` (ports configurable as of 2026-09-30; setup stops if a port is taken).
+- Clean-VM install test first (VirtualBox), then side-by-side on Jon's box, then switchover rehearsal.
+
+## Backlog ideas
+
+- Easter eggs alluding to the name: F7FIVE0 / F750 is a response to Plex raising the lifetime Plex Pass price. What exactly is still open.
