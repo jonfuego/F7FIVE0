@@ -1,0 +1,57 @@
+name: Release
+
+# Push a tag like v1.0.0 to build F7FIVE0-Setup-1.0.0.exe and the matching
+# zip, and attach both to a GitHub release.
+#
+# The Android APK is NOT built or signed here. The release key never goes to
+# GitHub. After this workflow finishes, the maintainer runs
+# scripts\release-apk.ps1 locally, which signs, verifies, and attaches the APK
+# to the same release. Do not add signing secrets to this repo.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to stamp (no leading v)"
+        required: true
+        default: "0.0.0-test"
+
+permissions:
+  contents: write
+
+jobs:
+  windows-installer:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Version
+        id: v
+        shell: pwsh
+        run: |
+          $v = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}".TrimStart("v") } else { "${{ inputs.version }}" }
+          "version=$v" >> $env:GITHUB_OUTPUT
+      - name: Inno Setup
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
+      - name: Build dist + Setup.exe
+        shell: pwsh
+        run: ./installer/build-dist.ps1 -Version "${{ steps.v.outputs.version }}" -Compile
+      - name: Zip
+        shell: pwsh
+        run: Compress-Archive -Path installer/dist/* -DestinationPath "installer/Output/F7FIVE0-${{ steps.v.outputs.version }}.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: F7FIVE0-${{ steps.v.outputs.version }}
+          path: installer/Output/*
+      - uses: softprops/action-gh-release@v2
+        if: github.ref_type == 'tag'
+        with:
+          files: installer/Output/*
+          generate_release_notes: true
