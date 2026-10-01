@@ -1,0 +1,14 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <application>
+    <!-- Android Auto / media browser entry point (spec J, criterion 44). Head
+         units bind to this service to browse Home, Recently Played, Mixes,
+         Albums, Artists and Downloads and to send transport commands. -->
+    <service
+      android:name="expo.modules.f7five0auto.F7FIVE0BrowserService"
+      android:exported="true">
+      <intent-filter>
+        <action android:name="android.media.browse.MediaBrowserService" />
+      </intent-filter>
+    </service>
+  </application>
+</manifest>

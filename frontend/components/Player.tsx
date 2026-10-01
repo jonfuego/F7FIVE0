@@ -1,0 +1,679 @@
+// Player. Takes a StreamStart response and renders a <video> tag with the
+// right source attachment strategy:
+//
+//   - mode === "direct": set video.src to the signed MP4 URL. Browsers
+//     handle byte-range seeking natively.
+//   - mode === "hls": if the browser supports HLS natively
+//     (Safari / iOS), set video.src to the master playlist directly. The
+//     Stream Gateway rewrites child playlists and segment URLs to keep
+//     the signed query on every sub-fetch.
+//   - mode === "hls" without native support: dynamically import hls.js
+//     and attach via MediaSource. hls.js will forward the signed query
+//     itself because the manifest rewrites carry it per-URI.
+//
+// Playback errors bubble up to onError so the page can show something.
+//
+// Resume: the page decides whether to resume. If it passes an
+// `initialResume` value we seek there once metadata is loaded (or
+// immediately if metadata is already present). Passing nothing (or 0)
+// starts from the beginning. Fetching the stored position and running
+// the "Resume from X / Start over" prompt is the page's job; keeping it
+// out of the Player means the Player never silently overrides a user
+// choice.
+//
+// Progress: during playback we heartbeat to the backend every
+// HEARTBEAT_MS. On unmount we flush one final write so we don't drop
+// the last few seconds. When a cast session is active, the heartbeat
+// uses the remote player's current time instead of the local video.
+//
+// Quality selector: on the MSE path we expose a gear menu overlaid on
+// the player. The menu lists Auto + each level in the ladder (sorted
+// high to low). Selecting "Auto" hands control back to hls.js ABR;
+// selecting a specific level pins it via `hls.currentLevel`. Native
+// HLS (Safari) and direct-play don't expose a level API, so the menu
+// is hidden for those modes.
+//
+// Cast: when the Cast SDK is loaded and a session is active, the Player
+// pauses local playback, sends the same signed stream URL to the
+// receiver, and shows a "Casting to <device>" overlay. On session end
+// it seeks the local video to the remote position and resumes. The
+// launcher button lives in the overlay next to the gear icon. During
+// a cast session the gear is hidden because hls.js is still attached
+// locally but not playing.
+
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import type HlsType from "hls.js";
+import type { Level } from "hls.js";
+import { apiPut } from "@/lib/client-api";
+import type { MediaMarker, Progress, StreamStart } from "@/lib/types";
+import CastButton from "./CastButton";
+import { useCast } from "@/lib/cast";
+
+type Props = {
+  stream: StreamStart;
+  onError?: (message: string) => void;
+  autoPlay?: boolean;
+  initialResume?: number;
+  // Optional absolute URL to the poster artwork for the Cast receiver.
+  // Same-origin is fine; Cast devices on the local network reach the
+  // tunnel-exposed origin just like the browser does.
+  posterUrl?: string;
+  // Detected intro/credits ranges. When currentTime falls inside one, a
+  // Skip button appears that seeks to the marker end.
+  markers?: MediaMarker[];
+  // Hands the live <video> element to the parent (the watch page) so the
+  // custom VideoTransport can drive it. Called with the element on mount and
+  // null on unmount. Replaces the old document.querySelector(".np video") poll.
+  onVideoEl?: (el: HTMLVideoElement | null) => void;
+};
+
+const HEARTBEAT_MS = 10_000;
+
+// Absolute-ize a same-origin path so the Cast receiver can fetch it. The
+// BFF rewrites `/api/stream/start` responses to path-only URLs so they
+// resolve under the tunnel in the browser; the Cast device on the LAN
+// needs a scheme + host to dereference.
+function toAbsolute(url: string): string {
+  if (/^https?:\/\//i.test(url)) return url;
+  if (typeof window === "undefined") return url;
+  if (url.startsWith("/")) return `${window.location.origin}${url}`;
+  return `${window.location.origin}/${url}`;
+}
+
+function castContentTypeFor(mode: StreamStart["mode"]): string {
+  return mode === "hls" ? "application/vnd.apple.mpegurl" : "video/mp4";
+}
+
+export function Player({
+  stream,
+  onError,
+  autoPlay = true,
+  initialResume,
+  posterUrl,
+  markers = [],
+  onVideoEl,
+}: Props) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const hlsRef = useRef<HlsType | null>(null);
+
+  // Callback ref: keep the internal ref in sync and hand the element up to the
+  // parent. Stable across renders (onVideoEl is a state setter on the page) so
+  // React doesn't detach/reattach it every render.
+  const setVideoNode = useCallback(
+    (el: HTMLVideoElement | null) => {
+      videoRef.current = el;
+      onVideoEl?.(el);
+    },
+    [onVideoEl],
+  );
+  const [ready, setReady] = useState(false);
+  // Playhead, sampled from the <video> timeupdate event, used only to decide
+  // whether a skip-intro / skip-credits button should show.
+  const [currentTime, setCurrentTime] = useState(0);
+
+  // Quality selector state. `levels` is populated on MANIFEST_PARSED;
+  // `loadedLevel` tracks whichever level ABR or the user settled on;
+  // `userLevel` is -1 for Auto, else the explicit level index the user
+  // pinned (so the UI can show Auto vs Pinned separately).
+  const [levels, setLevels] = useState<Level[]>([]);
+  const [loadedLevel, setLoadedLevel] = useState<number>(-1);
+  const [userLevel, setUserLevel] = useState<number>(-1);
+
+  // Cast bridge. useCast polls for SDK readiness internally so it's safe
+  // to call unconditionally; when the SDK never loads, `status` stays
+  // "unavailable" and the commands are no-ops.
+  const cast = useCast();
+  // Mirror the cast state into a ref so the heartbeat interval and the
+  // unmount flush can read the latest values without being torn down
+  // every time cast state changes.
+  const castRef = useRef(cast);
+  useEffect(() => {
+    castRef.current = cast;
+  }, [cast]);
+
+  // Cast session transition handler. Fires on every cast.isConnected
+  // flip and orchestrates the bridge between local and remote playback.
+  const wasConnectedRef = useRef(false);
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    const nowConnected = cast.isConnected;
+    const wasConnected = wasConnectedRef.current;
+    wasConnectedRef.current = nowConnected;
+
+    if (nowConnected && !wasConnected) {
+      // Starting to cast. Pause local playback at whatever position it's
+      // at and hand the same signed URL to the receiver with startTime
+      // set to the current local position. The HMAC already covers
+      // `t=<bucket>` so we send exactly what the backend signed; the
+      // receiver's `startTime` is a client-side seek, not a new signing.
+      const startAt = isFinite(video.currentTime) && video.currentTime > 0
+        ? video.currentTime
+        : (initialResume ?? 0);
+      try { video.pause(); } catch { /* ignore */ }
+
+      const absoluteUrl = toAbsolute(stream.url);
+      void cast
+        .loadMedia({
+          contentUrl: absoluteUrl,
+          contentType: castContentTypeFor(stream.mode),
+          title: stream.title ?? undefined,
+          posterUrl: posterUrl,
+          startTime: startAt > 0 ? startAt : undefined,
+          durationSec: stream.duration_sec ?? undefined,
+        })
+        .catch((err: unknown) => {
+          const message = err instanceof Error ? err.message : String(err);
+          onError?.(`Cast failed: ${message}`);
+          // Try to recover local playback so the user isn't stranded.
+          try { void video.play(); } catch { /* ignore */ }
+        });
+    } else if (!nowConnected && wasConnected) {
+      // Cast session ended. Seek local video to wherever the receiver
+      // left off and resume. Browsers sometimes reject play() without a
+      // user gesture if the tab was backgrounded; swallow the rejection
+      // and let the user hit play manually if needed.
+      const resumeAt = cast.currentTime;
+      try {
+        if (resumeAt > 0 && isFinite(video.duration) && video.duration > 0) {
+          video.currentTime = resumeAt;
+        }
+      } catch { /* ignore */ }
+      try {
+        const p = video.play();
+        if (p && typeof p.catch === "function") p.catch(() => { /* ignore */ });
+      } catch { /* ignore */ }
+    }
+    // cast.currentTime is read only in the transition branch, but it's
+    // most accurate on the tick the session actually ends, so we leave
+    // it out of deps. The transition is driven by isConnected.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cast.isConnected, stream, onError, posterUrl, initialResume]);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    let disposed = false;
+    let heartbeat: number | null = null;
+    let resumePos: number | null =
+      initialResume != null && initialResume > 0 ? initialResume : null;
+
+    // Reset quality state on every new stream.
+    setLevels([]);
+    setLoadedLevel(-1);
+    setUserLevel(-1);
+
+    async function attach() {
+      if (!video) return;
+
+      if (stream.mode === "direct") {
+        video.src = stream.url;
+        setReady(true);
+        return;
+      }
+
+      // HLS path. Prefer native (Safari, iOS) — it's smoother and uses
+      // fewer CPU cycles than MSE-driven playback.
+      if (video.canPlayType("application/vnd.apple.mpegurl")) {
+        video.src = stream.url;
+        setReady(true);
+        return;
+      }
+
+      try {
+        const { default: Hls } = await import("hls.js");
+        if (disposed) return;
+        if (!Hls.isSupported()) {
+          onError?.("HLS playback is not supported in this browser.");
+          return;
+        }
+        const instance = new Hls({
+          // Reasonable defaults. F7FIVE0 segments are 6s and the Stream
+          // Gateway caps concurrent transcodes, so a small buffer ahead
+          // keeps memory modest.
+          maxBufferLength: 30,
+          enableWorker: true,
+        });
+        hlsRef.current = instance;
+        instance.on(Hls.Events.MANIFEST_PARSED, (_event, data) => {
+          if (disposed) return;
+          // Copy so React treats it as a new array; hls.js mutates the
+          // internal levels object over time.
+          setLevels([...data.levels]);
+          setLoadedLevel(instance.currentLevel);
+        });
+        instance.on(Hls.Events.LEVEL_SWITCHED, (_event, data) => {
+          if (disposed) return;
+          setLoadedLevel(data.level);
+        });
+
+        // Bounded fatal-error recovery. A single fatal error used to swap the
+        // whole page for an ErrorBox, so any transient network blip or a
+        // re-spawn gap killed playback permanently. Instead: retry network
+        // errors with startLoad and backoff, recover media errors, and only
+        // give up (destroy + onError) once a small budget is exhausted. A
+        // healthy stretch (FRAG_BUFFERED) restores the budget so a later,
+        // unrelated blip gets the full allowance again.
+        const MAX_NET_RETRIES = 4;
+        const MAX_MEDIA_RETRIES = 3;
+        let netRetries = 0;
+        let mediaRetries = 0;
+        instance.on(Hls.Events.FRAG_BUFFERED, () => {
+          netRetries = 0;
+          mediaRetries = 0;
+        });
+        instance.on(Hls.Events.ERROR, (_event, data) => {
+          if (disposed) return;
+          if (!data.fatal) return;
+
+          if (data.type === Hls.ErrorTypes.NETWORK_ERROR && netRetries < MAX_NET_RETRIES) {
+            netRetries += 1;
+            // Exponential-ish backoff capped at 2s. startLoad re-fetches the
+            // manifest and segments; the keepalive ping keeps the encoder
+            // alive underneath so the re-fetch finds fresh output.
+            const delay = Math.min(2000, 250 * 2 ** (netRetries - 1));
+            window.setTimeout(() => {
+              if (disposed) return;
+              try { instance.startLoad(); } catch { /* ignore */ }
+            }, delay);
+            return;
+          }
+          if (data.type === Hls.ErrorTypes.MEDIA_ERROR && mediaRetries < MAX_MEDIA_RETRIES) {
+            mediaRetries += 1;
+            try {
+              // Second media-error attempt: swap the audio codec first, which
+              // clears the class of media errors a plain recover can't.
+              if (mediaRetries >= 2) instance.swapAudioCodec();
+              instance.recoverMediaError();
+            } catch { /* ignore */ }
+            return;
+          }
+
+          // Unrecoverable type, or the retry budget is spent: tear down and
+          // surface it so the page shows the error state.
+          try { instance.destroy(); } catch { /* ignore */ }
+          if (hlsRef.current === instance) hlsRef.current = null;
+          onError?.(`Playback error: ${data.type}/${data.details}`);
+        });
+        instance.loadSource(stream.url);
+        instance.attachMedia(video);
+        setReady(true);
+      } catch (err) {
+        onError?.(err instanceof Error ? err.message : "Failed to load player");
+      }
+    }
+
+    function trySeekNow() {
+      if (!video || resumePos == null) return;
+      if (!isNaN(video.duration) && video.duration > 0) {
+        try { video.currentTime = resumePos; } catch { /* ignore */ }
+        resumePos = null;
+      }
+    }
+
+    function onLoadedMetadata() {
+      trySeekNow();
+    }
+
+    function send(position: number, durationHint?: number | null) {
+      // Fire-and-forget. If the write fails we'll catch up on the next tick.
+      const duration =
+        durationHint != null && durationHint > 0
+          ? Math.floor(durationHint)
+          : video && !isNaN(video.duration) && video.duration > 0
+            ? Math.floor(video.duration)
+            : (stream.duration_sec ?? null);
+      void apiPut<Progress>(
+        `/api/library/progress/${stream.media_file_id}`,
+        {
+          position_sec: Math.floor(position),
+          duration_sec: duration,
+        },
+      ).catch(() => { /* swallow */ });
+    }
+
+    function pingKeepAlive() {
+      // Keep the transcode session alive while an HLS stream is mounted, even
+      // while paused (a pause is exactly what used to trip the 90s idle kill).
+      // The HMAC payload is uid:mid:exp:offset_bucket and does not cover the
+      // path, so the keepalive URL is the signed stream URL with its pathname
+      // swapped to the keepalive route. Direct-play has no session to keep.
+      if (!(stream.mode === "hls")) return;
+      if (typeof window === "undefined") return;
+      try {
+        const u = new URL(stream.url, window.location.origin);
+        u.pathname = `/stream/keepalive/${stream.media_file_id}`;
+        void fetch(u.toString(), { method: "GET", cache: "no-store" }).catch(() => { /* ignore */ });
+      } catch {
+        // ignore
+      }
+    }
+
+    function tick() {
+      pingKeepAlive();
+      // When casting, the receiver is the source of truth for playhead.
+      const c = castRef.current;
+      if (c.isConnected) {
+        if (c.currentTime > 0) {
+          send(c.currentTime, c.duration > 0 ? c.duration : stream.duration_sec);
+        }
+        return;
+      }
+      if (!video) return;
+      if (video.paused || video.ended) return;
+      if (isNaN(video.currentTime)) return;
+      send(video.currentTime);
+    }
+
+    video.addEventListener("loadedmetadata", onLoadedMetadata);
+    attach();
+    // If metadata was already loaded by the time this effect runs (rare but
+    // possible on fast caches), seek immediately without waiting for the event.
+    trySeekNow();
+    heartbeat = window.setInterval(tick, HEARTBEAT_MS);
+
+    return () => {
+      disposed = true;
+      if (heartbeat !== null) {
+        window.clearInterval(heartbeat);
+        heartbeat = null;
+      }
+      // Final flush. If the user was mid-playback this captures the last
+      // heartbeat-worth of progress so reloading the page resumes close
+      // to where they left off. If we're still casting on unmount, trust
+      // the receiver's time over the local video's (which is paused).
+      const c = castRef.current;
+      if (c.isConnected && c.currentTime > 0) {
+        send(c.currentTime, c.duration > 0 ? c.duration : stream.duration_sec);
+      } else if (video && !isNaN(video.currentTime) && video.currentTime > 0) {
+        send(video.currentTime);
+      }
+      if (video) {
+        video.removeEventListener("loadedmetadata", onLoadedMetadata);
+      }
+      const instance = hlsRef.current;
+      if (instance) {
+        try {
+          instance.destroy();
+        } catch {
+          // ignore
+        }
+        hlsRef.current = null;
+      }
+      if (video) {
+        video.removeAttribute("src");
+        try {
+          video.load();
+        } catch {
+          // ignore
+        }
+      }
+    };
+  }, [stream, onError, initialResume]);
+
+  function selectLevel(index: number) {
+    const instance = hlsRef.current;
+    if (!instance) return;
+    instance.currentLevel = index; // -1 means auto
+    setUserLevel(index);
+  }
+
+  // Sample the playhead for the skip-button gate. timeupdate fires a few
+  // times a second, which is plenty for showing/hiding a button.
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    const onTime = () => setCurrentTime(video.currentTime || 0);
+    video.addEventListener("timeupdate", onTime);
+    return () => video.removeEventListener("timeupdate", onTime);
+  }, []);
+
+  const activeMarker =
+    markers.find((m) => currentTime >= m.start_sec && currentTime < m.end_sec) ?? null;
+
+  function skipMarker(m: MediaMarker) {
+    const video = videoRef.current;
+    if (!video) return;
+    try {
+      video.currentTime = m.end_sec;
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const isCasting = cast.isConnected;
+
+  return (
+    <div className="relative h-full w-full">
+      <video
+        ref={setVideoNode}
+        autoPlay={autoPlay}
+        playsInline
+        preload="metadata"
+        className={`h-full w-full bg-black ${ready ? "" : "opacity-0"}`}
+      />
+
+      {/* Casting overlay. Covers the video so the user sees status rather
+          than a frozen frame. Includes a Disconnect shortcut. */}
+      {isCasting ? (
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/95 text-neutral-100">
+          <CastPlayingIcon />
+          <div className="mt-4 text-lg font-semibold">
+            Casting to {cast.deviceName ?? "your device"}
+          </div>
+          {stream.title ? (
+            <div className="mt-1 text-sm text-neutral-400">{stream.title}</div>
+          ) : null}
+          <div className="mt-5 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={cast.playPause}
+              className="rounded-md border border-neutral-700 px-3 py-1.5 text-xs text-neutral-100 transition hover:border-neutral-500"
+            >
+              {cast.isPaused ? "Play" : "Pause"}
+            </button>
+            <button
+              type="button"
+              onClick={() => cast.endSession(true)}
+              className="rounded-md bg-amber-500 px-3 py-1.5 text-xs font-medium text-neutral-950 transition hover:bg-amber-400"
+            >
+              Stop casting
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {/* Skip Intro / Skip Credits. Shows only while the playhead is inside
+          a detected marker and we're not casting. Sits above the custom
+          VideoTransport bar (taller than the old native strip) at the
+          bottom-right, so bottom-44 clears the transport height. */}
+      {activeMarker && !isCasting ? (
+        <button
+          type="button"
+          onClick={() => skipMarker(activeMarker)}
+          className="absolute bottom-44 right-4 z-20 rounded-md bg-black/70 px-4 py-2 text-sm font-medium text-neutral-100 backdrop-blur-sm transition hover:bg-black/90"
+        >
+          {activeMarker.kind === "intro" ? "Skip Intro" : "Skip Credits"}
+        </button>
+      ) : null}
+
+      {/* Top-right overlay: cast button + gear. The launcher upgrades to
+          a clickable icon after the SDK registers the custom element. */}
+      <div className="absolute right-3 top-3 z-10 flex items-center gap-2">
+        <CastButton status={cast.status} />
+        {levels.length > 1 && !isCasting ? (
+          <QualityMenu
+            levels={levels}
+            loadedLevel={loadedLevel}
+            userLevel={userLevel}
+            onSelect={selectLevel}
+          />
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function QualityMenu({
+  levels,
+  loadedLevel,
+  userLevel,
+  onSelect,
+}: {
+  levels: Level[];
+  loadedLevel: number;
+  userLevel: number;
+  onSelect: (index: number) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onDocClick(e: MouseEvent) {
+      if (!rootRef.current) return;
+      if (!rootRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [open]);
+
+  // Build entries indexed by their position in hls.levels (stable for
+  // `hls.currentLevel`), sorted by height descending for display.
+  const entries = levels
+    .map((lv, i) => ({ index: i, height: lv.height ?? 0, bitrate: lv.bitrate ?? 0 }))
+    .sort((a, b) => b.height - a.height || b.bitrate - a.bitrate);
+
+  const activeLevel = levels[loadedLevel];
+  const autoLabel = activeLevel?.height
+    ? `Auto (${activeLevel.height}p)`
+    : "Auto";
+  const buttonLabel = userLevel === -1
+    ? autoLabel
+    : (levels[userLevel]?.height ? `${levels[userLevel].height}p` : `Level ${userLevel}`);
+
+  return (
+    <div ref={rootRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex items-center gap-1.5 rounded-md bg-black/60 px-2.5 py-1 text-xs font-medium text-neutral-100 backdrop-blur-sm transition hover:bg-black/75"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title="Quality"
+      >
+        <GearIcon />
+        <span className="hidden sm:inline">{buttonLabel}</span>
+      </button>
+      {open ? (
+        <div
+          role="menu"
+          className="absolute right-0 mt-1 min-w-[9rem] overflow-hidden rounded-md border border-neutral-800 bg-neutral-950/95 text-sm shadow-lg backdrop-blur-sm"
+        >
+          <MenuItem
+            label={autoLabel}
+            selected={userLevel === -1}
+            onClick={() => { onSelect(-1); setOpen(false); }}
+          />
+          <div className="border-t border-neutral-900" />
+          {entries.map((e) => (
+            <MenuItem
+              key={e.index}
+              label={e.height ? `${e.height}p` : `Level ${e.index}`}
+              selected={userLevel === e.index}
+              onClick={() => { onSelect(e.index); setOpen(false); }}
+            />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function MenuItem({
+  label,
+  selected,
+  onClick,
+}: {
+  label: string;
+  selected: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitemradio"
+      aria-checked={selected}
+      onClick={onClick}
+      className={`flex w-full items-center justify-between gap-3 px-3 py-1.5 text-left transition hover:bg-neutral-900 ${
+        selected ? "text-amber-400" : "text-neutral-200"
+      }`}
+    >
+      <span>{label}</span>
+      {selected ? <CheckIcon /> : null}
+    </button>
+  );
+}
+
+function GearIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      width="14"
+      height="14"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    </svg>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      width="12"
+      height="12"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="3"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M4 12l5 5L20 6" />
+    </svg>
+  );
+}
+
+function CastPlayingIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      width="48"
+      height="48"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="text-amber-400"
+    >
+      <path d="M2 16a6 6 0 0 1 6 6" />
+      <path d="M2 12a10 10 0 0 1 10 10" />
+      <path d="M2 8a14 14 0 0 1 14 14" />
+      <rect x="2" y="4" width="20" height="16" rx="2" />
+    </svg>
+  );
+}

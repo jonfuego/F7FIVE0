@@ -1,0 +1,29 @@
+appId: com.f7five0.app
+name: login
+---
+- launchApp:
+    clearState: true
+- extendedWaitUntil:
+    visible: "Sign in"
+    timeout: 20000
+- assertVisible: "F7FIVE0"
+- takeScreenshot: 01-login
+# Server address comes from the environment: maestro test -e F7FIVE0_SERVER=http://10.0.2.2:3001 ...
+- tapOn: "Server"
+- eraseText
+- inputText: ${F7FIVE0_SERVER}
+- tapOn: "Username"
+- inputText: "native-smoke"
+- tapOn: "Password"
+- inputText: ${SMOKE_PASSWORD}
+- hideKeyboard
+- tapOn: "Sign in"
+- extendedWaitUntil:
+    visible: "Home"
+    timeout: 30000
+# Home's first rail. (On Deck / Continue Watching can push the lower rails
+# such as Albums below the fold, so don't wait on those.)
+- extendedWaitUntil:
+    visible: "Continue Watching"
+    timeout: 30000
+- takeScreenshot: 02-home

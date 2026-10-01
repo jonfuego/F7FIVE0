@@ -1,0 +1,29 @@
+appId: com.f7five0.app
+name: artist-radio
+---
+- launchApp
+- extendedWaitUntil:
+    visible: "Music"
+    timeout: 20000
+- tapOn: "Music"
+- tapOn: "Artists"
+- extendedWaitUntil:
+    visible: ".+, .+ albums"
+    timeout: 30000
+- waitForAnimationToEnd:
+    timeout: 5000
+# Artist tiles are labelled "<name>, <n> albums".
+- tapOn:
+    text: ".+, .+ albums"
+    index: 0
+    below: "Artists"
+    retryTapIfNoChange: true
+- extendedWaitUntil:
+    visible: "Start radio"
+    timeout: 20000
+- takeScreenshot: 11-artist
+- tapOn: "Start radio"
+- extendedWaitUntil:
+    visible: "Now playing .*Open full player\\."
+    timeout: 40000
+- assertVisible: "Now playing .*Open full player\\."

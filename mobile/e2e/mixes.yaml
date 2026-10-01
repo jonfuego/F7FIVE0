@@ -1,0 +1,34 @@
+appId: com.f7five0.app
+name: mixes-wall
+---
+# The Mixes wall with every auto-playlist kind and the parameter pickers
+# (criteria 12, 30).
+- launchApp
+- extendedWaitUntil:
+    visible: "Music"
+    timeout: 20000
+- tapOn: "Music"
+- tapOn: "Mixes"
+- extendedWaitUntil:
+    visible: "Shuffle All"
+    timeout: 15000
+- assertVisible: "Most Played"
+- assertVisible: "Track Radio"
+- takeScreenshot: 14-mixes
+- scrollUntilVisible:
+    element: "By Artist choose artist"
+    direction: DOWN
+- tapOn: "By Artist choose artist"
+- extendedWaitUntil:
+    visible: "Search artists"
+    timeout: 15000
+- extendedWaitUntil:
+    visible: "Artist .*"
+    timeout: 20000
+- tapOn:
+    text: "Artist .*"
+    index: 0
+- tapOn: "Play By Artist"
+- extendedWaitUntil:
+    visible: "Now playing .*Open full player\\."
+    timeout: 30000

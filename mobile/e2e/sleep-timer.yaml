@@ -1,0 +1,38 @@
+appId: com.f7five0.app
+name: sleep-timer
+---
+- launchApp
+- extendedWaitUntil:
+    visible: "Music"
+    timeout: 20000
+- tapOn: "Music"
+- tapOn: "Songs"
+- extendedWaitUntil:
+    visible: ".+, .+"
+    timeout: 30000
+- waitForAnimationToEnd:
+    timeout: 5000
+# Play the first track (rows are labelled "<title>, <artist>").
+- tapOn:
+    text: ".+, .+"
+    index: 0
+    below: "Songs"
+    retryTapIfNoChange: true
+- extendedWaitUntil:
+    visible: "Now playing .*Open full player\\."
+    timeout: 30000
+- tapOn: "Now playing .*Open full player\\."
+- extendedWaitUntil:
+    visible: "Player options"
+    timeout: 10000
+- tapOn: "Player options"
+- extendedWaitUntil:
+    visible: "Sleep 30m"
+    timeout: 10000
+- takeScreenshot: 20-player-options
+- tapOn: "Sleep 30m"
+- assertVisible: "Sleep 30m"
+# Turn it back off.
+- tapOn: "Sleep Off"
+- tapOn: "Close options"
+- assertVisible: "Close now playing"

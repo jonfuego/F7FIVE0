@@ -1,0 +1,105 @@
+/* F7FIVE0 design tokens v1. Generated from tokens.json. Dark is the default theme. */
+
+:root, [data-theme="dark"] {
+  --bg: #000000;
+  --surface-1: #0e0e0e;
+  --surface-2: #181818;
+  --surface-3: #242424;
+  --line: #2c2c2c;
+  --line-strong: #777777;
+  --ink: #ffffff;
+  --ink-2: #c4c4c4;
+  --ink-3: #9a9a9a;
+  --hive: #970002;
+  --hive-hover: #b3070a;
+  --hive-press: #7d0002;
+  --hive-text: #ff5c5e;
+  --hive-tint: #2b0a0a;
+  --on-hive: #ffffff;
+  --hive-mark: var(--hive-text);
+  --focus: #ffffff;
+  --positive: #5cc8ff;
+  --warning: #f2b33d;
+  --danger: var(--hive-text);
+  --scrim: rgba(0, 0, 0, 0.72);
+  --shadow-hive: 6px 6px 0 0 #970002;
+  --shadow-hive-s: 3px 3px 0 0 #970002;
+  --shadow-overlay: 0 16px 48px 0 rgba(0, 0, 0, 0.8);
+}
+
+[data-theme="light"] {
+  --bg: #ffffff;
+  --surface-1: #f4f4f4;
+  --surface-2: #eaeaea;
+  --surface-3: #dcdcdc;
+  --line: #d2d2d2;
+  --line-strong: #767676;
+  --ink: #000000;
+  --ink-2: #3a3a3a;
+  --ink-3: #595959;
+  --hive: #970002;
+  --hive-hover: #7d0002;
+  --hive-press: #650002;
+  --hive-text: #970002;
+  --hive-tint: #f8e6e6;
+  --on-hive: #ffffff;
+  --hive-mark: var(--hive);
+  --focus: #000000;
+  --positive: #005f9e;
+  --warning: #7f5100;
+  --danger: var(--hive);
+  --scrim: rgba(0, 0, 0, 0.56);
+  --shadow-overlay: 0 16px 48px 0 rgba(0, 0, 0, 0.18);
+}
+
+:root {
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+  --space-9: 96px;
+  --radius-0: 0px;
+  --radius-1: 2px;
+  --radius-2: 4px;
+  --radius-full: 9999px;
+  --poster-s: 112px;
+  --poster-m: 160px;
+  --poster-l: 220px;
+  --topbar-h: 64px;
+  --tabbar-h: 56px;
+  --miniplayer-h: 64px;
+  --tap-min: 44px;
+  --focus-w: 2px;
+  --font-display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --font-sans: "Archivo", "Helvetica Neue", Arial, sans-serif;
+}
+
+.display-xl { font-family: var(--font-display); font-size: 72px; line-height: 68px; font-weight: 900; letter-spacing: -0.02em; }
+
+.display-l { font-family: var(--font-display); font-size: 48px; line-height: 48px; font-weight: 900; letter-spacing: -0.015em; }
+
+.title-1 { font-family: var(--font-display); font-size: 32px; line-height: 36px; font-weight: 800; letter-spacing: -0.01em; }
+
+.title-2 { font-family: var(--font-display); font-size: 22px; line-height: 28px; font-weight: 800; }
+
+.title-3 { font-family: var(--font-display); font-size: 17px; line-height: 22px; font-weight: 700; }
+
+.body-l { font-family: var(--font-sans); font-size: 17px; line-height: 26px; font-weight: 400; }
+
+.body { font-family: var(--font-sans); font-size: 15px; line-height: 22px; font-weight: 400; }
+
+.body-strong { font-family: var(--font-sans); font-size: 15px; line-height: 22px; font-weight: 600; }
+
+.caption { font-family: var(--font-sans); font-size: 13px; line-height: 18px; font-weight: 500; }
+
+.overline { font-family: var(--font-sans); font-size: 12px; line-height: 16px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; }
+
+.tv-hero { font-family: var(--font-display); font-size: 64px; line-height: 64px; font-weight: 900; letter-spacing: -0.02em; }
+
+.tv-title { font-family: var(--font-display); font-size: 32px; line-height: 40px; font-weight: 800; }
+
+.tv-body { font-family: var(--font-sans); font-size: 24px; line-height: 32px; font-weight: 500; }

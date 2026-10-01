@@ -1,0 +1,55 @@
+appId: com.f7five0.app
+name: offline-playback
+---
+# Criterion 43: with the network OFF the app plays a downloaded track from
+# local storage. Download a song (wait for it to finish), cut the network,
+# relaunch the app (offline launch opens Downloads), play the download from the
+# Downloads screen, and assert the mini-player shows it playing. Network is
+# restored at the end so queued progress / track plays flush.
+# A previous failed attempt can leave airplane mode on: start online.
+- setAirplaneMode: disabled
+- launchApp
+- extendedWaitUntil:
+    visible: "Music"
+    timeout: 20000
+- tapOn: "Music"
+- tapOn: "Songs"
+- extendedWaitUntil:
+    visible: ".+, .+"
+    timeout: 30000
+- waitForAnimationToEnd:
+    timeout: 5000
+- longPressOn:
+    text: ".+, .+"
+    index: 0
+    below: "Songs"
+- runFlow:
+    when:
+      visible: "Download"
+    commands:
+      - tapOn: "Download"
+- tapOn: "Account"
+- extendedWaitUntil:
+    visible: "Downloads"
+    timeout: 15000
+- tapOn: "Downloads"
+# A finished row exposes "Play download <title>".
+- extendedWaitUntil:
+    visible: "Play download .*"
+    timeout: 180000
+# Network off, then a cold start: the app must come up offline.
+- setAirplaneMode: enabled
+- stopApp
+- launchApp
+- extendedWaitUntil:
+    visible: "Offline mode"
+    timeout: 30000
+- takeScreenshot: 25-offline-downloads
+- tapOn: "Play download .*"
+- extendedWaitUntil:
+    visible: "Now playing .*Open full player\\."
+    timeout: 30000
+- assertVisible: "Now playing .*Open full player\\."
+- takeScreenshot: 28-offline-playing
+# Restore connectivity so buffered progress/plays flush on reconnect.
+- setAirplaneMode: disabled

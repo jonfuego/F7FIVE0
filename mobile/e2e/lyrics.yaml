@@ -1,0 +1,38 @@
+appId: com.f7five0.app
+name: lyrics
+---
+- launchApp
+- extendedWaitUntil:
+    visible: "Music"
+    timeout: 20000
+- tapOn: "Music"
+- tapOn: "Songs"
+- extendedWaitUntil:
+    visible: ".+, .+"
+    timeout: 30000
+- waitForAnimationToEnd:
+    timeout: 5000
+- tapOn:
+    text: ".+, .+"
+    index: 0
+    below: "Songs"
+    retryTapIfNoChange: true
+- extendedWaitUntil:
+    visible: "Now playing .*Open full player\\."
+    timeout: 30000
+- tapOn: "Now playing .*Open full player\\."
+- extendedWaitUntil:
+    visible: "Open lyrics"
+    timeout: 10000
+# Full-screen player with the waveform scrubber (criteria 49, 50).
+- waitForAnimationToEnd:
+    timeout: 5000
+- takeScreenshot: 27-waveform-player
+- tapOn: "Open lyrics"
+- extendedWaitUntil:
+    visible: "Close lyrics"
+    timeout: 15000
+- takeScreenshot: 21-lyrics
+- assertVisible: "Close lyrics"
+- tapOn: "Close lyrics"
+- assertVisible: "Close now playing"

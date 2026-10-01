@@ -1,0 +1,7 @@
+{
+  "name": "f7five0-auto",
+  "platforms": ["android"],
+  "android": {
+    "modules": ["expo.modules.f7five0auto.F7FIVE0AutoModule"]
+  }
+}

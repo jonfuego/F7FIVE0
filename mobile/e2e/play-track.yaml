@@ -1,0 +1,34 @@
+appId: com.f7five0.app
+name: play-a-track-and-open-now-playing
+---
+- launchApp
+- extendedWaitUntil:
+    visible: "Music"
+    timeout: 20000
+- tapOn: "Music"
+- tapOn: "Songs"
+- extendedWaitUntil:
+    visible: ".+, .+"
+    timeout: 30000
+- waitForAnimationToEnd:
+    timeout: 5000
+# Play the first track row (rows are labelled "<title>, <artist>").
+- tapOn:
+    text: ".+, .+"
+    index: 0
+    below: "Songs"
+    retryTapIfNoChange: true
+- extendedWaitUntil:
+    visible: "Now playing .*Open full player\\."
+    timeout: 30000
+- tapOn: "Now playing .*Open full player\\."
+- extendedWaitUntil:
+    visible: "Close now playing"
+    timeout: 10000
+- takeScreenshot: 04-now-playing
+- assertVisible: "Pause"
+- tapOn: "Pause"
+- assertVisible: "Play"
+- tapOn: "Play"
+- assertVisible: "Pause"
+- tapOn: "Close now playing"

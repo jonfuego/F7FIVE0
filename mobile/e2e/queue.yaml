@@ -1,0 +1,34 @@
+appId: com.f7five0.app
+name: queue
+---
+- launchApp
+- extendedWaitUntil:
+    visible: "Music"
+    timeout: 20000
+- tapOn: "Music"
+- tapOn: "Songs"
+- extendedWaitUntil:
+    visible: ".+, .+"
+    timeout: 30000
+- waitForAnimationToEnd:
+    timeout: 5000
+# Play the first track (rows are labelled "<title>, <artist>").
+- tapOn:
+    text: ".+, .+"
+    index: 0
+    below: "Songs"
+    retryTapIfNoChange: true
+- extendedWaitUntil:
+    visible: "Now playing .*Open full player\\."
+    timeout: 30000
+- tapOn: "Now playing .*Open full player\\."
+- extendedWaitUntil:
+    visible: "Open queue"
+    timeout: 10000
+- tapOn: "Open queue"
+- extendedWaitUntil:
+    visible: "Up Next"
+    timeout: 10000
+- takeScreenshot: 09-queue
+- assertVisible: "Up Next"
+- tapOn: "Close queue"

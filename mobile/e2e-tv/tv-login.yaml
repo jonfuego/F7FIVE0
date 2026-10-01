@@ -1,0 +1,25 @@
+appId: com.f7five0.app
+name: tv-login
+---
+# Android TV: same username/password screen, filled with the on-screen
+# keyboard, then Sign in (spec F TV login). Runs before the browse flow
+# because installing the TV APK clears app data.
+- launchApp:
+    clearState: true
+- extendedWaitUntil:
+    visible: "Sign in"
+    timeout: 30000
+- takeScreenshot: tv-login
+# Server address comes from the environment: maestro test -e F7FIVE0_SERVER=http://10.0.2.2:3001 ...
+- tapOn: "Server"
+- eraseText
+- inputText: ${F7FIVE0_SERVER}
+- tapOn: "Username"
+- inputText: "native-smoke"
+- tapOn: "Password"
+- inputText: ${SMOKE_PASSWORD}
+- pressKey: back
+- tapOn: "Sign in"
+- extendedWaitUntil:
+    visible: "Continue Watching"
+    timeout: 45000

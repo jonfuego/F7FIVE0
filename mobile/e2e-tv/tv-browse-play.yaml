@@ -1,0 +1,32 @@
+appId: com.f7five0.app
+name: tv-browse-detail-playback
+---
+# Android TV (criterion 29): browse rails, open an album detail, then start
+# playback with the remote: the detail's "Play album" button takes initial
+# D-pad focus, so Dpad Center plays it.
+- launchApp
+- extendedWaitUntil:
+    visible: "Continue Watching"
+    timeout: 45000
+- waitForAnimationToEnd:
+    timeout: 5000
+- takeScreenshot: tv-browse
+- scrollUntilVisible:
+    element: "Albums"
+    direction: DOWN
+- tapOn:
+    text: ".+, .+"
+    below: "Albums"
+    index: 0
+- extendedWaitUntil:
+    visible: "Play album"
+    timeout: 20000
+- takeScreenshot: tv-detail
+- pressKey: Remote Dpad Center
+- extendedWaitUntil:
+    visible: "Now playing .*"
+    timeout: 30000
+- waitForAnimationToEnd:
+    timeout: 5000
+- takeScreenshot: tv-playback
+- assertVisible: "Now playing .*"

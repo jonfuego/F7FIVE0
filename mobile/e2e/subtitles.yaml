@@ -1,0 +1,59 @@
+appId: com.f7five0.app
+name: subtitles-audio-quality-picker
+---
+- launchApp
+- extendedWaitUntil:
+    visible: "Movies & Shows"
+    timeout: 20000
+- tapOn: "Movies & Shows"
+- tapOn: "Movies"
+- extendedWaitUntil:
+    visible: ".+, [0-9]{4}"
+    timeout: 30000
+# Movie tiles are labelled "<title>, <year>".
+- tapOn:
+    text: ".+, [0-9]{4}"
+    index: 0
+- extendedWaitUntil:
+    visible: "Play movie|Resume from .*"
+    timeout: 20000
+- tapOn: "Play movie|Resume from .*"
+# Let the player mount and start playing; the transport controls auto-hide, so
+# tap the video to reveal them before reaching for the picker button.
+- waitForAnimationToEnd:
+    timeout: 8000
+# The transport auto-hides after a few seconds, so a tap aimed at the options
+# button can land after it hid. Reveal (tap the empty upper area, not the
+# centre play button) and open the sheet, retrying until it is up.
+- repeat:
+    times: 4
+    while:
+      notVisible: "Quality Original"
+    commands:
+      - runFlow:
+          when:
+            notVisible: "Audio, subtitles and quality"
+          commands:
+            - tapOn:
+                point: "50%,25%"
+      - tapOn:
+          text: "Audio, subtitles and quality"
+          optional: true
+      - waitForAnimationToEnd:
+          timeout: 3000
+- extendedWaitUntil:
+    visible: "Quality Original"
+    timeout: 10000
+- takeScreenshot: 23-quality-picker
+- assertVisible: "Quality Original"
+- scrollUntilVisible:
+    element: "Subtitles off"
+    direction: DOWN
+- takeScreenshot: 29-subtitles-picker
+- assertVisible: "Subtitles off"
+- tapOn: "Quality 720p"
+- tapOn: "Close picker"
+# Reveal controls again, then close the player.
+- tapOn:
+    point: "50%,50%"
+- tapOn: "Close player"

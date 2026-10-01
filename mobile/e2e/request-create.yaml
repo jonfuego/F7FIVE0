@@ -1,0 +1,24 @@
+appId: com.f7five0.app
+name: request-create
+---
+- launchApp
+- extendedWaitUntil:
+    visible: "Account"
+    timeout: 20000
+- tapOn: "Account"
+- extendedWaitUntil:
+    visible: "My requests"
+    timeout: 20000
+- tapOn: "My requests"
+- extendedWaitUntil:
+    visible: "Request search"
+    timeout: 15000
+- tapOn: "Request search"
+- inputText: "Matrix"
+- hideKeyboard
+- tapOn: "Search"
+- extendedWaitUntil:
+    visible: "Request"
+    timeout: 30000
+- takeScreenshot: 12-requests
+- assertVisible: "Request"

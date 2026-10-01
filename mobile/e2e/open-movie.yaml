@@ -1,0 +1,36 @@
+appId: com.f7five0.app
+name: open-a-movie-and-start-playback
+---
+- launchApp
+- extendedWaitUntil:
+    visible: "Movies & Shows"
+    timeout: 20000
+- tapOn: "Movies & Shows"
+- tapOn: "Movies"
+- extendedWaitUntil:
+    visible: ".+, [0-9]{4}"
+    timeout: 30000
+# Movie tiles are labelled "<title>, <year>".
+- tapOn:
+    text: ".+, [0-9]{4}"
+    index: 0
+- extendedWaitUntil:
+    visible: "Play movie|Resume from .*"
+    timeout: 20000
+- takeScreenshot: 06-movie-detail
+- tapOn: "Play movie|Resume from .*"
+- extendedWaitUntil:
+    visible: "Close player"
+    timeout: 30000
+- waitForAnimationToEnd:
+    timeout: 8000
+- takeScreenshot: 07-video-playback
+# Controls auto-hide; a tap on the video brings them back.
+- runFlow:
+    when:
+      notVisible: "Close player"
+    commands:
+      - tapOn:
+          point: "50%,50%"
+- tapOn: "Close player"
+- assertVisible: "Movie"

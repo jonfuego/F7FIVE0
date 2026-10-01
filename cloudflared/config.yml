@@ -1,0 +1,80 @@
+# Optional: locally-managed Cloudflare Tunnel config for F7FIVE0.
+#
+# Most people do NOT need this file. The easy path is a dashboard-managed
+# tunnel: create a tunnel in Cloudflare Zero Trust, paste its token into
+# F7FIVE0 Setup, and add one public hostname pointing at
+# http://localhost:3001. The web app routes /api and /stream to the backends
+# itself.
+#
+# Use this file only if you run cloudflared with a local config.yml and want
+# the tunnel to route straight to each service (slightly less overhead on
+# video). Replace media.example.com with your hostname, merge the rules into
+# your config, keep them above any catch-all, then:
+#   cloudflared tunnel ingress validate --config <path-to-your-config.yml>
+#   Restart-Service Cloudflared
+#
+# Path order matters: cloudflared takes the first match, so the browser-facing
+# BFF prefixes must come before the broad /api/.* rule.
+
+ingress:
+  # ---- Next BFF paths (cookie auth, tokens stay server-side) --------------
+  # Session lifecycle: login, logout, refresh, me. These set/clear the
+  # httpOnly mh_access and mh_refresh cookies.
+  - hostname: media.example.com
+    path: ^/api/session/.*
+    service: http://127.0.0.1:3001
+
+  # Library browse wrapped by the Next BFF so the browser's cookie gets
+  # swapped for a Bearer token before the backend sees the request.
+  - hostname: media.example.com
+    path: ^/api/library/.*
+    service: http://127.0.0.1:3001
+
+  # Stream-start also goes through Next so the returned stream URL can be
+  # rewritten to a same-origin path that hls.js / the <video> tag resolve
+  # against the public hostname.
+  - hostname: media.example.com
+    path: ^/api/stream/.*
+    service: http://127.0.0.1:3001
+
+  # Admin panel endpoints. Forwarded via the Next BFF so the Bearer token
+  # can be attached from the httpOnly cookie. The proxy also aliases
+  # users/* to /api/auth/users/* and library/sync to the existing sync
+  # trigger so the browser URL space stays flat under /api/admin.
+  - hostname: media.example.com
+    path: ^/api/admin/.*
+    service: http://127.0.0.1:3001
+
+  # Art overrides read path. /api/art/<kind>/<id>/<role> streams the
+  # admin-pinned image. Authenticated via cookie -> bearer swap in the
+  # Next BFF, same as the library paths.
+  - hostname: media.example.com
+    path: ^/api/art/.*
+    service: http://127.0.0.1:3001
+
+  # Media requests flow. Wrapped by the Next BFF so the browser cookie gets
+  # swapped for a Bearer token. Must stay above the broad ^/api/.* rule.
+  - hostname: media.example.com
+    path: ^/api/requests/.*
+    service: http://127.0.0.1:3001
+
+  # ---- Backend services ---------------------------------------------------
+  # Stream Gateway: HLS manifests + segments, direct-play byte ranges. The
+  # gateway validates the signed URL inline via HMAC before any DB work.
+  - hostname: media.example.com
+    path: ^/stream/.*
+    service: http://127.0.0.1:8002
+
+  # Remaining API surface: auth (token-based), users admin, arr webhooks,
+  # sync control. External clients and webhook callers hit this directly.
+  - hostname: media.example.com
+    path: ^/api/.*
+    service: http://127.0.0.1:8001
+
+  # ---- Web UI -------------------------------------------------------------
+  # Everything else on this hostname goes to the Next server.
+  - hostname: media.example.com
+    service: http://127.0.0.1:3001
+
+  # ---- Required last rule ------------------------------------------------
+  - service: http_status:404

@@ -1,0 +1,16 @@
+appId: com.f7five0.app
+name: search
+---
+- launchApp
+- extendedWaitUntil:
+    visible: "Search"
+    timeout: 20000
+- tapOn: "Search"
+- tapOn: "Search query"
+- inputText: "the"
+- hideKeyboard
+- extendedWaitUntil:
+    visible:
+      text: ".+, .+"
+    timeout: 20000
+- takeScreenshot: 05-search-results

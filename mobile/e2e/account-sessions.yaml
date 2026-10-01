@@ -1,0 +1,22 @@
+appId: com.f7five0.app
+name: account-sessions
+---
+- launchApp
+- extendedWaitUntil:
+    visible: "Account"
+    timeout: 20000
+- tapOn: "Account"
+- extendedWaitUntil:
+    visible: "Devices"
+    timeout: 20000
+- extendedWaitUntil:
+    visible: ".*This device.*"
+    timeout: 20000
+- takeScreenshot: 08-account
+# Nested screen, then hardware back stays in the app.
+- tapOn: "My requests"
+- extendedWaitUntil:
+    visible: "My Requests"
+    timeout: 15000
+- back
+- assertVisible: "Devices"

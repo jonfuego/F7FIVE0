@@ -1,0 +1,28 @@
+appId: com.f7five0.app
+name: track-radio
+---
+- launchApp
+- extendedWaitUntil:
+    visible: "Music"
+    timeout: 20000
+- tapOn: "Music"
+- tapOn: "Songs"
+- extendedWaitUntil:
+    visible: ".+, .+"
+    timeout: 30000
+- waitForAnimationToEnd:
+    timeout: 5000
+# Long-press a song row opens the context menu (rows: "<title>, <artist>").
+- longPressOn:
+    text: ".+, .+"
+    index: 0
+    below: "Songs"
+- extendedWaitUntil:
+    visible: "Track radio"
+    timeout: 10000
+- takeScreenshot: 22-song-menu
+- tapOn: "Track radio"
+- extendedWaitUntil:
+    visible: "Now playing .*Open full player\\."
+    timeout: 40000
+- assertVisible: "Now playing .*Open full player\\."

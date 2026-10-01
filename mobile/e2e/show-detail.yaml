@@ -1,0 +1,38 @@
+appId: com.f7five0.app
+name: show-detail-and-on-deck
+---
+# Show detail (seasons + episodes) and the Home On Deck rail (criteria 30, 38,
+# 50). Marking the first episode watched guarantees an On Deck entry: the
+# backend rolls forward to the next unwatched episode.
+- launchApp
+- extendedWaitUntil:
+    visible: "Movies & Shows"
+    timeout: 20000
+- tapOn: "Movies & Shows"
+- tapOn: "TV Shows"
+- extendedWaitUntil:
+    visible: ".+, [0-9]{4}"
+    timeout: 30000
+- tapOn:
+    text: ".+, [0-9]{4}"
+    index: 0
+- extendedWaitUntil:
+    visible: "Play .*"
+    timeout: 20000
+- takeScreenshot: 13-show-detail
+- runFlow:
+    when:
+      notVisible: "Mark episode unwatched"
+    commands:
+      - tapOn:
+          text: "Mark episode watched"
+          index: 0
+- extendedWaitUntil:
+    visible: "Mark episode unwatched"
+    timeout: 10000
+- tapOn: "Home"
+- extendedWaitUntil:
+    visible: "On Deck"
+    timeout: 30000
+- takeScreenshot: 26-on-deck
+- assertVisible: "On Deck"

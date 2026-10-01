@@ -1,0 +1,14 @@
+appId: com.f7five0.app
+name: continue-watching
+---
+- launchApp
+- extendedWaitUntil:
+    visible: "Home"
+    timeout: 20000
+- tapOn: "Home"
+- extendedWaitUntil:
+    visible: "Continue Watching"
+    timeout: 20000
+- assertVisible: "Continue Watching"
+- assertVisible: "Recent Arrivals"
+- takeScreenshot: 10-continue-watching

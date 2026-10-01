@@ -1,0 +1,464 @@
+{
+ "name": "F7FIVE0",
+ "version": 1,
+ "color": {
+  "themes": [
+   {
+    "id": "dark",
+    "name": "Dark"
+   },
+   {
+    "id": "light",
+    "name": "Light"
+   }
+  ],
+  "tokens": [
+   {
+    "name": "bg",
+    "value": {
+     "dark": "#000000",
+     "light": "#ffffff"
+    },
+    "usage": "Page and app background. Pure black in dark (OLED, matches the wordmark's black), pure white in light."
+   },
+   {
+    "name": "surface-1",
+    "value": {
+     "dark": "#0e0e0e",
+     "light": "#f4f4f4"
+    },
+    "usage": "Top bar, bottom tab bar, mini player, side panels. One step off bg."
+   },
+   {
+    "name": "surface-2",
+    "value": {
+     "dark": "#181818",
+     "light": "#eaeaea"
+    },
+    "usage": "Cards, poster fallback tiles, menus, modals, input fields."
+   },
+   {
+    "name": "surface-3",
+    "value": {
+     "dark": "#242424",
+     "light": "#dcdcdc"
+    },
+    "usage": "Hover and pressed state of surface-2 items, progress tracks, skeleton loaders."
+   },
+   {
+    "name": "line",
+    "value": {
+     "dark": "#2c2c2c",
+     "light": "#d2d2d2"
+    },
+    "usage": "Hairline dividers between rows and around cards. Decorative only; never the only boundary of a control."
+   },
+   {
+    "name": "line-strong",
+    "value": {
+     "dark": "#777777",
+     "light": "#767676"
+    },
+    "usage": "Borders of inputs, secondary buttons and chips. Holds 3:1 on bg through surface-3 in both themes."
+   },
+   {
+    "name": "ink",
+    "value": {
+     "dark": "#ffffff",
+     "light": "#000000"
+    },
+    "usage": "Titles and body copy on bg, surface-1, surface-2, surface-3 and hive-tint."
+   },
+   {
+    "name": "ink-2",
+    "value": {
+     "dark": "#c4c4c4",
+     "light": "#3a3a3a"
+    },
+    "usage": "Secondary text: metadata lines (year, runtime, artist), descriptions. On bg through surface-3 and hive-tint."
+   },
+   {
+    "name": "ink-3",
+    "value": {
+     "dark": "#9a9a9a",
+     "light": "#595959"
+    },
+    "usage": "Tertiary text: timestamps, counts, placeholder text, disabled labels. On bg through surface-3."
+   },
+   {
+    "name": "hive",
+    "value": {
+     "dark": "#970002",
+     "light": "#970002"
+    },
+    "usage": "THE brand red, exact from the logo (#970002). Primary button fill, active nav marker fill, the offset block behind a focused poster. It is the hidden HIVE layer: spend it on one thing per view. Carries on-hive text. Not for text or thin marks on dark grounds (2.3:1 on black)."
+   },
+   {
+    "name": "hive-hover",
+    "value": {
+     "dark": "#b3070a",
+     "light": "#7d0002"
+    },
+    "usage": "Hover fill of hive surfaces. Derived."
+   },
+   {
+    "name": "hive-press",
+    "value": {
+     "dark": "#7d0002",
+     "light": "#650002"
+    },
+    "usage": "Pressed fill of hive surfaces. Derived."
+   },
+   {
+    "name": "hive-text",
+    "value": {
+     "dark": "#ff5c5e",
+     "light": "#970002"
+    },
+    "usage": "Red text and thin red marks (links, active tab label, 'New' tags, playback progress) on bg through surface-3 and hive-tint. Brightened in dark so it holds 4.5:1; equals hive in light."
+   },
+   {
+    "name": "hive-tint",
+    "value": {
+     "dark": "#2b0a0a",
+     "light": "#f8e6e6"
+    },
+    "usage": "Selected-row and active-chip background. Pair with ink or hive-text."
+   },
+   {
+    "name": "on-hive",
+    "value": {
+     "dark": "#ffffff",
+     "light": "#ffffff"
+    },
+    "usage": "Text and icons on hive, hive-hover and hive-press fills (9:1 and up)."
+   },
+   {
+    "name": "hive-mark",
+    "value": {
+     "dark": "{hive-text}",
+     "light": "{hive}"
+    },
+    "usage": "Non-text red marks that need 3:1 on the ground: progress fill, unread dots, the active-tab underline. Resolves to hive-text in dark, hive in light."
+   },
+   {
+    "name": "focus",
+    "value": {
+     "dark": "#ffffff",
+     "light": "#000000"
+    },
+    "usage": "Keyboard and TV-remote focus ring: 2px solid at 2px offset, drawn on the ground around the element. White in dark, black in light."
+   },
+   {
+    "name": "positive",
+    "value": {
+     "dark": "#5cc8ff",
+     "light": "#005f9e"
+    },
+    "usage": "Success and 'available' states (download ready, request filled). Text on bg through surface-3. Kept on the blue side so it never pairs with red by hue alone; always with a word or icon."
+   },
+   {
+    "name": "warning",
+    "value": {
+     "dark": "#f2b33d",
+     "light": "#7f5100"
+    },
+    "usage": "Warnings (transcoding, low storage, request pending). Text on bg through surface-3; always with a word or icon."
+   },
+   {
+    "name": "danger",
+    "value": {
+     "dark": "{hive-text}",
+     "light": "{hive}"
+    },
+    "usage": "Destructive actions and errors. Shares the brand red, so it must always carry a word ('Delete', 'Failed') or an icon; never red alone."
+   },
+   {
+    "name": "scrim",
+    "value": {
+     "dark": "rgba(0, 0, 0, 0.72)",
+     "light": "rgba(0, 0, 0, 0.56)"
+    },
+    "usage": "Overlay behind modals and the full-screen player controls; also the bottom fade over backdrop art so ink stays legible."
+   }
+  ]
+ },
+ "type": {
+  "fonts": [],
+  "families": {
+   "display": "\"Archivo\", \"Helvetica Neue\", Arial, sans-serif",
+   "sans": "\"Archivo\", \"Helvetica Neue\", Arial, sans-serif"
+  },
+  "groups": [
+   {
+    "name": "Display",
+    "family": "display",
+    "styles": [
+     {
+      "name": "display-xl",
+      "fontSize": "72px",
+      "lineHeight": "68px",
+      "fontWeight": 900,
+      "letterSpacing": "-0.02em",
+      "sample": "F7FIVE0",
+      "usage": "Hero titles on the Home billboard and detail backdrop. Uppercase titles are fine here; set in ink over scrim."
+     },
+     {
+      "name": "display-l",
+      "fontSize": "48px",
+      "lineHeight": "48px",
+      "fontWeight": 900,
+      "letterSpacing": "-0.015em",
+      "sample": "Now Showing",
+      "usage": "Page titles (Movies, Series, Music) on desktop."
+     },
+     {
+      "name": "title-1",
+      "fontSize": "32px",
+      "lineHeight": "36px",
+      "fontWeight": 800,
+      "letterSpacing": "-0.01em",
+      "sample": "Continue Watching",
+      "usage": "Detail page title on mobile; modal titles."
+     },
+     {
+      "name": "title-2",
+      "fontSize": "22px",
+      "lineHeight": "28px",
+      "fontWeight": 800,
+      "sample": "Recently Added",
+      "usage": "Rail headers and section headers."
+     },
+     {
+      "name": "title-3",
+      "fontSize": "17px",
+      "lineHeight": "22px",
+      "fontWeight": 700,
+      "sample": "Blade Runner 2049",
+      "usage": "Card titles, list-row titles, poster fallback titles."
+     }
+    ]
+   },
+   {
+    "name": "Text",
+    "family": "sans",
+    "styles": [
+     {
+      "name": "body-l",
+      "fontSize": "17px",
+      "lineHeight": "26px",
+      "fontWeight": 400,
+      "sample": "A young blade runner discovers a long-buried secret.",
+      "usage": "Synopsis and long descriptions."
+     },
+     {
+      "name": "body",
+      "fontSize": "15px",
+      "lineHeight": "22px",
+      "fontWeight": 400,
+      "sample": "2017 \u00b7 2h 44m \u00b7 Sci-Fi",
+      "usage": "Default UI text, metadata lines, form fields."
+     },
+     {
+      "name": "body-strong",
+      "fontSize": "15px",
+      "lineHeight": "22px",
+      "fontWeight": 600,
+      "sample": "Play",
+      "usage": "Button labels, emphasized inline text, active nav labels."
+     },
+     {
+      "name": "caption",
+      "fontSize": "13px",
+      "lineHeight": "18px",
+      "fontWeight": 500,
+      "sample": "42 min left",
+      "usage": "Under-poster metadata, timestamps, helper text. Use tabular numerals for times."
+     },
+     {
+      "name": "overline",
+      "fontSize": "12px",
+      "lineHeight": "16px",
+      "fontWeight": 700,
+      "letterSpacing": "0.12em",
+      "sample": "NEW EPISODE",
+      "usage": "Tags and eyebrow labels. Always uppercase (text-transform: uppercase)."
+     }
+    ]
+   },
+   {
+    "name": "TV",
+    "family": "display",
+    "styles": [
+     {
+      "name": "tv-hero",
+      "fontSize": "64px",
+      "lineHeight": "64px",
+      "fontWeight": 900,
+      "letterSpacing": "-0.02em",
+      "sample": "Dune: Part Two",
+      "usage": "10-foot UI hero titles on the TV app."
+     },
+     {
+      "name": "tv-title",
+      "fontSize": "32px",
+      "lineHeight": "40px",
+      "fontWeight": 800,
+      "sample": "Up Next",
+      "usage": "TV rail headers."
+     },
+     {
+      "name": "tv-body",
+      "fontSize": "24px",
+      "lineHeight": "32px",
+      "fontWeight": 500,
+      "family": "sans",
+      "sample": "Season 2 \u00b7 Episode 4",
+      "usage": "TV metadata and body text. Nothing on TV is set smaller than this."
+     }
+    ]
+   }
+  ]
+ },
+ "spacing": {
+  "tokens": [
+   {
+    "name": "space-1",
+    "value": "4px",
+    "usage": "Icon-to-label gap, tag padding (vertical)."
+   },
+   {
+    "name": "space-2",
+    "value": "8px",
+    "usage": "Gap between a poster and its caption; chip padding (vertical)."
+   },
+   {
+    "name": "space-3",
+    "value": "12px",
+    "usage": "Gap between posters in a rail on mobile; button padding (vertical)."
+   },
+   {
+    "name": "space-4",
+    "value": "16px",
+    "usage": "Mobile page gutter; card padding; gap between posters on desktop."
+   },
+   {
+    "name": "space-5",
+    "value": "24px",
+    "usage": "Gap between a rail header and its posters; button padding (horizontal)."
+   },
+   {
+    "name": "space-6",
+    "value": "32px",
+    "usage": "Desktop page gutter; gap between rails."
+   },
+   {
+    "name": "space-7",
+    "value": "48px",
+    "usage": "Section breaks on detail pages; TV rail gap."
+   },
+   {
+    "name": "space-8",
+    "value": "64px",
+    "usage": "TV page gutter (10-foot safe area)."
+   },
+   {
+    "name": "space-9",
+    "value": "96px",
+    "usage": "Hero billboard bottom padding on desktop."
+   }
+  ]
+ },
+ "radius": {
+  "tokens": [
+   {
+    "name": "radius-0",
+    "value": "0px",
+    "usage": "Default. Posters, cards, backdrops, the top bar: square, like the wordmark."
+   },
+   {
+    "name": "radius-1",
+    "value": "2px",
+    "usage": "Buttons, inputs, chips, tags. Just enough to soften the pixel edge."
+   },
+   {
+    "name": "radius-2",
+    "value": "4px",
+    "usage": "Menus, modals, toasts."
+   },
+   {
+    "name": "radius-full",
+    "value": "9999px",
+    "usage": "Only for round things: avatars, the play-button disc, progress-bar ends, unread dots."
+   }
+  ]
+ },
+ "shadow": {
+  "note": "F7FIVE0 elevates with surfaces, not blur. The one signature shadow is the hard HIVE offset, lifted from the red layer sitting behind the black letters in the wordmark.",
+  "tokens": [
+   {
+    "name": "shadow-hive",
+    "value": "6px 6px 0 0 #970002",
+    "usage": "The HIVE offset: a hard red block behind a focused or hovered poster, the primary hero button, or the active nav item. One per view. Pair with the focus ring for keyboard/remote focus; the offset alone is not a focus indicator."
+   },
+   {
+    "name": "shadow-hive-s",
+    "value": "3px 3px 0 0 #970002",
+    "usage": "Small HIVE offset for buttons and chips."
+   },
+   {
+    "name": "shadow-overlay",
+    "value": {
+     "dark": "0 16px 48px 0 rgba(0, 0, 0, 0.8)",
+     "light": "0 16px 48px 0 rgba(0, 0, 0, 0.18)"
+    },
+    "usage": "Menus, modals and the expanded queue panel."
+   }
+  ]
+ },
+ "size": {
+  "note": "Fixed component dimensions.",
+  "tokens": [
+   {
+    "name": "poster-s",
+    "value": "112px",
+    "usage": "Poster width in mobile rails (2:3 art)."
+   },
+   {
+    "name": "poster-m",
+    "value": "160px",
+    "usage": "Poster width in desktop rails and grids."
+   },
+   {
+    "name": "poster-l",
+    "value": "220px",
+    "usage": "Poster width on detail pages and TV rails."
+   },
+   {
+    "name": "topbar-h",
+    "value": "64px",
+    "usage": "Top bar height, web."
+   },
+   {
+    "name": "tabbar-h",
+    "value": "56px",
+    "usage": "Bottom tab bar height, mobile (plus safe-area inset)."
+   },
+   {
+    "name": "miniplayer-h",
+    "value": "64px",
+    "usage": "Mini player height, docked above the tab bar."
+   },
+   {
+    "name": "tap-min",
+    "value": "44px",
+    "usage": "Minimum touch target on mobile and web."
+   },
+   {
+    "name": "focus-w",
+    "value": "2px",
+    "usage": "Focus ring width; also the ring offset. TV uses 4px."
+   }
+  ]
+ }
+}

@@ -1,0 +1,10 @@
+* text=auto eol=lf
+# Windows-native files keep CRLF so Notepad and older PowerShell are happy.
+*.ps1 text eol=crlf
+*.iss text eol=crlf
+*.cmd text eol=crlf
+*.png binary
+*.jpg binary
+*.ico binary
+*.ttf binary
+*.woff2 binary

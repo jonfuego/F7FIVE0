@@ -1,0 +1,30 @@
+appId: com.f7five0.app
+name: browse-album
+---
+- launchApp
+- extendedWaitUntil:
+    visible: "Music"
+    timeout: 20000
+- tapOn: "Music"
+- tapOn: "Albums"
+- extendedWaitUntil:
+    visible: ".+, .+"
+    timeout: 30000
+- waitForAnimationToEnd:
+    timeout: 5000
+# Album tiles are labelled "<title>, <artist>". Retry the tap if the screen
+# did not change (a tap during the stack transition is swallowed).
+- tapOn:
+    text: ".+, .+"
+    index: 0
+    below: "Albums"
+    retryTapIfNoChange: true
+- extendedWaitUntil:
+    visible: "Album"
+    timeout: 15000
+- waitForAnimationToEnd:
+    timeout: 10000
+- takeScreenshot: 03-album
+# Hardware back returns to the grid instead of leaving the app.
+- back
+- assertVisible: "Albums"

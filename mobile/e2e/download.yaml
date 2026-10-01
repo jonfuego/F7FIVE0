@@ -1,0 +1,34 @@
+appId: com.f7five0.app
+name: download-a-song
+---
+- launchApp
+- extendedWaitUntil:
+    visible: "Music"
+    timeout: 20000
+- tapOn: "Music"
+- tapOn: "Songs"
+- extendedWaitUntil:
+    visible: ".+, .+"
+    timeout: 30000
+- waitForAnimationToEnd:
+    timeout: 5000
+# Long-press a song row -> context menu -> Download.
+- longPressOn:
+    text: ".+, .+"
+    index: 0
+    below: "Songs"
+- extendedWaitUntil:
+    visible: "Download"
+    timeout: 10000
+- tapOn: "Download"
+# Go to the Downloads screen and confirm the item is listed.
+- tapOn: "Account"
+- extendedWaitUntil:
+    visible: "Downloads"
+    timeout: 15000
+- tapOn: "Downloads"
+- extendedWaitUntil:
+    visible: "Storage"
+    timeout: 15000
+- takeScreenshot: 24-downloads
+- assertVisible: "Storage"
