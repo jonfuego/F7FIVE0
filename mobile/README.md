@@ -74,6 +74,18 @@ after staging; `-Tv` builds the Android TV variant.
 If you build the app yourself, it is signed with your own key, so it
 installs as a separate app from the official one and cannot update it.
 
+## Passkeys
+
+The sign-in screen offers **Sign in with passkey** when the server address is
+https and the server has passkeys on (`/api/client/features`). Account >
+Passkeys adds, renames, and removes them. Android TV builds never show it.
+
+The app's passkey origin is its signing certificate, so the server must list
+that certificate. Official builds work with every server by default. If you
+sign the app with your own key, put your certificate's SHA-256 (printed by
+`scripts\release-apk.ps1`, or `keytool -list -v`) in the server's
+`WEBAUTHN_ANDROID_CERT_SHA256`.
+
 A build can ship with a default server by setting
 `EXPO_PUBLIC_API_BASE=https://media.example.com` before prebuild.
 

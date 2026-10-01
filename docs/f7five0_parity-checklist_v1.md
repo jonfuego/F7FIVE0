@@ -18,15 +18,16 @@ Legend: `[x]` = present in the F7FIVE0 code (checked by reading the repo on 2026
 
 F7FIVE0 was forked from arcHIVE at about 1.2.0 (Alembic head 0021). The parity gaps are:
 
-1. Passkey sign-in (arcHIVE 1.3.0, migration 0022 webauthn). No WebAuthn code in F7FIVE0 yet.
+1. ~~Passkey sign-in~~ Ported 2026-09-30 (migration 0022, same revision id). Code-verified and browser-tested, not yet on a real install or phone. See `f7five0_passkeys-plan_v1.md` in the vault.
 2. Chromecast in the Android app (arcHIVE 1.3.0). Web cast exists; mobile has none.
 3. F7FIVE0 design system. Tokens v2, Tailwind preset and RN theme are in `design/` but not wired in; web and mobile still use arcHIVE fonts (Bebas, Fraunces). Archivo is not used yet.
 4. Install, cutover and data migration (sections 10 and 11).
+5. Mobile library lists capped at 200 rows. arcHIVE app fix `c7ac7a6` (load full lists, A-Z rail jumps by grid row) landed after the fork and is not in F7FIVE0 `mobile/`.
 
 ## 1. Access and accounts
 
 - [x] Password sign-in (web, phone, TV)
-- [ ] Passkey (fingerprint) sign-in, app and web
+- [x] Passkey (fingerprint) sign-in, app and web (2026-09-30; on only with an https PUBLIC_URL; real-device check pending)
 - [x] Device sessions (native sessions, migration 0020)
 - [x] Account page: display name, password
 - [x] Admin-only account creation

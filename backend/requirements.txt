@@ -1,0 +1,18 @@
+# Loose pins so Python 3.14 (cp314) gets prebuilt wheels.
+# Tighten to exact versions once Phase 0 is stable.
+fastapi>=0.115,<0.120
+uvicorn[standard]>=0.32,<0.40
+pydantic[email]>=2.10,<3
+pydantic-settings>=2.6,<3
+sqlalchemy>=2.0.36,<2.1
+alembic>=1.14,<2
+psycopg[binary]>=3.2.13,<4
+bcrypt>=4.2,<5
+PyJWT>=2.9,<3
+httpx>=0.27,<0.29
+apscheduler>=3.10.4,<4
+python-dotenv>=1.0.1,<2
+python-multipart>=0.0.12,<1
+pillow>=10.4,<12
+mutagen>=1.47,<2
+webauthn>=2.0,<3
