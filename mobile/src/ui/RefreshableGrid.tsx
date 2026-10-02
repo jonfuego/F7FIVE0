@@ -39,10 +39,14 @@ export function RefreshableGrid<T>({
       contentContainerStyle={styles.content}
       ListHeaderComponent={ListHeaderComponent}
       showsVerticalScrollIndicator={false}
-      // A-Z jumps can target an unmeasured row; approximate then let it settle.
+      // A-Z jumps can target a row that hasn't been measured yet: jump to an
+      // estimate so the rows around it render, then retry the exact row.
       onScrollToIndexFailed={(info) => {
         const anyRef = listRef as React.MutableRefObject<FlatList<T> | null> | undefined;
-        anyRef?.current?.scrollToOffset({ offset: info.averageItemLength * info.index, animated: true });
+        anyRef?.current?.scrollToOffset({ offset: info.averageItemLength * info.index, animated: false });
+        setTimeout(() => {
+          anyRef?.current?.scrollToIndex({ index: info.index, viewPosition: 0, animated: true });
+        }, 120);
       }}
       refreshControl={
         <RefreshControl

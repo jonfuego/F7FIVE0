@@ -39,7 +39,7 @@ export function AlbumsLibrary(): React.ReactElement {
   const router = useRouter();
   const { columns, itemWidth } = useGrid();
   const sf = useSortFilter("albums", albums.data ?? [], ALBUM_SORTS, ALBUM_FILTERS);
-  const { listRef, active, onSelect } = useAlphaRail(sf.items, (a) => a.title);
+  const { listRef, active, onSelect } = useAlphaRail(sf.items, (a) => a.title, columns);
 
   return (
     <View style={libraryBody.pad}>

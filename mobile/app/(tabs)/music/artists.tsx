@@ -34,7 +34,7 @@ export function ArtistsLibrary(): React.ReactElement {
   const router = useRouter();
   const { columns, itemWidth } = useGrid();
   const sf = useSortFilter("artists", artists.data ?? [], ARTIST_SORTS, ARTIST_FILTERS);
-  const { listRef, active, onSelect } = useAlphaRail(sf.items, (a) => a.name);
+  const { listRef, active, onSelect } = useAlphaRail(sf.items, (a) => a.name, columns);
 
   return (
     <View style={libraryBody.pad}>

@@ -21,3 +21,8 @@ export function buildAlphaIndex(titles: string[]): { letters: Set<string>; first
   });
   return { letters, firstIndex };
 }
+
+/** FlatList row that holds item `index` in a grid of `numColumns`. */
+export function rowForItem(index: number, numColumns: number): number {
+  return Math.floor(index / Math.max(1, numColumns));
+}

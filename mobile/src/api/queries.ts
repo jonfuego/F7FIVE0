@@ -25,6 +25,12 @@ import type {
   SongRow,
 } from "./types";
 
+/** The list endpoints default to 200 rows; ask for the whole library like the
+ * web app does (movies/series/albums cap at the server max, songs match the
+ * web songs page). */
+export const LIBRARY_LIMIT = 20000;
+export const SONGS_LIMIT = 2000;
+
 function useJsonQuery<T>(key: unknown[], path: string, enabled = true): UseQueryResult<T> {
   const api = useApi();
   return useQuery<T>({
@@ -34,8 +40,8 @@ function useJsonQuery<T>(key: unknown[], path: string, enabled = true): UseQuery
   });
 }
 
-export const useSongs = () => useJsonQuery<SongRow[]>(["songs"], "/api/songs");
-export const useAlbums = () => useJsonQuery<Album[]>(["albums"], "/api/albums");
+export const useSongs = () => useJsonQuery<SongRow[]>(["songs"], `/api/songs?limit=${SONGS_LIMIT}`);
+export const useAlbums = () => useJsonQuery<Album[]>(["albums"], `/api/albums?limit=${LIBRARY_LIMIT}`);
 export const useArtists = () => useJsonQuery<Artist[]>(["artists"], "/api/artists");
 export const useAlbum = (id: string) =>
   useJsonQuery<AlbumDetail>(["album", id], `/api/albums/${id}`, !!id);
@@ -89,7 +95,7 @@ export async function fetchAutoPlaylistById(
   );
   return mapAutoPlaylistItems(res.items);
 }
-export const useMovies = () => useJsonQuery<Movie[]>(["movies"], "/api/movies");
+export const useMovies = () => useJsonQuery<Movie[]>(["movies"], `/api/movies?limit=${LIBRARY_LIMIT}`);
 export const useMovie = (id: string) =>
   useJsonQuery<Movie>(["movie", id], `/api/movies/${id}`, !!id);
 export const useProgress = (mediaFileId: string) =>
@@ -100,7 +106,7 @@ export const useMusicVideoArtist = (id: string) =>
   useJsonQuery<MusicVideoArtistDetail>(["mv-artist", id], `/api/music-videos/artists/${id}`, !!id);
 export const useMusicVideoRelease = (id: string) =>
   useJsonQuery<MusicVideoReleaseDetail>(["mv-release", id], `/api/music-videos/releases/${id}`, !!id);
-export const useShows = () => useJsonQuery<Series[]>(["shows"], "/api/series");
+export const useShows = () => useJsonQuery<Series[]>(["shows"], `/api/series?limit=${LIBRARY_LIMIT}`);
 export const useMusicVideoArtists = () =>
   useJsonQuery<MusicVideoArtist[]>(["music-videos"], "/api/music-videos/artists");
 export const useContinueWatching = () =>

@@ -68,7 +68,7 @@ export function MoviesLibrary(): React.ReactElement {
     [movies.data, genre],
   );
   const sf = useSortFilter("movies", inGenre, MOVIE_SORTS, filters);
-  const { listRef, active, onSelect } = useAlphaRail(sf.items, (m) => m.title);
+  const { listRef, active, onSelect } = useAlphaRail(sf.items, (m) => m.title, columns);
 
   return (
     <View style={libraryBody.pad}>

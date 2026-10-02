@@ -49,7 +49,7 @@ export function ShowsLibrary(): React.ReactElement {
   }, [watchingIds]);
 
   const sf = useSortFilter("shows", shows.data ?? [], SHOW_SORTS, filters);
-  const { listRef, active, onSelect } = useAlphaRail(sf.items, (s) => s.title);
+  const { listRef, active, onSelect } = useAlphaRail(sf.items, (s) => s.title, columns);
 
   return (
     <View style={libraryBody.pad}>

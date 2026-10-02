@@ -22,7 +22,7 @@ F7FIVE0 was forked from arcHIVE at about 1.2.0 (Alembic head 0021). The parity g
 2. Chromecast in the Android app (arcHIVE 1.3.0). Web cast exists; mobile has none.
 3. F7FIVE0 design system. Tokens v2, Tailwind preset and RN theme are in `design/` but not wired in; web and mobile still use arcHIVE fonts (Bebas, Fraunces). Archivo is not used yet.
 4. Install, cutover and data migration (sections 10 and 11).
-5. Mobile library lists capped at 200 rows. arcHIVE app fix `c7ac7a6` (load full lists, A-Z rail jumps by grid row) landed after the fork and is not in F7FIVE0 `mobile/`.
+5. ~~Mobile library lists capped at 200 rows.~~ Ported 2026-10-01 from arcHIVE app `c7ac7a6` (full lists, A-Z rail jumps by grid row). tsc and jest pass; not yet checked on a device.
 
 ## 1. Access and accounts
 
@@ -38,6 +38,7 @@ F7FIVE0 was forked from arcHIVE at about 1.2.0 (Alembic head 0021). The parity g
 - [x] Movies, TV (seasons, episodes), music (artists, albums, songs), music videos
 - [x] Mixes / auto-playlists
 - [x] A to Z rail
+- [x] Android app library lists load the whole library, not the first 200 (2026-10-01, from arcHIVE `c7ac7a6`)
 - [x] Sort on library screens
 - [x] Search
 - [x] Artwork: local files first, TMDB and MusicBrainz, admin art overrides never overwritten
