@@ -32,6 +32,9 @@ export interface StreamOptions {
   audioTrackIndex?: number;
   subtitle?: SubtitleChoice;
   quality?: StreamQuality;
+  // "cast" when the signed URL is being handed to a Chromecast receiver; the
+  // backend logs cast starts for the smoke check. Defaults to "play".
+  purpose?: "play" | "cast";
 }
 
 /** Ask the API for a fresh signed stream URL for a media file. Optional video
@@ -51,6 +54,7 @@ export async function startStream(
       audio_track_index: opts?.audioTrackIndex,
       subtitle: opts?.subtitle,
       quality: opts?.quality,
+      purpose: opts?.purpose ?? "play",
     }),
   });
 }

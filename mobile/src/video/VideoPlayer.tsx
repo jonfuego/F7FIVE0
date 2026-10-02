@@ -20,6 +20,7 @@ import type { ISO639_1, SelectedTrack, TextTracks } from "react-native-video";
 
 import { fetchMarkers, fetchMediaStreams, fetchNextEpisode, startStream } from "@/api/media";
 import type { StreamQuality, StreamStart, SubtitleChoice } from "@/api/types";
+import { CastButton, useCast } from "@/cast";
 import { useDownloads } from "@/download/DownloadProvider";
 import { useApi } from "@/state/auth";
 import { deviceName } from "@/state/config";
@@ -65,6 +66,7 @@ function qualitySettingKey(): string {
  * 15 s, re-signs once on a load error and whenever a picker choice changes. */
 export function VideoPlayer({ mediaFileId, resumeSec = 0, onClose, onPlayNext }: VideoPlayerProps): React.ReactElement {
   const api = useApi();
+  const cast = useCast();
   const downloads = useDownloads();
   const downloadsRef = useRef(downloads);
   downloadsRef.current = downloads;
@@ -258,6 +260,45 @@ export function VideoPlayer({ mediaFileId, resumeSec = 0, onClose, onPlayNext }:
     if (upNext.show && !upNextDismissed && upNext.secondsLeft === 0) advance();
   }, [upNext.show, upNext.secondsLeft, upNextDismissed, advance]);
 
+  // Cast hand-off. When a receiver connects, mint a fresh signed URL with
+  // purpose:"cast" (the receiver fetches it itself from the server) and
+  // load it, carrying the current position over, then pause local playback. On
+  // disconnect, resume locally at wherever the receiver left off.
+  const castedRef = useRef(false);
+  const castVideoNow = useCallback(async () => {
+    try {
+      const at = Math.floor(positionRef.current);
+      const s = await startStream(api, mediaFileId, at, {
+        audioTrackIndex: pickedAudio,
+        subtitle,
+        quality,
+        purpose: "cast",
+      });
+      const ok = await cast.castVideo({
+        url: s.url,
+        mode: s.mode,
+        title: s.title ?? stream?.title ?? undefined,
+        artUrl: s.art_url ?? undefined,
+        startPositionSec: at,
+        isMovie: true,
+      });
+      if (ok) setPaused(true);
+    } catch {
+      // Keep playing locally if the hand-off fails.
+    }
+  }, [api, mediaFileId, pickedAudio, subtitle, quality, cast, stream]);
+
+  useEffect(() => {
+    if (cast.isConnected && !castedRef.current) {
+      castedRef.current = true;
+      void castVideoNow();
+    } else if (!cast.isConnected && castedRef.current) {
+      // Session ended: resume local playback where the receiver was.
+      castedRef.current = false;
+      setPaused(false);
+    }
+  }, [cast.isConnected, castVideoNow]);
+
   const onError = useCallback(async () => {
     if (recovered.current) {
       setError("Playback failed.");
@@ -373,6 +414,7 @@ export function VideoPlayer({ mediaFileId, resumeSec = 0, onClose, onPlayNext }:
             <Text style={styles.title} numberOfLines={1}>
               {stream.title ?? "Now playing"}
             </Text>
+            <CastButton tintColor="#fff" />
             <IconButton
               name="options"
               onPress={() => setPickerOpen(true)}

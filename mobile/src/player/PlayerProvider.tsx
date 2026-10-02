@@ -25,6 +25,7 @@ import {
   saveServerQueue,
   startStream,
 } from "@/api/media";
+import { useCast } from "@/cast";
 import { buildTrackArtwork } from "./artwork";
 import { clampCrossfade, fadeInVolume, fadeOutVolume, shouldStartFade } from "./crossfade";
 import { resolveVolume } from "./loudness";
@@ -100,6 +101,10 @@ interface PlayerContextValue {
   repeatMode: RepeatSetting;
   shuffleOn: boolean;
   getQueueItems: () => { metas: QueueMeta[]; activeIndex: number };
+  /** Hand the current queue to a connected Chromecast receiver: sign a cast URL
+   * per track, load it as a cast queue at the current track + position, and
+   * pause local playback. Returns false when there's no queue or no session. */
+  castCurrentQueue: () => Promise<boolean>;
   queueVersion: number;
   nowPlaying: NowPlaying | null;
   isPlaying: boolean;
@@ -114,6 +119,7 @@ const PlayerContext = createContext<PlayerContextValue | null>(null);
 
 export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const api = useApi();
+  const cast = useCast();
   const downloads = useDownloads();
   const downloadsRef = useRef(downloads);
   downloadsRef.current = downloads;
@@ -641,6 +647,41 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const castCurrentQueue = useCallback(async (): Promise<boolean> => {
+    const metas = queueMeta.current;
+    if (metas.length === 0) return false;
+    const startIndex = Math.max(0, activeIndexRef.current);
+    const startPositionSec = Math.floor(progressRef.current.position || 0);
+    const activeMediaId = metas[startIndex]?.mediaFileId;
+    // Sign a direct cast URL per track; the receiver fetches each itself from
+    // the server, so every URL must be absolute + signed (purpose:"cast" so
+    // the server logs the cast start).
+    const signed = await Promise.all(
+      metas.map((m) =>
+        startStream(api, m.mediaFileId, undefined, { purpose: "cast" })
+          .then((s) => ({ s, m }))
+          .catch(() => null),
+      ),
+    );
+    const resolved = signed.filter((x): x is { s: Awaited<ReturnType<typeof startStream>>; m: QueueMeta } => x !== null);
+    const tracks = resolved.map(({ s, m }) => ({
+      url: s.url,
+      title: m.title,
+      artist: m.artist ?? undefined,
+      album: m.album ?? undefined,
+      // Only the signed, header-less art URL is usable by the receiver.
+      artUrl: s.art_url ?? undefined,
+    }));
+    if (tracks.length === 0) return false;
+    const idx = Math.max(0, resolved.findIndex(({ m }) => m.mediaFileId === activeMediaId));
+    const ok = await cast.castMusicQueue({ tracks, startIndex: idx, startPositionSec });
+    if (ok) {
+      await TrackPlayer.pause().catch(() => {});
+      syncer.current?.flush();
+    }
+    return ok;
+  }, [api, cast]);
+
   const next = useCallback(async () => {
     try {
       await TrackPlayer.skipToNext();
@@ -765,6 +806,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       repeatMode,
       shuffleOn,
       getQueueItems,
+      castCurrentQueue,
       queueVersion,
       nowPlaying,
       isPlaying,
@@ -802,6 +844,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       repeatMode,
       shuffleOn,
       getQueueItems,
+      castCurrentQueue,
       queueVersion,
       nowPlaying,
       isPlaying,

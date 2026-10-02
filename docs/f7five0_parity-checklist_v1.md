@@ -19,7 +19,7 @@ Legend: `[x]` = present in the F7FIVE0 code (checked by reading the repo on 2026
 F7FIVE0 was forked from arcHIVE at about 1.2.0 (Alembic head 0021). The parity gaps are:
 
 1. ~~Passkey sign-in~~ Ported 2026-09-30 (migration 0022, same revision id). Code-verified and browser-tested, not yet on a real install or phone. See `f7five0_passkeys-plan_v1.md` in the vault.
-2. Chromecast in the Android app (arcHIVE 1.3.0). Web cast exists; mobile has none.
+2. ~~Chromecast in the Android app.~~ Ported 2026-10-01 from arcHIVE app 1.3.0 (`f5e48a8`, `b6dcc6e`, `f4e095e`, `ca2c270`). tsc and jest pass; not yet tested with a real Chromecast.
 3. F7FIVE0 design system. Tokens v2, Tailwind preset and RN theme are in `design/` but not wired in; web and mobile still use arcHIVE fonts (Bebas, Fraunces). Archivo is not used yet.
 4. Install, cutover and data migration (sections 10 and 11).
 5. ~~Mobile library lists capped at 200 rows.~~ Ported 2026-10-01 from arcHIVE app `c7ac7a6` (full lists, A-Z rail jumps by grid row). tsc and jest pass; not yet checked on a device.
@@ -65,7 +65,7 @@ F7FIVE0 was forked from arcHIVE at about 1.2.0 (Alembic head 0021). The parity g
 ## 5. Casting
 
 - [x] Chromecast from the web app
-- [ ] Chromecast from the Android app (video and music queue)
+- [x] Chromecast from the Android app (video and music queue) (2026-10-01; phone only, TV build excluded; real-device check pending, including casting while signed in over a plain-http LAN address)
 
 ## 6. Offline
 

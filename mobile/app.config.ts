@@ -50,6 +50,12 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       "FOREGROUND_SERVICE",
       "FOREGROUND_SERVICE_MEDIA_PLAYBACK",
       "WAKE_LOCK",
+      // Chromecast discovery: the Cast SDK finds receivers over mDNS, which
+      // needs a Wi-Fi multicast lock. Without CHANGE_WIFI_MULTICAST_STATE the
+      // device picker finds nothing and the cast button appears to do nothing.
+      "ACCESS_WIFI_STATE",
+      "CHANGE_WIFI_MULTICAST_STATE",
+      "ACCESS_NETWORK_STATE",
     ],
   },
   extra: {
@@ -82,6 +88,14 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     "./plugins/withAndroidReleaseSigning.js",
     // Android Auto media support (crit 44): automotive_app_desc + car metadata.
     "./plugins/withAndroidAuto.js",
+    // Chromecast (phone only). Wires the react-native-google-cast options
+    // provider + the Default Media Receiver (CC1AD845) into the Android
+    // manifest. TV builds exclude it: react-native-google-cast is a phone/tablet
+    // sender only, and the leanback TV build has no cast UI. Guarded on EXPO_TV
+    // so the TV manifest never declares the options provider.
+    ...(IS_TV
+      ? []
+      : [["./plugins/withGoogleCast.js", { receiverAppId: "CC1AD845" }] as [string, { receiverAppId: string }]]),
   ],
   experiments: {
     typedRoutes: false,

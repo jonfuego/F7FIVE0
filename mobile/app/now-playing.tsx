@@ -1,10 +1,11 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Modal, Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { CastButton, useCast } from "@/cast";
 import { usePlayer } from "@/player/PlayerProvider";
 import { colors, MIN_TOUCH, radius, spacing, typography } from "@/state/theme";
 import { Artwork } from "@/ui/Artwork";
@@ -52,9 +53,23 @@ export default function NowPlayingScreen(): React.ReactElement {
     setLoudnessAllowBoost,
     sleep,
     setSleepTimer,
+    castCurrentQueue,
   } = usePlayer();
   const router = useRouter();
   const api = useApi();
+  const cast = useCast();
+
+  // Hand the queue to the receiver when a cast session connects; nothing to undo
+  // on disconnect (track-player resumes locally on its own play controls).
+  const castedRef = useRef(false);
+  useEffect(() => {
+    if (cast.isConnected && !castedRef.current) {
+      castedRef.current = true;
+      void castCurrentQueue();
+    } else if (!cast.isConnected) {
+      castedRef.current = false;
+    }
+  }, [cast.isConnected, castCurrentQueue]);
   const startTrackRadio = useTrackRadio();
   const trackId = nowPlaying?.trackId ?? null;
   const waveform = useQuery({
@@ -82,6 +97,9 @@ export default function NowPlayingScreen(): React.ReactElement {
         <IconButton name="chevron-down" onPress={() => router.back()} accessibilityLabel="Close now playing" />
         <Text style={styles.header}>Now Playing</Text>
         <View style={styles.topRight}>
+          <View style={styles.queueBtn}>
+            <CastButton />
+          </View>
           <Pressable
             onPress={() => setLyricsOpen(true)}
             accessibilityRole="button"
