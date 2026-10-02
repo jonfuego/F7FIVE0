@@ -25,7 +25,6 @@ const MAX_BAR = 40;
  * dimmed. Tap/drag seeks. Falls back to the plain Scrubber when there are no
  * peaks (backend hasn't analysed the track yet). */
 export function WaveformScrubber({ peaks, position, duration, onSeek }: WaveformScrubberProps): React.ReactElement {
-  const [width, setWidth] = useState(0);
   const [dragFrac, setDragFrac] = useState<number | null>(null);
   const widthRef = useRef(0);
   const durationRef = useRef(duration);
@@ -35,7 +34,6 @@ export function WaveformScrubber({ peaks, position, duration, onSeek }: Waveform
 
   const onLayout = (e: LayoutChangeEvent) => {
     const w = e.nativeEvent.layout.width;
-    setWidth(w);
     widthRef.current = w;
   };
 

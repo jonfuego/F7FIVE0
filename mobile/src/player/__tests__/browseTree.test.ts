@@ -1,4 +1,15 @@
-import { browseRoot, findRoot, ROOT_ID, rootChildren, sourceFor } from "../browseTree";
+import {
+  browseRoot,
+  findRoot,
+  folderId,
+  parseParent,
+  parsePlayableId,
+  playableId,
+  ROOT_ID,
+  rootChildren,
+  songItems,
+  sourceFor,
+} from "../browseTree";
 
 describe("Android Auto browse tree", () => {
   it("exposes the six spec categories in order", () => {
@@ -35,8 +46,6 @@ describe("Android Auto browse tree", () => {
     expect(findRoot("nope")).toBeNull();
   });
 });
-
-import { folderId, parseParent, parsePlayableId, playableId, songItems } from "../browseTree";
 
 describe("Android Auto media ids", () => {
   it("round-trips playable ids that carry their list and position", () => {

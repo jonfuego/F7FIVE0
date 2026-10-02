@@ -1,4 +1,4 @@
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useLocalSearchParams } from "expo-router";
 import React from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
@@ -17,7 +17,6 @@ export default function TvDetail(): React.ReactElement {
   const { id } = useLocalSearchParams<{ id: string }>();
   const album = useAlbum(id ?? "");
   const { playSongs } = usePlayer();
-  const router = useRouter();
 
   return (
     <Screen title="Details">

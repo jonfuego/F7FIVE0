@@ -1,5 +1,7 @@
-jest.mock("react-native", () => ({ useWindowDimensions: () => ({ width: 412, height: 915 }) }));
 import { gridColumns, gridItemWidth } from "../useGrid";
+
+// babel-jest hoists jest.mock above the import, so the mock still applies.
+jest.mock("react-native", () => ({ useWindowDimensions: () => ({ width: 412, height: 915 }) }));
 
 describe("library grid geometry", () => {
   it("is 4 per row on a portrait phone, 6 in landscape, 7 on wide screens", () => {
