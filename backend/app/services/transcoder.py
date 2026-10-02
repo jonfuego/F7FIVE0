@@ -329,10 +329,38 @@ class TranscodeManager:
                 self._jobs.pop(key, None)
                 _close_session_row(existing.session_row_id)
 
+            siblings = self._pop_running_siblings(key)
             job = self._start(user_id, media_file_id, variant, source_path, offset_bucket,
                               opts=opts)
             self._jobs[key] = job
-            return job
+        # Kill outside the lock: kill() can wait up to 10 s for ffmpeg to exit.
+        for sib in siblings:
+            log.info("stopping ffmpeg %s: same viewer switched to variant %s",
+                     sib.key, variant.label)
+            sib.kill()
+            _close_session_row(sib.session_row_id)
+        return job
+
+    def _pop_running_siblings(
+        self, key: tuple[uuid.UUID, uuid.UUID, str, int, str],
+    ) -> list[TranscodeJob]:
+        """Remove and return running jobs for the same viewer, file, offset
+        bucket and track picks but a different variant. Caller holds the lock.
+
+        A player that changes quality (hls.js level switch, or a manual pick)
+        starts a new variant; the old variant's ffmpeg would otherwise keep
+        encoding until the idle janitor, competing for the CPU on installs
+        without NVENC. Finished jobs stay registered so their cached segments
+        keep serving.
+        """
+        user_id, media_file_id, label, bucket, opts = key
+        out: list[TranscodeJob] = []
+        for k, j in list(self._jobs.items()):
+            if (k[0] == user_id and k[1] == media_file_id and k[3] == bucket
+                    and k[4] == opts and k[2] != label and j.is_running()):
+                self._jobs.pop(k, None)
+                out.append(j)
+        return out
 
     def get(
         self,

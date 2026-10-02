@@ -11,6 +11,8 @@ export type Features = {
   public_url?: string | null;
   /** Passkey sign-in. Off on home-only (plain http) installs. */
   passkeys?: { enabled: boolean; rp_id: string | null };
+  /** Hardware (NVENC) transcoding on the server. */
+  transcode?: { hardware: boolean };
 };
 
 const NONE: Features = { requests: { enabled: false, movie: false, series: false }, public_url: null, passkeys: { enabled: false, rp_id: null } };

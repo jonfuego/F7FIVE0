@@ -60,7 +60,7 @@ F7FIVE0 was forked from arcHIVE at about 1.2.0 (Alembic head 0021). The parity g
 - [x] Resume, mark watched / unwatched
 - [x] Skip intro, skip credits, next episode
 - [x] Subtitle and audio track pickers, quality picker (signed track-opts)
-- [ ] Transcoding on non-NVIDIA hardware (QuickSync, AMD, CPU): confirm acceptable
+- [ ] Transcoding on non-NVIDIA hardware (QuickSync, AMD, CPU): confirm acceptable. 2026-10-01 VM test: plays, but slow start and stalls because the web player auto-switches quality and spawns a second ffmpeg (task `cpu-transcode-variant-switch`). Retest on real hardware with NVENC off.
 
 ## 5. Casting
 
@@ -98,7 +98,7 @@ F7FIVE0 was forked from arcHIVE at about 1.2.0 (Alembic head 0021). The parity g
 
 - [x] Windows installer: Setup.exe (Inno Setup), `install.ps1`, uninstall, build-dist, CI release on `v*` tags
 - [x] Remote access options: Tailscale Funnel, Cloudflare named tunnel, Caddy with HTTPS
-- [ ] Clean-VM install test passes (per repo CLAUDE.md, required before tagging)
+- [ ] Clean-VM install test passes (per repo CLAUDE.md, required before tagging). 2026-10-01 run 1: install, services, Cloudflare tunnel, web sign-in, passkey (mobile) passed. Still open: reboot survival, phone app against the VM, uninstall, playback retest after the transcode fix.
 - [ ] Signed Android release builds and a documented update path
 - [ ] Data migration tool, arcHIVE to F7FIVE0: users, passwords, watch progress, queues, track plays, requests, metadata and art overrides, audio analysis (or re-run backfill)
 - [ ] Jon's own install moved to F7FIVE0 and smoke-tested

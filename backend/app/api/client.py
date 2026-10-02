@@ -66,6 +66,9 @@ def features() -> dict:
             "enabled": settings.passkeys_enabled,
             "rp_id": settings.webauthn_rp_id_effective or None,
         },
+        # Hardware (NVENC) transcoding. Without it the web player starts
+        # transcoded video at 720p instead of the top of the ladder.
+        "transcode": {"hardware": bool(settings.nvenc_enabled)},
     }
 
 

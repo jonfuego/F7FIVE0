@@ -52,3 +52,10 @@ def test_base_url_uses_public_scheme_for_public_host(monkeypatch):
     assert _base_url(req({"host": "192.168.1.20:3001"})) == "http://192.168.1.20:3001"
     # An explicit forwarded proto on other hosts is still honored.
     assert _base_url(req({"host": "media.example.com", "x-forwarded-proto": "https"})) == "https://media.example.com"
+
+
+def test_features_transcode_hardware(client, monkeypatch):
+    monkeypatch.setattr(settings, "nvenc_enabled", False)
+    assert client.get("/api/client/features").json()["transcode"] == {"hardware": False}
+    monkeypatch.setattr(settings, "nvenc_enabled", True)
+    assert client.get("/api/client/features").json()["transcode"] == {"hardware": True}

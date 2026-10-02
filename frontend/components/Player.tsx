@@ -28,10 +28,13 @@
 //
 // Quality selector: on the MSE path we expose a gear menu overlaid on
 // the player. The menu lists Auto + each level in the ladder (sorted
-// high to low). Selecting "Auto" hands control back to hls.js ABR;
-// selecting a specific level pins it via `hls.currentLevel`. Native
-// HLS (Safari) and direct-play don't expose a level API, so the menu
-// is hidden for those modes.
+// high to low). Every level is its own ffmpeg on the server, so a level
+// switch is a cold start. The player therefore starts PINNED to one level:
+// the viewer's last pick on this browser, else the top of the ladder when
+// the server has hardware encoding, else the highest level at or below
+// 720p. hls.js ABR only runs when the viewer picks "Auto". Native HLS
+// (Safari) and direct-play don't expose a level API, so the menu is
+// hidden for those modes.
 //
 // Cast: when the Cast SDK is loaded and a session is active, the Player
 // pauses local playback, sends the same signed stream URL to the
@@ -50,6 +53,8 @@ import { apiPut } from "@/lib/client-api";
 import type { MediaMarker, Progress, StreamStart } from "@/lib/types";
 import CastButton from "./CastButton";
 import { useCast } from "@/lib/cast";
+import { loadFeatures } from "@/lib/features";
+import { pickStartLevel, readQualityPref, writeQualityPref } from "@/lib/quality";
 
 type Props = {
   stream: StreamStart;
@@ -70,6 +75,7 @@ type Props = {
 };
 
 const HEARTBEAT_MS = 10_000;
+
 
 // Absolute-ize a same-origin path so the Cast receiver can fetch it. The
 // BFF rewrites `/api/stream/start` responses to path-only URLs so they
@@ -225,8 +231,12 @@ export function Player({
       }
 
       try {
-        const { default: Hls } = await import("hls.js");
+        const [{ default: Hls }, features] = await Promise.all([
+          import("hls.js"),
+          loadFeatures(),
+        ]);
         if (disposed) return;
+        const hardware = Boolean(features.transcode?.hardware);
         if (!Hls.isSupported()) {
           onError?.("HLS playback is not supported in this browser.");
           return;
@@ -237,6 +247,9 @@ export function Player({
           // keeps memory modest.
           maxBufferLength: 30,
           enableWorker: true,
+          // Don't fetch a level playlist until we've pinned one: each level
+          // request starts an ffmpeg on the server.
+          autoStartLoad: false,
         });
         hlsRef.current = instance;
         instance.on(Hls.Events.MANIFEST_PARSED, (_event, data) => {
@@ -244,7 +257,18 @@ export function Player({
           // Copy so React treats it as a new array; hls.js mutates the
           // internal levels object over time.
           setLevels([...data.levels]);
-          setLoadedLevel(instance.currentLevel);
+          const start = pickStartLevel(
+            data.levels.map((lv) => lv.height ?? 0),
+            readQualityPref(),
+            hardware,
+          );
+          if (start >= 0) {
+            instance.startLevel = start;
+            instance.loadLevel = start; // manual level: ABR stays off
+          }
+          setUserLevel(start);
+          setLoadedLevel(start >= 0 ? start : instance.currentLevel);
+          instance.startLoad();
         });
         instance.on(Hls.Events.LEVEL_SWITCHED, (_event, data) => {
           if (disposed) return;
@@ -420,6 +444,8 @@ export function Player({
     if (!instance) return;
     instance.currentLevel = index; // -1 means auto
     setUserLevel(index);
+    const height = index >= 0 ? instance.levels[index]?.height : undefined;
+    writeQualityPref(index < 0 ? "auto" : height ? String(height) : "auto");
   }
 
   // Sample the playhead for the skip-button gate. timeupdate fires a few
