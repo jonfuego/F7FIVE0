@@ -18,7 +18,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState, type FormEvent } from "react";
 import { GearMenu } from "./GearMenu";
-import { Wordmark } from "./Wordmark";
+import { HiveWordmark } from "./HiveWordmark";
 
 type NavLink = { label: string; href: string };
 
@@ -37,7 +37,7 @@ export function MarqueeTop() {
   return (
     <header className="marquee-top">
       <div className="marquee-row">
-        <Wordmark />
+        <HiveWordmark />
         <nav className="marquee-nav" aria-label="Primary">
           {NAV.map((link) => (
             <Link

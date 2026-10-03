@@ -1,0 +1,46 @@
+/* F7FIVE0 Hidden HIVE wordmark. Import once (e.g. from app/globals.css).
+   Timeline (2.4 s): black steps back and fades (0-0.3 s), H right stem and I close up
+   (0.25-0.7 s), HIVE holds (to 1.6 s), pieces return (1.6-1.95 s), black snaps back (to 2.4 s). */
+
+.f7-hive { display: inline-flex; align-items: center; line-height: 0; }
+.f7-hive-svg { display: block; overflow: visible; }
+.f7-hive-red { fill: #9C0404; }   /* hive */
+.f7-hive-black { fill: #000000; }
+
+/* White plate off white grounds: always in dark, never bare on black. */
+.f7-hive-plate-always, [data-theme="dark"] .f7-hive-plate-auto, :root:not([data-theme]) .f7-hive-plate-auto {
+  background: #FFFFFF; padding: var(--f7-hive-pad);
+}
+
+.f7-hive-svg.is-playing .f7-hive-black { animation: f7-hive-black 2.4s cubic-bezier(.2,.7,.2,1) both; }
+.f7-hive-svg.is-playing .f7-hive-hr    { animation: f7-hive-hr 2.4s both; }
+.f7-hive-svg.is-playing .f7-hive-i     { animation: f7-hive-i 2.4s both; }
+
+@keyframes f7-hive-black {
+  0%    { opacity: 1; transform: translateX(0); }
+  12.5% { opacity: 0; transform: translateX(-10px); }
+  81%   { opacity: 0; transform: translateX(-10px); animation-timing-function: cubic-bezier(.5,0,.75,0); }
+  96%   { opacity: 1; transform: translateX(1px); }
+  100%  { opacity: 1; transform: translateX(0); }
+}
+@keyframes f7-hive-hr {
+  0%, 10%  { transform: translateX(0); animation-timing-function: cubic-bezier(.2,.7,.2,1); }
+  29%, 67% { transform: translateX(-40px); animation-timing-function: cubic-bezier(.5,0,.75,0); }
+  81%, 100% { transform: translateX(0); }
+}
+@keyframes f7-hive-i {
+  0%, 12%  { transform: translateX(0); animation-timing-function: cubic-bezier(.2,.7,.2,1); }
+  29%, 67% { transform: translateX(-13px); animation-timing-function: cubic-bezier(.5,0,.75,0); }
+  81%, 100% { transform: translateX(0); }
+}
+/* SVG user units: translateX in px maps to viewBox units because the transform is on SVG <g> elements. */
+
+@media (prefers-reduced-motion: reduce) {
+  /* No sliding: the pieces jump while the black is gone; only fades remain. */
+  .f7-hive-svg.is-playing .f7-hive-black { animation-name: f7-hive-black-fade; }
+  .f7-hive-svg.is-playing .f7-hive-hr { animation-name: f7-hive-hr-jump; }
+  .f7-hive-svg.is-playing .f7-hive-i  { animation-name: f7-hive-i-jump; }
+}
+@keyframes f7-hive-black-fade { 0% { opacity: 1; } 12.5%, 81% { opacity: 0; } 100% { opacity: 1; } }
+@keyframes f7-hive-hr-jump { 0%, 12.4% { transform: translateX(0); } 12.5%, 80.9% { transform: translateX(-40px); } 81%, 100% { transform: translateX(0); } }
+@keyframes f7-hive-i-jump  { 0%, 12.4% { transform: translateX(0); } 12.5%, 80.9% { transform: translateX(-13px); } 81%, 100% { transform: translateX(0); } }
