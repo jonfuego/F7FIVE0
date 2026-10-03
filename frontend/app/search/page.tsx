@@ -252,7 +252,7 @@ function SearchPageInner() {
                   padding: "16px 24px",
                   fontFamily: "var(--mono)",
                   fontSize: 12,
-                  color: "oklch(0.75 0.16 30)",
+                  color: "var(--danger)",
                 }}
               >
                 {error}
@@ -485,7 +485,7 @@ function RequestFromSearchInner({ query }: { query: string }) {
         <div style={{ marginTop: 12, fontFamily: "var(--mono)", fontSize: 11, color: "var(--ink-3)" }}>Searching the catalog…</div>
       ) : null}
       {err ? (
-        <div style={{ marginTop: 12, fontFamily: "var(--mono)", fontSize: 12, color: "oklch(0.75 0.16 30)" }}>{err}</div>
+        <div style={{ marginTop: 12, fontFamily: "var(--mono)", fontSize: 12, color: "var(--danger)" }}>{err}</div>
       ) : null}
       {results && !busy && results.length === 0 ? (
         <div style={{ marginTop: 12, fontFamily: "var(--mono)", fontSize: 11, color: "var(--ink-3)" }}>
@@ -513,7 +513,7 @@ function RequestFromSearchInner({ query }: { query: string }) {
               </div>
               <div style={{ flexShrink: 0 }}>
                 {r.in_library ? (
-                  <span style={{ fontFamily: "var(--mono)", fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: "oklch(0.78 0.13 150)" }}>In library</span>
+                  <span style={{ fontFamily: "var(--mono)", fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--positive)" }}>In library</span>
                 ) : r.requested ? (
                   <span style={{ fontFamily: "var(--mono)", fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--ink-2)" }}>Requested</span>
                 ) : (

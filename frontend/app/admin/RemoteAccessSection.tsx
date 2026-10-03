@@ -237,7 +237,7 @@ export function RemoteAccessSection() {
       ) : (
         <div className="mt-4 space-y-4">
           {!status.available ? (
-            <div className="rounded-md border border-amber-900/60 bg-amber-950/30 px-4 py-3 text-sm text-amber-200">
+            <div className="rounded-md border border-line bg-hive-tint px-4 py-3 text-sm text-hive-text">
               {ERRORS.helper_unavailable}
             </div>
           ) : null}
@@ -297,7 +297,7 @@ export function RemoteAccessSection() {
                     value={form.host}
                     onChange={(e) => setForm({ ...form, host: e.target.value })}
                     placeholder={form.method === "portforward" ? "myname.duckdns.org or music.yourdomain.com" : "music.yourdomain.com"}
-                    className="mt-1 w-full rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 font-mono text-sm text-neutral-100"
+                    className="mt-1 w-full rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 font-sans text-sm text-neutral-100"
                   />
                 </label>
               ) : null}
@@ -309,7 +309,7 @@ export function RemoteAccessSection() {
                     autoComplete="off"
                     value={form.duckdns}
                     onChange={(e) => setForm({ ...form, duckdns: e.target.value })}
-                    className="mt-1 w-full rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 font-mono text-sm text-neutral-100"
+                    className="mt-1 w-full rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 font-sans text-sm text-neutral-100"
                   />
                   <span className="mt-1 block text-xs text-neutral-500">
                     From duckdns.org. It keeps the name pointed at your home when your internet address changes.
@@ -324,11 +324,11 @@ export function RemoteAccessSection() {
                     autoComplete="off"
                     value={form.token}
                     onChange={(e) => setForm({ ...form, token: e.target.value })}
-                    className="mt-1 w-full rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 font-mono text-sm text-neutral-100"
+                    className="mt-1 w-full rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 font-sans text-sm text-neutral-100"
                   />
                   <span className="mt-1 block text-xs text-neutral-500">
                     In the Cloudflare dashboard, give the tunnel the public hostname above pointing at{" "}
-                    <span className="font-mono">http://localhost:{status.web_port}</span>.
+                    <span className="font-sans">http://localhost:{status.web_port}</span>.
                   </span>
                 </label>
               ) : null}
@@ -342,7 +342,7 @@ export function RemoteAccessSection() {
                 </p>
               ) : null}
               {status.public_url ? (
-                <p className="text-xs text-amber-300/80">
+                <p className="text-xs text-hive-text">
                   Changing the address signs passkeys out of the old one: everyone sets up their passkey again on the new address.
                 </p>
               ) : null}
@@ -455,7 +455,7 @@ function CurrentSetup({
           <img src={qr} alt={`QR code for ${url}`} width={144} height={144} className="rounded-md" />
         ) : null}
         <div className="min-w-0 space-y-2">
-          <p className="break-all font-mono text-sm text-neutral-100">{url}</p>
+          <p className="break-all font-sans text-sm text-neutral-100">{url}</p>
           <div className="flex flex-wrap items-center gap-2 text-xs">
             {status.method ? (
               <span className="rounded-full bg-neutral-800 px-2 py-0.5 text-neutral-300">{METHOD_LABEL[status.method]}</span>
@@ -589,7 +589,7 @@ function RunPanel({
 
       {run.state === "succeeded" && run.public_url ? (
         <p className="text-sm text-neutral-300">
-          F7FIVE0 is reachable at <span className="break-all font-mono text-neutral-100">{run.public_url}</span>.
+          F7FIVE0 is reachable at <span className="break-all font-sans text-neutral-100">{run.public_url}</span>.
         </p>
       ) : null}
       {run.state === "failed" && run.error ? (
@@ -599,7 +599,7 @@ function RunPanel({
       {run.log.length ? (
         <details className="text-xs">
           <summary className="cursor-pointer text-neutral-500 hover:text-neutral-300">Details</summary>
-          <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-all rounded-md bg-neutral-950 p-3 font-mono text-[11px] text-neutral-400">
+          <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-all rounded-md bg-neutral-950 p-3 font-sans text-[11px] text-neutral-400">
             {run.log.join("\n")}
           </pre>
         </details>

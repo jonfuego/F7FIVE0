@@ -115,9 +115,9 @@ export default function MusicVideoReleasePage() {
           style={{
             margin: "16px 64px",
             padding: "12px 16px",
-            border: "1px solid oklch(0.40 0.20 25 / 0.4)",
+            border: "1px solid var(--danger)",
             borderRadius: 4,
-            color: "oklch(0.85 0.10 25)",
+            color: "var(--danger)",
             fontFamily: "var(--mono)",
             fontSize: 12,
           }}
@@ -310,7 +310,7 @@ function VideoTile({ video }: { video: MusicVideo }) {
             style={{
               position: "absolute",
               inset: 0,
-              background: "oklch(0 0 0 / 0.5)",
+              background: "var(--scrim)",
               display: "grid",
               placeItems: "center",
               fontFamily: "var(--mono)",
@@ -359,7 +359,7 @@ function ReleaseSkeleton() {
       <div className="body">
         <div
           className="poster-card album"
-          style={{ background: "oklch(0.18 0.012 60)" }}
+          style={{ background: "var(--surface-2)" }}
         />
         <div className="info">
           <div className="kicker">Loading…</div>

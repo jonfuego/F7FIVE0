@@ -12,6 +12,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Icon } from "@/components/Icon";
+import { X } from "lucide-react";
 import { ArtOverrideModal, ArtKind, ArtRole } from "@/components/ArtOverrideModal";
 import type {
   MatchCandidate,
@@ -172,17 +174,7 @@ export default function EditOverridesModal({
               className="rounded p-1 text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100"
               aria-label="Close"
             >
-              <svg
-                className="h-4 w-4"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M18 6 6 18M6 6l12 12" />
-              </svg>
+              <Icon icon={X} size={16} />
             </button>
           </header>
 
@@ -267,7 +259,7 @@ export default function EditOverridesModal({
                 type="button"
                 onClick={handleSave}
                 disabled={busy || !dirtyAny}
-                className="rounded bg-amber-500 px-3 py-1.5 text-sm font-medium text-neutral-950 hover:bg-amber-400 disabled:opacity-50"
+                className="rounded bg-hive px-3 py-1.5 text-sm font-medium text-on-hive hover:bg-hive-hover disabled:opacity-50"
               >
                 {busy ? "Saving..." : "Save changes"}
               </button>
@@ -585,7 +577,7 @@ function FixMatchTab({
           type="button"
           onClick={search}
           disabled={busy || !query.trim()}
-          className="rounded bg-amber-500 px-3 py-1.5 text-sm font-medium text-neutral-950 hover:bg-amber-400 disabled:opacity-50"
+          className="rounded bg-hive px-3 py-1.5 text-sm font-medium text-on-hive hover:bg-hive-hover disabled:opacity-50"
         >
           {busy ? "Searching..." : "Search"}
         </button>
@@ -648,8 +640,8 @@ function FixMatchTab({
       )}
 
       {confirming ? (
-        <div className="mt-3 rounded border border-amber-700/50 bg-amber-950/30 p-3">
-          <p className="text-xs text-amber-100">
+        <div className="mt-3 rounded border border-line bg-hive-tint p-3">
+          <p className="text-xs text-ink">
             Re-match <b>{currentLabel}</b> to <b>{confirming.label}</b>?
             Existing manual overrides will not be touched; canonical
             metadata will refresh from {confirming.source}.
@@ -666,7 +658,7 @@ function FixMatchTab({
               type="button"
               onClick={() => apply(confirming)}
               disabled={applying}
-              className="rounded bg-amber-500 px-3 py-1 text-xs font-medium text-neutral-950 hover:bg-amber-400 disabled:opacity-50"
+              className="rounded bg-hive px-3 py-1 text-xs font-medium text-on-hive hover:bg-hive-hover disabled:opacity-50"
             >
               {applying ? "Applying..." : "Confirm re-match"}
             </button>
@@ -735,7 +727,7 @@ function RefreshTab({
             type="button"
             onClick={refresh}
             disabled={busy}
-            className="mt-3 rounded bg-amber-500 px-3 py-1.5 text-sm font-medium text-neutral-950 hover:bg-amber-400 disabled:opacity-50"
+            className="mt-3 rounded bg-hive px-3 py-1.5 text-sm font-medium text-on-hive hover:bg-hive-hover disabled:opacity-50"
           >
             {busy ? "Refreshing..." : `Refresh from ${external.source}:${external.id}`}
           </button>
@@ -886,7 +878,7 @@ async function extractError(res: Response): Promise<string> {
 }
 
 const inputClass =
-  "block w-full rounded border border-neutral-800 bg-neutral-950 px-3 py-1.5 text-sm text-neutral-100 placeholder-neutral-600 focus:border-amber-500 focus:outline-none";
+  "block w-full rounded border border-neutral-800 bg-neutral-950 px-3 py-1.5 text-sm text-neutral-100 placeholder-neutral-600 focus:border-ink focus:outline-none";
 
 // Avoid an import-time warning when the file is bundled but no
 // reference to useRef is left; the linter wants every imported symbol

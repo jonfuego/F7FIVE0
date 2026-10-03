@@ -176,7 +176,7 @@ function SongListSkeleton() {
             style={{
               width: 40,
               height: 40,
-              background: "oklch(0.18 0.012 60)",
+              background: "var(--surface-2)",
               borderRadius: 3,
               flex: "0 0 40px",
             }}
@@ -185,7 +185,7 @@ function SongListSkeleton() {
             style={{
               flex: 1,
               height: 14,
-              background: "oklch(0.18 0.012 60)",
+              background: "var(--surface-2)",
               borderRadius: 3,
             }}
           />
@@ -193,7 +193,7 @@ function SongListSkeleton() {
             style={{
               width: 80,
               height: 12,
-              background: "oklch(0.18 0.012 60)",
+              background: "var(--surface-2)",
               borderRadius: 3,
             }}
           />
@@ -348,7 +348,7 @@ function SongRowItem({ row }: { row: SongRow }) {
             width: 40,
             height: 40,
             flex: "0 0 40px",
-            background: "oklch(0.18 0.012 60)",
+            background: "var(--surface-2)",
             borderRadius: 3,
             position: "relative",
             overflow: "hidden",

@@ -187,7 +187,7 @@ export function MixCard({
             style={{
               fontFamily: "var(--mono)",
               fontSize: 11,
-              color: "oklch(0.75 0.16 30)",
+              color: "var(--danger)",
               letterSpacing: "0.06em",
             }}
           >
@@ -241,7 +241,7 @@ function PickerInputs({
             max={f.kind === "number" ? f.max : undefined}
             style={{
               padding: "8px 12px",
-              background: "oklch(0.10 0.012 60)",
+              background: "var(--surface-1)",
               border: "1px solid var(--line)",
               borderRadius: 3,
               color: "var(--ink)",

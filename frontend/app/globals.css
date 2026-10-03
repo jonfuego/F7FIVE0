@@ -1725,6 +1725,17 @@ button { border: 0; background: transparent; color: inherit; font: inherit; curs
 .font-display { font-family: var(--font-display); }
 .font-sans { font-family: var(--font-sans); }
 
+/* Inline play triangle used in button and link labels. Draws in the current
+   text color, so it reads as on-hive on a hive button and hive-text on dark. */
+.tri {
+  display: inline-block;
+  width: 0;
+  height: 0;
+  border-left: 10px solid currentColor;
+  border-top: 6px solid transparent;
+  border-bottom: 6px solid transparent;
+}
+
 .page-pad { padding: 0 64px; }
 @media (max-width: 720px) {
   .page-pad { padding: 0 24px; }

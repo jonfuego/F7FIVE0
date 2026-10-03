@@ -16,6 +16,19 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { CSSProperties } from "react";
+import {
+  EllipsisVertical,
+  ListMusic,
+  Pause,
+  Play,
+  Repeat,
+  Shuffle,
+  SkipBack,
+  SkipForward,
+  Volume2,
+  VolumeX,
+} from "lucide-react";
+import { Icon } from "@/components/Icon";
 import { apiGet, apiPost, apiPut } from "@/lib/client-api";
 import {
   colorForTitle,
@@ -382,6 +395,7 @@ export function MiniPlayer() {
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentItem?.media_file_id]);
 
   // Track-play log accounting. We write a `track_plays` row when the
@@ -675,6 +689,7 @@ export function MiniPlayer() {
       album: currentItem.album_title ?? "",
       artwork,
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     currentItem?.media_file_id,
     currentItem?.title,
@@ -854,6 +869,7 @@ export function MiniPlayer() {
     if (!currentItem) return;
     permissionRequestedRef.current = true;
     void requestNotificationPermission();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentItem?.media_file_id]);
 
   // Pause-on-login. The dock element itself returns null below when on
@@ -1127,7 +1143,7 @@ export function MiniPlayer() {
                 ) : null}
               </div>
             ) : streamError ? (
-              <div className="s" style={{ color: "oklch(0.75 0.16 30)" }}>
+              <div className="s" style={{ color: "var(--danger)" }}>
                 {streamError}
               </div>
             ) : null}
@@ -1165,7 +1181,7 @@ export function MiniPlayer() {
             aria-pressed={shuffle}
             className="icbtn"
             style={{
-              color: shuffle ? "oklch(0.82 0.13 75)" : undefined,
+              color: shuffle ? "var(--warning)" : undefined,
               opacity: shuffle ? 1 : 0.55,
             }}
           >
@@ -1206,7 +1222,7 @@ export function MiniPlayer() {
             aria-pressed={repeat !== "off"}
             className="icbtn"
             style={{
-              color: repeat !== "off" ? "oklch(0.82 0.13 75)" : undefined,
+              color: repeat !== "off" ? "var(--warning)" : undefined,
               opacity: repeat !== "off" ? 1 : 0.55,
               position: "relative",
             }}
@@ -1333,87 +1349,34 @@ export function MiniPlayer() {
 }
 
 function PrevIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden>
-      <path d="M6 6h2v12H6zM20 6L9 12l11 6z" />
-    </svg>
-  );
+  return <Icon icon={SkipBack} size={16} fill />;
 }
 function NextIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden>
-      <path d="M16 6h2v12h-2zM4 6l11 6-11 6z" />
-    </svg>
-  );
+  return <Icon icon={SkipForward} size={16} fill />;
 }
 function PlayIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden>
-      <path d="M8 5v14l11-7z" />
-    </svg>
-  );
+  return <Icon icon={Play} size={14} fill />;
 }
 function PauseIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden>
-      <path d="M6 5h4v14H6zM14 5h4v14h-4z" />
-    </svg>
-  );
+  return <Icon icon={Pause} size={14} fill />;
 }
 function ShuffleIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <path d="M16 3h5v5" />
-      <path d="M4 20L21 3" />
-      <path d="M21 16v5h-5" />
-      <path d="M15 15l6 6" />
-      <path d="M4 4l5 5" />
-    </svg>
-  );
+  return <Icon icon={Shuffle} size={16} />;
 }
 function RepeatIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <path d="M17 1l4 4-4 4" />
-      <path d="M3 11V9a4 4 0 014-4h14" />
-      <path d="M7 23l-4-4 4-4" />
-      <path d="M21 13v2a4 4 0 01-4 4H3" />
-    </svg>
-  );
+  return <Icon icon={Repeat} size={16} />;
 }
 function QueueIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden>
-      <path d="M3 6h13v2H3zm0 5h13v2H3zm0 5h9v2H3zm15-5l5 3-5 3z" />
-    </svg>
-  );
+  return <Icon icon={ListMusic} size={16} />;
 }
 function KebabIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden>
-      <circle cx="12" cy="5" r="2" />
-      <circle cx="12" cy="12" r="2" />
-      <circle cx="12" cy="19" r="2" />
-    </svg>
-  );
+  return <Icon icon={EllipsisVertical} size={16} />;
 }
 function VolumeIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <path d="M11 5L6 9H2v6h4l5 4z" />
-      <path d="M15.5 8.5a5 5 0 010 7" />
-      <path d="M18.5 5.5a9 9 0 010 13" />
-    </svg>
-  );
+  return <Icon icon={Volume2} size={16} />;
 }
 function MuteIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <path d="M11 5L6 9H2v6h4l5 4z" />
-      <path d="M23 9l-6 6" />
-      <path d="M17 9l6 6" />
-    </svg>
-  );
+  return <Icon icon={VolumeX} size={16} />;
 }
 
 const dockMenuStyle: CSSProperties = {

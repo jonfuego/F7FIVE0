@@ -140,7 +140,7 @@ function LoginPageInner() {
               type="button"
               onClick={onPasskey}
               disabled={passkeyBusy || submitting}
-              className="w-full rounded-lg border border-amber-500 bg-amber-500/10 px-4 py-2 text-sm font-medium text-amber-300 transition hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+              className="w-full rounded-lg border border-hive bg-hive-tint px-4 py-2 text-sm font-medium text-hive-text transition hover:bg-hive-tint disabled:cursor-not-allowed disabled:opacity-60"
             >
               {passkeyBusy ? "Waiting for passkey..." : "Sign in with passkey"}
             </button>

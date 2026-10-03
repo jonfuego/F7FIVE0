@@ -70,18 +70,15 @@ export function joinMeta(
     .join(" • ");
 }
 
-// Deterministic OKLCH color derived from a title. The Marquee design tints
-// poster placeholders, hero backdrops, and now-playing stages with `--pg`.
-// Items that lack a `color` field on the API response fall back to this so
-// the ambient-color effect still works.
+// Poster placeholders, hero backdrops and the now-playing stage used to take a
+// per-title ambient tint through the `--pg` custom property. Design system v3
+// is flat: those surfaces are a plain surface-2 tile. Kept so callers that
+// still set `--pg` resolve to a token instead of a computed color.
 export function colorForTitle(
-  title: string | null | undefined,
-  opts: { lightness?: number; chroma?: number } = {},
+  _title?: string | null,
+  _opts: { lightness?: number; chroma?: number } = {},
 ): string {
-  const l = opts.lightness ?? 0.45;
-  const c = opts.chroma ?? 0.13;
-  const h = hueFromString(title ?? "");
-  return `oklch(${l} ${c} ${h})`;
+  return "var(--surface-2)";
 }
 
 export function hueFromString(s: string): number {

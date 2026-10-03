@@ -134,7 +134,7 @@ export default function SeriesPage() {
               style={{
                 width: "100%",
                 aspectRatio: "2/3",
-                background: "oklch(0.18 0.012 60)",
+                background: "var(--surface-2)",
                 borderRadius: 6,
               }}
             />

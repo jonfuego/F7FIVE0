@@ -2,7 +2,7 @@
 // theatrical 2:3 poster (or 1:1 for albums/artists) with a tinted gradient
 // placeholder driven by --pg, plus a title + meta line below.
 //
-// `status` paints a small watched check or a thin amber progress bar. The
+// `status` paints a small watched check or a thin hive progress bar. The
 // admin Edit affordance opts the tile into a hover-revealed Edit button
 // over the poster; the parent page is responsible for gating the prop on
 // the admin role.
@@ -11,6 +11,8 @@
 
 import Link from "next/link";
 import type { CSSProperties } from "react";
+import { Check, Play } from "lucide-react";
+import { Icon } from "@/components/Icon";
 import { Poster } from "./Poster";
 import { colorForTitle, hueFromString } from "@/lib/format";
 import type { FileStatus } from "@/lib/progress";
@@ -85,7 +87,7 @@ export function MediaCard({
         ) : null}
         {status === "watched" ? (
           <div className="watched" aria-label="Watched" title="Watched">
-            <CheckIcon />
+            <Icon icon={Check} size={12} />
           </div>
         ) : null}
         {status === "in_progress" && typeof progressPct === "number" ? (
@@ -118,7 +120,7 @@ export function MediaCard({
             }}
             aria-label={`Play ${title}`}
           >
-            <PlayIcon />
+            <Icon icon={Play} size={18} fill />
           </button>
         ) : null}
       </div>
@@ -131,31 +133,5 @@ export function MediaCard({
   );
 }
 
-function PlayIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden>
-      <path d="M8 5v14l11-7z" />
-    </svg>
-  );
-}
-
 // Suppress the Poster import lint when not used directly.
 void Poster;
-
-function CheckIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 24 24"
-      width="12"
-      height="12"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="3"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M4 12l5 5L20 6" />
-    </svg>
-  );
-}

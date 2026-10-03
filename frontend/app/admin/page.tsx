@@ -171,7 +171,7 @@ function UsersSection({ me }: { me: Me }) {
             <tbody>
               {users.map((u) => (
                 <tr key={u.id} className="border-b border-neutral-900 last:border-b-0">
-                  <td className="px-2 py-2 font-mono text-xs text-neutral-300">{u.username}</td>
+                  <td className="px-2 py-2 font-sans text-xs text-neutral-300">{u.username}</td>
                   <td className="px-2 py-2">{u.display_name}</td>
                   <td className="px-2 py-2">
                     <select
@@ -473,7 +473,7 @@ function ActiveStreamsSection() {
                   <td className="px-2 py-2 text-neutral-300">
                     {formatRelative(r.started_at)}
                   </td>
-                  <td className="px-2 py-2 text-right font-mono text-xs text-neutral-400">
+                  <td className="px-2 py-2 text-right font-sans text-xs text-neutral-400">
                     {formatBytes(r.bytes_served)}
                   </td>
                 </tr>
@@ -548,7 +548,7 @@ function RecentHistorySection() {
                   </td>
                   <td className="px-2 py-2">{r.user_display_name}</td>
                   <td className="px-2 py-2 text-neutral-200">{r.title}</td>
-                  <td className="px-2 py-2 text-right font-mono text-xs text-neutral-400">
+                  <td className="px-2 py-2 text-right font-sans text-xs text-neutral-400">
                     {formatPosition(r.last_position_sec)}
                   </td>
                 </tr>
@@ -824,7 +824,7 @@ function AuthEventsSection() {
                   <td className="px-2 py-2 text-neutral-300">{formatRelative(e.at)}</td>
                   <td className="px-2 py-2">{e.username ?? <span className="text-neutral-500">unknown</span>}</td>
                   <td className="px-2 py-2 text-neutral-200">{e.event}</td>
-                  <td className="px-2 py-2 font-mono text-xs text-neutral-400">{e.ip ?? "-"}</td>
+                  <td className="px-2 py-2 font-sans text-xs text-neutral-400">{e.ip ?? "-"}</td>
                 </tr>
               ))}
             </tbody>

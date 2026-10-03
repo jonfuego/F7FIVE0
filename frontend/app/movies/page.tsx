@@ -134,7 +134,7 @@ export default function MoviesPage() {
               style={{
                 width: "100%",
                 aspectRatio: "2/3",
-                background: "oklch(0.18 0.012 60)",
+                background: "var(--surface-2)",
                 borderRadius: 6,
                 animation: "pulse 1.6s var(--ease) infinite",
               }}

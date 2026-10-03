@@ -1,4 +1,4 @@
-// Movie detail. Full-bleed item-color hero, Bebas title, meta row,
+// Movie detail. Full-bleed hero, display title, meta row,
 // description, primary Play + secondary actions, cast row, directors
 // line, technical metadata block in mono.
 
@@ -108,9 +108,9 @@ export default function MovieDetailPage() {
           style={{
             margin: "16px 64px",
             padding: "12px 16px",
-            border: "1px solid oklch(0.40 0.20 25 / 0.4)",
+            border: "1px solid var(--danger)",
             borderRadius: 4,
-            color: "oklch(0.85 0.10 25)",
+            color: "var(--danger)",
             fontFamily: "var(--mono)",
             fontSize: 12,
           }}
@@ -287,7 +287,7 @@ function CastRow({ cast }: { cast: CastMember[] }) {
 
 function TechnicalCard({ file }: { file: MediaFile }) {
   return (
-    <div className="cards font-mono">
+    <div className="cards font-sans">
       <div className="card">
         <h4>File Information</h4>
         <div className="row"><span>Codec</span><span>{file.video_codec?.toUpperCase() ?? "—"}</span></div>
@@ -367,7 +367,7 @@ function DetailSkeleton() {
         <div
           className="poster-card"
           style={{
-            background: "oklch(0.18 0.012 60)",
+            background: "var(--surface-2)",
           }}
         />
         <div className="info">

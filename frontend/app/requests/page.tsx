@@ -363,7 +363,7 @@ function AdminQueueSection() {
 
 function StatusChip({ status }: { status: RequestStatus }) {
   const map: Record<RequestStatus, string> = {
-    pending: "bg-amber-900/40 text-amber-300",
+    pending: "bg-hive-tint text-hive-text",
     approved: "bg-sky-900/40 text-sky-300",
     denied: "bg-neutral-800 text-neutral-400",
     available: "bg-emerald-900/40 text-emerald-300",

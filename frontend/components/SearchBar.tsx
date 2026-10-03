@@ -1,5 +1,5 @@
 // Client-side filter input for library pages, restyled for the Marquee
-// look. Mono font, pill border, amber focus ring. Used by the four
+// look. Archivo, squared border, focus ring. Used by the four
 // browse pages to narrow an already-loaded list locally.
 
 "use client";
@@ -31,7 +31,7 @@ export function SearchBar({ value, onChange, placeholder }: Props) {
         style={{
           width: "100%",
           padding: "9px 36px 9px 16px",
-          background: "oklch(0.20 0.012 60 / 0.6)",
+          background: "var(--surface-3)",
           border: "1px solid var(--line)",
           borderRadius: 999,
           fontFamily: "var(--mono)",

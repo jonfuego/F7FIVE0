@@ -53,6 +53,8 @@ import { apiPut } from "@/lib/client-api";
 import type { MediaMarker, Progress, StreamStart } from "@/lib/types";
 import CastButton from "./CastButton";
 import { useCast } from "@/lib/cast";
+import { Icon } from "@/components/Icon";
+import { Settings, Check, Cast } from "lucide-react";
 import { loadFeatures, useFeatures } from "@/lib/features";
 import {
   CPU_START_HEIGHT,
@@ -530,7 +532,7 @@ export function Player({
             <button
               type="button"
               onClick={() => cast.endSession(true)}
-              className="rounded-md bg-amber-500 px-3 py-1.5 text-xs font-medium text-neutral-950 transition hover:bg-amber-400"
+              className="rounded-md bg-hive px-3 py-1.5 text-xs font-medium text-on-hive transition hover:bg-hive-hover"
             >
               Stop casting
             </button>
@@ -728,7 +730,7 @@ function MenuItem({
       aria-checked={selected}
       onClick={onClick}
       className={`flex w-full items-center justify-between gap-3 px-3 py-1.5 text-left transition hover:bg-neutral-900 ${
-        selected ? "text-amber-400" : "text-neutral-200"
+        selected ? "text-hive-text" : "text-neutral-200"
       }`}
     >
       <span>{label}</span>
@@ -738,60 +740,13 @@ function MenuItem({
 }
 
 function GearIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 24 24"
-      width="14"
-      height="14"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <circle cx="12" cy="12" r="3" />
-      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-    </svg>
-  );
+  return <Icon icon={Settings} size={14} aria-hidden="true" />;
 }
 
 function CheckIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 24 24"
-      width="12"
-      height="12"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="3"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M4 12l5 5L20 6" />
-    </svg>
-  );
+  return <Icon icon={Check} size={12} aria-hidden="true" />;
 }
 
 function CastPlayingIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 24 24"
-      width="48"
-      height="48"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className="text-amber-400"
-    >
-      <path d="M2 16a6 6 0 0 1 6 6" />
-      <path d="M2 12a10 10 0 0 1 10 10" />
-      <path d="M2 8a14 14 0 0 1 14 14" />
-      <rect x="2" y="4" width="20" height="16" rx="2" />
-    </svg>
-  );
+  return <Icon icon={Cast} size={48} aria-hidden="true" className="text-hive-text" />;
 }

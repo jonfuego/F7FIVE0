@@ -570,7 +570,7 @@ function AnywhereCard() {
           <img src={qr} alt={`QR code for ${url}`} width={176} height={176} className="rounded-md" />
         ) : null}
         <div className="min-w-0">
-          <p className="break-all font-mono text-sm text-neutral-200">{url}</p>
+          <p className="break-all font-sans text-sm text-neutral-200">{url}</p>
           <button
             type="button"
             onClick={() => void navigator.clipboard?.writeText(url)}
@@ -622,7 +622,7 @@ function AndroidAppCard() {
           <a
             href="/download/android"
             download={apk.name}
-            className="mt-4 inline-flex items-center rounded-md bg-amber-500 px-4 py-2 text-sm font-semibold text-neutral-950 hover:bg-amber-400"
+            className="mt-4 inline-flex items-center rounded-md bg-hive px-4 py-2 text-sm font-semibold text-on-hive hover:bg-hive-hover"
           >
             Download for Android
           </a>

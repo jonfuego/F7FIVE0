@@ -114,7 +114,7 @@ export default function MusicPage() {
               style={{
                 width: "100%",
                 aspectRatio: "1/1",
-                background: "oklch(0.18 0.012 60)",
+                background: "var(--surface-2)",
                 borderRadius: 4,
               }}
             />

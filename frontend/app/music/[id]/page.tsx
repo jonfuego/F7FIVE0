@@ -1,4 +1,4 @@
-// Album detail. Marquee hero with item-color tint, Bebas title, meta
+// Album detail. Hero with the display title, meta
 // row (artist · year · type), tagline-style disambiguation, primary Play
 // album + Shuffle + Add-to-queue actions, links chips, technical metadata
 // for the first track's file, and the full track list.
@@ -64,9 +64,9 @@ export default function AlbumDetailPage() {
           style={{
             margin: "16px 64px",
             padding: "12px 16px",
-            border: "1px solid oklch(0.40 0.20 25 / 0.4)",
+            border: "1px solid var(--danger)",
             borderRadius: 4,
-            color: "oklch(0.85 0.10 25)",
+            color: "var(--danger)",
             fontFamily: "var(--mono)",
             fontSize: 12,
           }}
@@ -315,7 +315,7 @@ function AlbumSkeleton() {
       <div className="body">
         <div
           className="poster-card album"
-          style={{ background: "oklch(0.18 0.012 60)" }}
+          style={{ background: "var(--surface-2)" }}
         />
         <div className="info">
           <div className="kicker">Loading…</div>

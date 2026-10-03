@@ -27,6 +27,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { formatDuration } from "@/lib/format";
+import { Icon } from "@/components/Icon";
+import { Play, Pause, Volume2, VolumeX, Maximize, Minimize } from "lucide-react";
 
 type Props = {
   // The live <video>, or null before <Player> mounts it / after it unmounts.
@@ -305,49 +307,25 @@ export function VideoTransport({ videoEl, durationSec, offsetSec = 0, onSeekBefo
 }
 
 function PlayIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="30" height="30" fill="currentColor" aria-hidden>
-      <path d="M8 5v14l11-7z" />
-    </svg>
-  );
+  return <Icon icon={Play} size={30} fill aria-hidden="true" />;
 }
 
 function PauseIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="30" height="30" fill="currentColor" aria-hidden>
-      <path d="M6 5h4v14H6zM14 5h4v14h-4z" />
-    </svg>
-  );
+  return <Icon icon={Pause} size={30} fill aria-hidden="true" />;
 }
 
 function VolumeIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden>
-      <path d="M3 10v4h4l5 5V5L7 10H3zm13.5 2a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4z" />
-    </svg>
-  );
+  return <Icon icon={Volume2} size={22} aria-hidden="true" />;
 }
 
 function MuteIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden>
-      <path d="M3 10v4h4l5 5V5L7 10H3zm16.5 2 2.3-2.3-1.4-1.4-2.3 2.3-2.3-2.3-1.4 1.4 2.3 2.3-2.3 2.3 1.4 1.4 2.3-2.3 2.3 2.3 1.4-1.4-2.3-2.3z" />
-    </svg>
-  );
+  return <Icon icon={VolumeX} size={22} aria-hidden="true" />;
 }
 
 function FullscreenIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <path d="M4 9V5a1 1 0 0 1 1-1h4M20 9V5a1 1 0 0 0-1-1h-4M4 15v4a1 1 0 0 0 1 1h4M20 15v4a1 1 0 0 1-1 1h-4" />
-    </svg>
-  );
+  return <Icon icon={Maximize} size={22} aria-hidden="true" />;
 }
 
 function FullscreenExitIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <path d="M9 4v4a1 1 0 0 1-1 1H4M15 4v4a1 1 0 0 0 1 1h4M9 20v-4a1 1 0 0 0-1-1H4M15 20v-4a1 1 0 0 1 1-1h4" />
-    </svg>
-  );
+  return <Icon icon={Minimize} size={22} aria-hidden="true" />;
 }

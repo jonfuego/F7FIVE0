@@ -106,9 +106,9 @@ export default function SeriesDetailPage() {
           style={{
             margin: "16px 64px",
             padding: "12px 16px",
-            border: "1px solid oklch(0.40 0.20 25 / 0.4)",
+            border: "1px solid var(--danger)",
             borderRadius: 4,
-            color: "oklch(0.85 0.10 25)",
+            color: "var(--danger)",
             fontFamily: "var(--mono)",
             fontSize: 12,
           }}
@@ -231,8 +231,8 @@ function SeriesHero({
 
           {sampleFile ? (
             // Mono technical block: codec, bitrate, container, file size,
-            // file path. font-mono is wired to var(--mono).
-            <div className="cards font-mono">
+            // file path. font-sans is wired to var(--mono).
+            <div className="cards font-sans">
               <div className="card">
                 <h4>File Information</h4>
                 <div className="row"><span>Codec</span><span>{sampleFile.video_codec?.toUpperCase() ?? "—"}</span></div>
@@ -344,7 +344,7 @@ function EpisodeRow({ ep }: { ep: Episode }) {
           </div>
         ) : null}
         {effective ? (
-          <span style={{ color: "var(--bulb)", fontSize: 10 }}>watched</span>
+          <span style={{ color: "var(--hive-text)", fontSize: 10 }}>watched</span>
         ) : null}
       </div>
     </>
@@ -468,7 +468,7 @@ function SeriesSkeleton() {
       <div className="body">
         <div
           className="poster-card"
-          style={{ background: "oklch(0.18 0.012 60)" }}
+          style={{ background: "var(--surface-2)" }}
         />
         <div className="info">
           <div className="kicker">Loading…</div>

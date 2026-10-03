@@ -16,6 +16,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Icon } from "@/components/Icon";
+import { X } from "lucide-react";
 
 export type ArtKind = "artist" | "movie" | "series" | "music_video";
 export type ArtRole = "thumb" | "poster" | "backdrop";
@@ -258,17 +260,7 @@ export function ArtOverrideModal({
             className="rounded p-1 text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100"
             aria-label="Close"
           >
-            <svg
-              className="h-4 w-4"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M18 6 6 18M6 6l12 12" />
-            </svg>
+            <Icon icon={X} size={16} />
           </button>
         </div>
 
@@ -311,7 +303,7 @@ export function ArtOverrideModal({
                   type="button"
                   onClick={handleUpload}
                   disabled={busy}
-                  className="rounded bg-amber-500 px-3 py-1.5 text-sm font-medium text-neutral-950 hover:bg-amber-400 disabled:opacity-50"
+                  className="rounded bg-hive px-3 py-1.5 text-sm font-medium text-on-hive hover:bg-hive-hover disabled:opacity-50"
                 >
                   {busy ? "Uploading..." : "Apply"}
                 </button>
@@ -327,7 +319,7 @@ export function ArtOverrideModal({
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
                 placeholder="https://..."
-                className="block w-full rounded border border-neutral-800 bg-neutral-950 px-3 py-1.5 text-sm text-neutral-100 placeholder-neutral-500 focus:border-amber-500 focus:outline-none"
+                className="block w-full rounded border border-neutral-800 bg-neutral-950 px-3 py-1.5 text-sm text-neutral-100 placeholder-neutral-500 focus:border-ink focus:outline-none"
               />
               <div className="flex justify-end gap-2 pt-2">
                 {hasOverride ? (
@@ -344,7 +336,7 @@ export function ArtOverrideModal({
                   type="button"
                   onClick={handleFromUrl}
                   disabled={busy}
-                  className="rounded bg-amber-500 px-3 py-1.5 text-sm font-medium text-neutral-950 hover:bg-amber-400 disabled:opacity-50"
+                  className="rounded bg-hive px-3 py-1.5 text-sm font-medium text-on-hive hover:bg-hive-hover disabled:opacity-50"
                 >
                   {busy ? "Fetching..." : "Apply"}
                 </button>
@@ -421,7 +413,7 @@ function SearchPanel({
               type="button"
               onClick={() => onPick(c)}
               disabled={busy}
-              className="group flex flex-col items-stretch overflow-hidden rounded border border-neutral-800 bg-neutral-950 text-left transition hover:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500 disabled:opacity-50"
+              className="group flex flex-col items-stretch overflow-hidden rounded border border-neutral-800 bg-neutral-950 text-left transition hover:border-hive focus:outline-none focus:ring-1 focus:ring-focus disabled:opacity-50"
               aria-label={`Apply ${c.label}`}
             >
               <div className="aspect-[2/3] w-full overflow-hidden bg-neutral-900">
@@ -471,7 +463,7 @@ function TabButton({
       onClick={onClick}
       className={`rounded-t px-3 py-1.5 text-sm ${
         active
-          ? "border-b-2 border-amber-500 text-neutral-100"
+          ? "border-b-2 border-hive text-neutral-100"
           : "text-neutral-400 hover:text-neutral-200"
       }`}
     >

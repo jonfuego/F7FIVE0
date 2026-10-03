@@ -1,4 +1,4 @@
-// A horizontal cinema rail. Kicker (mono caps) + Bebas title on the left,
+// A horizontal cinema rail. Kicker (caps) + display title on the left,
 // "All →" link on the right, doubled-up scroll-snap track of poster
 // children below. Used on the home page exclusively; library pages use
 // Grid instead.

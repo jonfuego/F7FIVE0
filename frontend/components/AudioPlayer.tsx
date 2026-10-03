@@ -27,6 +27,8 @@ import { apiPut } from "@/lib/client-api";
 import type { Progress, StreamStart } from "@/lib/types";
 import CastButton from "./CastButton";
 import { useCast } from "@/lib/cast";
+import { Icon } from "@/components/Icon";
+import { Music } from "lucide-react";
 
 type Props = {
   stream: StreamStart;
@@ -299,7 +301,7 @@ export function AudioPlayer({
         </div>
 
         {isCasting ? (
-          <div className="mt-5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
+          <div className="mt-5 rounded-lg border border-hive bg-hive-tint px-3 py-2 text-sm text-ink">
             <div className="flex items-center justify-between gap-3">
               <div className="truncate">
                 Casting to {cast.deviceName ?? "your device"}
@@ -308,14 +310,14 @@ export function AudioPlayer({
                 <button
                   type="button"
                   onClick={cast.playPause}
-                  className="rounded-md border border-amber-400/40 px-2.5 py-1 text-xs text-amber-50 transition hover:border-amber-300"
+                  className="rounded-md border border-hive px-2.5 py-1 text-xs text-ink transition hover:border-hive"
                 >
                   {cast.isPaused ? "Play" : "Pause"}
                 </button>
                 <button
                   type="button"
                   onClick={() => cast.endSession(true)}
-                  className="rounded-md bg-amber-500 px-2.5 py-1 text-xs font-medium text-neutral-950 transition hover:bg-amber-400"
+                  className="rounded-md bg-hive px-2.5 py-1 text-xs font-medium text-on-hive transition hover:bg-hive-hover"
                 >
                   Stop
                 </button>
@@ -329,21 +331,5 @@ export function AudioPlayer({
 }
 
 function NoteIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 24 24"
-      width="32"
-      height="32"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M9 18V5l12-2v13" />
-      <circle cx="6" cy="18" r="3" />
-      <circle cx="18" cy="16" r="3" />
-    </svg>
-  );
+  return <Icon icon={Music} size={32} aria-hidden="true" />;
 }

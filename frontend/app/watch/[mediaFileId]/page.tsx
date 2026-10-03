@@ -11,6 +11,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
+import { Icon } from "@/components/Icon";
+import { SkipBack, SkipForward, Play, Pause, ListMusic } from "lucide-react";
 import { Player } from "@/components/Player";
 import { VideoTransport } from "@/components/VideoTransport";
 import { QueuePanel } from "@/components/QueuePanel";
@@ -125,6 +127,7 @@ export default function WatchPage() {
       router.replace(`/watch/${queueCurrent.media_file_id}`);
     }
     linkedRef.current = linkedToDock;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [linkedToDock, queueCurrent?.media_file_id, mediaFileId, router]);
 
   // Clear `followingQueue` once the route has caught up.
@@ -290,6 +293,7 @@ export default function WatchPage() {
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mediaFileId]);
 
   useEffect(() => {
@@ -559,11 +563,11 @@ function ErrorBox({ message, onRetry }: { message: string; onRetry: () => void }
       <div
         style={{
           background: "var(--bg-2)",
-          border: "1px solid oklch(0.40 0.20 25 / 0.4)",
+          border: "1px solid var(--danger)",
           borderRadius: 8,
           padding: "24px 28px",
           maxWidth: 480,
-          color: "oklch(0.90 0.10 25)",
+          color: "var(--danger)",
         }}
       >
         <div
@@ -575,7 +579,7 @@ function ErrorBox({ message, onRetry }: { message: string; onRetry: () => void }
             marginBottom: 8,
           }}
         >
-          Can't play this file
+          Can&apos;t play this file
         </div>
         <p
           style={{
@@ -693,7 +697,7 @@ function DockLinkedView({
             aspectRatio: "1/1",
             borderRadius: 12,
             objectFit: "cover",
-            boxShadow: "0 24px 60px oklch(0 0 0 / 0.4)",
+            boxShadow: "0 24px 60px var(--scrim)",
           }}
         />
       ) : (
@@ -761,9 +765,7 @@ function DockLinkedView({
           aria-label="Previous"
           style={iconButtonStyle}
         >
-          <svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor" aria-hidden>
-            <path d="M6 6h2v12H6zM20 6L9 12l11 6z" />
-          </svg>
+          <Icon icon={SkipBack} size={26} fill />
         </button>
         <button
           type="button"
@@ -773,21 +775,17 @@ function DockLinkedView({
             width: 76,
             height: 76,
             borderRadius: "50%",
-            background: "var(--bulb)",
-            color: "oklch(0.13 0.012 60)",
+            background: "var(--hive)",
+            color: "var(--on-hive)",
             display: "grid",
             placeItems: "center",
-            boxShadow: "0 0 24px var(--bulb-glow)",
+            boxShadow: "0 0 24px transparent",
           }}
         >
           {paused ? (
-            <svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor" aria-hidden>
-              <path d="M8 5v14l11-7z" />
-            </svg>
+            <Icon icon={Play} size={28} fill />
           ) : (
-            <svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor" aria-hidden>
-              <path d="M6 5h4v14H6zM14 5h4v14h-4z" />
-            </svg>
+            <Icon icon={Pause} size={28} fill />
           )}
         </button>
         <button
@@ -796,9 +794,7 @@ function DockLinkedView({
           aria-label="Next"
           style={iconButtonStyle}
         >
-          <svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor" aria-hidden>
-            <path d="M16 6h2v12h-2zM4 6l11 6-11 6z" />
-          </svg>
+          <Icon icon={SkipForward} size={26} fill />
         </button>
         <button
           type="button"
@@ -806,9 +802,7 @@ function DockLinkedView({
           aria-label="Open queue"
           style={iconButtonStyle}
         >
-          <svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor" aria-hidden>
-            <path d="M3 6h13v2H3zm0 5h13v2H3zm0 5h9v2H3zm15-5l5 3-5 3z" />
-          </svg>
+          <Icon icon={ListMusic} size={26} />
         </button>
       </div>
     </div>

@@ -8,7 +8,9 @@
 "use client";
 
 import { useState } from "react";
+import { Circle, CircleCheck } from "lucide-react";
 import { apiDelete, apiPost } from "@/lib/client-api";
+import { Icon } from "@/components/Icon";
 
 type Props = {
   mediaFileId: string;
@@ -54,40 +56,8 @@ export function MarkWatchedButton({
       title={label}
       className={`inline-flex items-center gap-1.5 rounded-md border border-neutral-800 text-neutral-200 transition hover:border-neutral-600 hover:text-white disabled:opacity-60 ${padding}`}
     >
-      {isWatched ? <CheckFilled /> : <CheckOutline />}
+      {isWatched ? <Icon icon={CircleCheck} size={14} /> : <Icon icon={Circle} size={14} />}
       {label}
     </button>
-  );
-}
-
-function CheckFilled() {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 20 20" width="14" height="14" fill="currentColor">
-      <circle cx="10" cy="10" r="9" />
-      <path
-        d="M5.5 10.5l3 3 6-6"
-        stroke="#0a0a0a"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        fill="none"
-      />
-    </svg>
-  );
-}
-
-function CheckOutline() {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 20 20"
-      width="14"
-      height="14"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-    >
-      <circle cx="10" cy="10" r="8.5" />
-    </svg>
   );
 }

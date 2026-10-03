@@ -25,6 +25,8 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import Link from "next/link";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { GripVertical, X } from "lucide-react";
+import { Icon } from "@/components/Icon";
 import { apiGet } from "@/lib/client-api";
 import {
   useQueue,
@@ -106,7 +108,7 @@ export function QueuePanel({ open, onClose }: Props) {
               aria-pressed={shuffle}
               className={`rounded-md border px-2.5 py-1 text-xs transition ${
                 shuffle
-                  ? "border-amber-500/60 bg-amber-500/10 text-amber-200"
+                  ? "border-hive bg-hive-tint text-hive-text"
                   : "border-neutral-800 text-neutral-300 hover:border-neutral-600 hover:text-white"
               }`}
             >
@@ -118,7 +120,7 @@ export function QueuePanel({ open, onClose }: Props) {
               aria-pressed={repeat !== "off"}
               className={`rounded-md border px-2.5 py-1 text-xs transition ${
                 repeat !== "off"
-                  ? "border-amber-500/60 bg-amber-500/10 text-amber-200"
+                  ? "border-hive bg-hive-tint text-hive-text"
                   : "border-neutral-800 text-neutral-300 hover:border-neutral-600 hover:text-white"
               }`}
             >
@@ -306,7 +308,7 @@ function SortableRow({ id, item, active, onJump, onRemove }: SortableRowProps) {
     <li ref={setNodeRef} style={style}>
       <div
         className={`flex items-center gap-2 px-2 py-2.5 ${
-          active ? "bg-amber-500/10" : "hover:bg-neutral-900/60"
+          active ? "bg-hive-tint" : "hover:bg-neutral-900/60"
         }`}
       >
         <button
@@ -342,7 +344,7 @@ function SortableRow({ id, item, active, onJump, onRemove }: SortableRowProps) {
           <div className="min-w-0 flex-1">
             <div
               className={`truncate text-sm ${
-                active ? "text-amber-200" : "text-neutral-100"
+                active ? "text-hive-text" : "text-neutral-100"
               }`}
             >
               {item.title}
@@ -352,7 +354,7 @@ function SortableRow({ id, item, active, onJump, onRemove }: SortableRowProps) {
                 <Link
                   href={artistHref}
                   onClick={(e) => e.stopPropagation()}
-                  className="text-neutral-400 hover:text-amber-200 hover:underline"
+                  className="text-neutral-400 hover:text-hive-text hover:underline"
                 >
                   {item.artist_name ?? "Unknown artist"}
                 </Link>
@@ -366,7 +368,7 @@ function SortableRow({ id, item, active, onJump, onRemove }: SortableRowProps) {
                     <Link
                       href={albumHref}
                       onClick={(e) => e.stopPropagation()}
-                      className="text-neutral-400 hover:text-amber-200 hover:underline"
+                      className="text-neutral-400 hover:text-hive-text hover:underline"
                     >
                       {item.album_title}
                     </Link>
@@ -385,7 +387,7 @@ function SortableRow({ id, item, active, onJump, onRemove }: SortableRowProps) {
             aria-label="Track actions"
             aria-haspopup="menu"
             aria-expanded={menuOpen}
-            className="rounded-md px-2 py-1 font-mono text-base leading-none text-neutral-400 transition hover:bg-neutral-900 hover:text-neutral-100"
+            className="rounded-md px-2 py-1 font-sans text-base leading-none text-neutral-400 transition hover:bg-neutral-900 hover:text-neutral-100"
           >
             ⋮
           </button>
@@ -446,22 +448,9 @@ function SortableRow({ id, item, active, onJump, onRemove }: SortableRowProps) {
 }
 
 function CloseIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-      <path d="M6 6l12 12M18 6L6 18" strokeLinecap="round" />
-    </svg>
-  );
+  return <Icon icon={X} size={16} />;
 }
 
 function GripIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true">
-      <circle cx="9" cy="5" r="1.5" />
-      <circle cx="9" cy="12" r="1.5" />
-      <circle cx="9" cy="19" r="1.5" />
-      <circle cx="15" cy="5" r="1.5" />
-      <circle cx="15" cy="12" r="1.5" />
-      <circle cx="15" cy="19" r="1.5" />
-    </svg>
-  );
+  return <Icon icon={GripVertical} size={14} />;
 }
