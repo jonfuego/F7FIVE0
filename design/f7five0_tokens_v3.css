@@ -1,4 +1,4 @@
-/* F7FIVE0 design tokens v1. Generated from tokens.json. Dark is the default theme. */
+/* F7FIVE0 design tokens v3. Generated from tokens.json. Dark is the default theme. */
 
 :root, [data-theme="dark"] {
   --bg: #000000;
@@ -10,9 +10,9 @@
   --ink: #ffffff;
   --ink-2: #c4c4c4;
   --ink-3: #9a9a9a;
-  --hive: #970002;
-  --hive-hover: #b3070a;
-  --hive-press: #7d0002;
+  --hive: #9c0404;
+  --hive-hover: #b50808;
+  --hive-press: #820303;
   --hive-text: #ff5c5e;
   --hive-tint: #2b0a0a;
   --on-hive: #ffffff;
@@ -21,9 +21,10 @@
   --positive: #5cc8ff;
   --warning: #f2b33d;
   --danger: var(--hive-text);
+  --logo-plate: #ffffff;
   --scrim: rgba(0, 0, 0, 0.72);
-  --shadow-hive: 6px 6px 0 0 #970002;
-  --shadow-hive-s: 3px 3px 0 0 #970002;
+  --shadow-hive: 6px 6px 0 0 #9c0404;
+  --shadow-hive-s: 3px 3px 0 0 #9c0404;
   --shadow-overlay: 0 16px 48px 0 rgba(0, 0, 0, 0.8);
 }
 
@@ -37,10 +38,10 @@
   --ink: #000000;
   --ink-2: #3a3a3a;
   --ink-3: #595959;
-  --hive: #970002;
-  --hive-hover: #7d0002;
-  --hive-press: #650002;
-  --hive-text: #970002;
+  --hive: #9c0404;
+  --hive-hover: #820303;
+  --hive-press: #6a0202;
+  --hive-text: #9c0404;
   --hive-tint: #f8e6e6;
   --on-hive: #ffffff;
   --hive-mark: var(--hive);
@@ -48,6 +49,7 @@
   --positive: #005f9e;
   --warning: #7f5100;
   --danger: var(--hive);
+  --logo-plate: #ffffff;
   --scrim: rgba(0, 0, 0, 0.56);
   --shadow-overlay: 0 16px 48px 0 rgba(0, 0, 0, 0.18);
 }
