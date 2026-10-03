@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Hidden HIVE preview</title>
+<style>
+/* F7FIVE0 Hidden HIVE wordmark. Import once (e.g. from app/globals.css).
+   Timeline (2.4 s): black steps back and fades (0-0.3 s), H right stem and I close up
+   (0.25-0.7 s), HIVE holds (to 1.6 s), pieces return (1.6-1.95 s), black snaps back (to 2.4 s). */
+
+.f7-hive { display: inline-flex; align-items: center; line-height: 0; }
+.f7-hive-svg { display: block; overflow: visible; }
+.f7-hive-red { fill: #9C0404; }   /* hive */
+.f7-hive-black { fill: #000000; }
+
+/* White plate off white grounds: always in dark, never bare on black. */
+.f7-hive-plate-always, [data-theme="dark"] .f7-hive-plate-auto, :root:not([data-theme]) .f7-hive-plate-auto {
+  background: #FFFFFF; padding: var(--f7-hive-pad);
+}
+
+.f7-hive-svg.is-playing .f7-hive-black { animation: f7-hive-black 2.4s cubic-bezier(.2,.7,.2,1) both; }
+.f7-hive-svg.is-playing .f7-hive-hr    { animation: f7-hive-hr 2.4s both; }
+.f7-hive-svg.is-playing .f7-hive-i     { animation: f7-hive-i 2.4s both; }
+
+@keyframes f7-hive-black {
+  0%    { opacity: 1; transform: translateX(0); }
+  12.5% { opacity: 0; transform: translateX(-10px); }
+  81%   { opacity: 0; transform: translateX(-10px); animation-timing-function: cubic-bezier(.5,0,.75,0); }
+  96%   { opacity: 1; transform: translateX(1px); }
+  100%  { opacity: 1; transform: translateX(0); }
+}
+@keyframes f7-hive-hr {
+  0%, 10%  { transform: translateX(0); animation-timing-function: cubic-bezier(.2,.7,.2,1); }
+  29%, 67% { transform: translateX(-40px); animation-timing-function: cubic-bezier(.5,0,.75,0); }
+  81%, 100% { transform: translateX(0); }
+}
+@keyframes f7-hive-i {
+  0%, 12%  { transform: translateX(0); animation-timing-function: cubic-bezier(.2,.7,.2,1); }
+  29%, 67% { transform: translateX(-13px); animation-timing-function: cubic-bezier(.5,0,.75,0); }
+  81%, 100% { transform: translateX(0); }
+}
+/* SVG user units: translateX in px maps to viewBox units because the transform is on SVG <g> elements. */
+
+@media (prefers-reduced-motion: reduce) {
+  /* No sliding: the pieces jump while the black is gone; only fades remain. */
+  .f7-hive-svg.is-playing .f7-hive-black { animation-name: f7-hive-black-fade; }
+  .f7-hive-svg.is-playing .f7-hive-hr { animation-name: f7-hive-hr-jump; }
+  .f7-hive-svg.is-playing .f7-hive-i  { animation-name: f7-hive-i-jump; }
+}
+@keyframes f7-hive-black-fade { 0% { opacity: 1; } 12.5%, 81% { opacity: 0; } 100% { opacity: 1; } }
+@keyframes f7-hive-hr-jump { 0%, 12.4% { transform: translateX(0); } 12.5%, 80.9% { transform: translateX(-40px); } 81%, 100% { transform: translateX(0); } }
+@keyframes f7-hive-i-jump  { 0%, 12.4% { transform: translateX(0); } 12.5%, 80.9% { transform: translateX(-13px); } 81%, 100% { transform: translateX(0); } }
+
+body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #fff; font: 500 14px/20px system-ui, sans-serif; color: #595959; }
+[data-theme="dark"] body { background: #000; color: #9a9a9a; }
+.wrap { display: grid; justify-items: center; gap: 16px; padding: 24px; }
+a.f7-hive { cursor: pointer; }
+button { font: inherit; border: 1px solid currentColor; background: none; color: inherit; padding: 6px 12px; cursor: pointer; }
+</style></head>
+<body>
+<div class="wrap">
+  <a class="f7-hive f7-hive-plate-auto" style="--f7-hive-pad:30px" id="logo" aria-label="F7FIVE0"><svg class="f7-hive-svg" viewBox="0 0 1476 298" height="120" width="594" aria-hidden="true"><g class="f7-hive-red"><g><path transform="translate(0 298) scale(0.1 -0.1)" d="M4920 1535 l0 -1445 150 0 150 0 0 620 0 620 630 0 630 0 0 250 0
+250 -630 0 -630 0 0 575 0 575 -150 0 -150 0 0 -1445z"/></g><g class="f7-hive-hr"><path transform="translate(0 298) scale(0.1 -0.1)" d="M6880 1535 l0 -1445 105 0 105 0 0 1445 0 1445 -105 0 -105 0 0
+-1445z"/></g><g class="f7-hive-i"><path transform="translate(0 298) scale(0.1 -0.1)" d="M7250 1535 l0 -1445 110 0 110 0 0 1445 0 1445 -110 0 -110 0 0
+-1445z"/></g><g><path transform="translate(0 298) scale(0.1 -0.1)" d="M8027 2973 l91 -4 7 -17 c4 -9 198 -582 431 -1272 234 -690 429
+-1258 433 -1263 4 -4 173 518 376 1160 203 643 385 1221 406 1286 l37 117 -97
+0 -97 0 -314 -1085 c-172 -597 -315 -1083 -317 -1081 -2 1 -147 489 -322 1082
+l-318 1079 -204 1 c-112 0 -163 -1 -112 -3z"/></g><g><path transform="translate(0 298) scale(0.1 -0.1)" d="M10570 1540 l0 -1250 845 0 845 0 0 145 0 145 -740 0 -740 0 0 375 0
+375 748 2 c411 1 705 4 655 5 l-93 4 0 244 0 245 -655 0 -655 0 0 328 0 327
+745 -4 745 -3 0 156 0 156 -850 0 -850 0 0 -1250z"/></g></g><g class="f7-hive-black"><path transform="translate(0 298) scale(0.1 -0.1)" d="M0 1535 l0 -1445 300 0 300 0 0 620 0 620 630 0 630 0 0 250 0 250
+-630 0 -630 0 0 325 0 325 715 0 715 0 0 250 0 250 -1015 0 -1015 0 0 -1445z
+M4610 1535 l0 -1445 155 0 155 0 0 1445 0 1445 -155 0 -155 0 0 -1445z M5220
+2730 l0 -250 715 0 715 0 0 250 0 250 -715 0 -715 0 0 -250z M7090 1535 l0
+-1445 80 0 80 0 0 1445 0 1445 -80 0 -80 0 0 -1445z M8006 2204 c144 -429 363
+-1078 487 -1444 l224 -665 253 0 253 0 487 1420 c268 781 490 1430 494 1443
+l7 22 -202 -2 -203 -3 -405 -1282 c-222 -705 -407 -1280 -411 -1278 -4 2 -199
+573 -435 1268 -235 696 -430 1269 -434 1275 -3 6 -85 13 -192 17 l-186 8 263
+-779z M10380 1535 l0 -1445 1040 0 1040 0 0 245 0 245 -100 0 -100 0 0 -145 0
+-145 -845 0 -845 0 0 1250 0 1250 850 0 850 0 0 -155 0 -155 100 0 100 0 0
+250 0 250 -1045 0 -1045 0 0 -1445z M13687 2949 c-337 -36 -612 -245 -736
+-561 -86 -219 -122 -485 -122 -914 0 -870 216 -1316 701 -1446 l85 -22 180 0
+180 1 80 22 c379 103 589 398 670 939 50 336 35 920 -31 1212 -81 359 -258
+588 -548 709 -126 52 -309 76 -459 60z m260 -474 c125 -62 193 -216 235 -535
+17 -129 17 -767 0 -915 -30 -261 -64 -364 -150 -450 -80 -79 -183 -111 -305
+-94 -175 24 -270 168 -318 483 -26 170 -37 624 -20 846 33 444 116 633 302
+685 79 22 186 14 256 -20z M2240 2650 l0 -250 701 0 700 0 -49 -57 c-115 -133
+-334 -456 -471 -695 -141 -246 -267 -570 -347 -892 -34 -138 -96 -478 -110
+-604 l-7 -62 279 2 279 3 3 40 c1 22 9 105 18 185 79 730 359 1363 901 2038
+l83 103 0 219 0 220 -990 0 -990 0 0 -250z M10780 2160 l0 -330 100 0 100 0 0
+330 0 330 -100 0 -100 0 0 -330z M12090 1585 l0 -245 90 0 90 0 0 245 0 245
+-90 0 -90 0 0 -245z M10780 955 l0 -375 100 0 100 0 0 375 0 375 -100 0 -100
+0 0 -375z"/></g></svg></a>
+  <div id="hint">Tap the logo 7 times.</div>
+  <div><button id="theme">Toggle dark</button> <button id="play">Play now</button></div>
+</div>
+<script>
+  var svg = document.querySelector('.f7-hive-svg'), n = 0, last = 0, playing = false;
+  function play() {
+    if (playing) return; playing = true;
+    svg.classList.remove('is-playing'); void svg.getBoundingClientRect(); svg.classList.add('is-playing');
+    setTimeout(function () { svg.classList.remove('is-playing'); playing = false; }, 2400);
+  }
+  document.getElementById('logo').addEventListener('click', function (e) {
+    e.preventDefault(); var now = performance.now();
+    n = now - last <= 600 ? n + 1 : 1; last = now;
+    document.getElementById('hint').textContent = n < 7 ? (7 - n) + ' more' : 'HIVE';
+    if (n >= 7) { n = 0; play(); setTimeout(function () { document.getElementById('hint').textContent = 'Tap the logo 7 times.'; }, 2400); }
+  });
+  document.getElementById('play').addEventListener('click', play);
+  document.getElementById('theme').addEventListener('click', function () {
+    var r = document.documentElement; r.dataset.theme = r.dataset.theme === 'dark' ? 'light' : 'dark';
+  });
+</script>
+</body></html>
