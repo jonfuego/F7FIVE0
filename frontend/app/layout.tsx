@@ -29,7 +29,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#0b0604",
+  themeColor: "#000000",
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
@@ -38,11 +38,7 @@ export const viewport: Viewport = {
 const FONTS_HREF =
   "https://fonts.googleapis.com/css2?" +
   [
-    "family=Fraunces:opsz,wght@9..144,400..900",
-    "family=Instrument+Serif:wght@400",
-    "family=Bebas+Neue",
-    "family=Inter:wght@400;500;600;700",
-    "family=JetBrains+Mono:wght@400;500;600",
+    "family=Archivo:wght@400;500;600;700;800;900",
   ].join("&") +
   "&display=swap";
 
