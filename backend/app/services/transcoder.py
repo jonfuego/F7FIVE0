@@ -355,9 +355,11 @@ class TranscodeManager:
     def _pop_running_siblings(
         self, key: tuple[uuid.UUID, uuid.UUID, str, int, str],
     ) -> list[TranscodeJob]:
-        """Remove and return running jobs for the same viewer, file, offset
-        bucket and audio/subtitle picks but a different variant or quality
-        ceiling. Caller holds the lock.
+        """Remove and return the viewer's other running jobs for the same file
+        and audio/subtitle picks: a different variant, quality ceiling, or
+        offset bucket. A new cold start for one viewer and one file (quality
+        switch, resume, restart at a new position) replaces the old encode.
+        Caller holds the lock.
 
         A player that changes quality (hls.js level switch, or a manual pick)
         starts a new variant; the old variant's ffmpeg would otherwise keep
@@ -365,15 +367,14 @@ class TranscodeManager:
         without NVENC. Finished jobs stay registered so their cached segments
         keep serving.
         """
-        user_id, media_file_id, label, bucket, opts = key
+        user_id, media_file_id, _label, _bucket, opts = key
         base = _opts_without_quality(opts)
         out: list[TranscodeJob] = []
         for k, j in list(self._jobs.items()):
             if k == key or not j.is_running():
                 continue
-            if (k[0] == user_id and k[1] == media_file_id and k[3] == bucket
-                    and _opts_without_quality(k[4]) == base
-                    and (k[2] != label or k[4] != opts)):
+            if (k[0] == user_id and k[1] == media_file_id
+                    and _opts_without_quality(k[4]) == base):
                 self._jobs.pop(k, None)
                 out.append(j)
         return out

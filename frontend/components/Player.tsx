@@ -357,14 +357,21 @@ export function Player({
       trySeekNow();
     }
 
-    function send(position: number, durationHint?: number | null) {
+    // A resumed HLS stream's timeline starts at 0 at `offset_sec` into the
+    // source; convert to source time for saved progress.
+    const base = stream.mode === "hls" ? (stream.offset_sec ?? 0) : 0;
+
+    function send(streamPosition: number, durationHint?: number | null) {
       // Fire-and-forget. If the write fails we'll catch up on the next tick.
+      const position = base + streamPosition;
       const duration =
-        durationHint != null && durationHint > 0
-          ? Math.floor(durationHint)
-          : video && !isNaN(video.duration) && video.duration > 0
-            ? Math.floor(video.duration)
-            : (stream.duration_sec ?? null);
+        base > 0 && stream.duration_sec
+          ? Math.floor(stream.duration_sec)
+          : durationHint != null && durationHint > 0
+            ? Math.floor(durationHint)
+            : video && !isNaN(video.duration) && video.duration > 0
+              ? Math.floor(video.duration)
+              : (stream.duration_sec ?? null);
       void apiPut<Progress>(
         `/api/library/progress/${stream.media_file_id}`,
         {

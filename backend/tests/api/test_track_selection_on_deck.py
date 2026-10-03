@@ -550,3 +550,18 @@ def test_progress_upsert_recovers_from_insert_race(client, db_session, h264_movi
     r = client.put(f"/api/progress/{h264_movie.id}", json={"position_sec": 42, "duration_sec": 100})
     assert r.status_code == 200, r.text
     assert r.json()["position_sec"] == 42
+
+
+def test_stream_start_reports_hls_offset(client, h264_movie):
+    """A resumed HLS stream starts its own timeline at 0; the response tells
+    the player where that 0 sits in the source."""
+    r = client.post("/api/stream/start", json={
+        "file_id": str(h264_movie.id), "quality": "480p", "resume_sec": 47,
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["mode"] == "hls"
+    assert body["offset_sec"] == 40 and _q(body["url"])["t"] == "40"
+    # Direct play seeks client-side; its offset is always 0.
+    r = client.post("/api/stream/start", json={"file_id": str(h264_movie.id), "resume_sec": 47})
+    assert r.json()["mode"] == "direct" and r.json()["offset_sec"] == 0

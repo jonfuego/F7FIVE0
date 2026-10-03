@@ -287,4 +287,5 @@ def stream_start(
         subtitle=body.subtitle,
         quality=body.quality or "original",
         track_opts=opts_token or None,
+        offset_sec=bucket,
     )

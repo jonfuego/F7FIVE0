@@ -422,4 +422,7 @@ export type StreamStart = {
   cover_path: string | null;
   artist_name: string | null;
   album_title: string | null;
+  // Where the stream starts in the source (seconds). A resumed HLS stream's
+  // timeline starts at 0, so add this to <video>.currentTime.
+  offset_sec?: number;
 };

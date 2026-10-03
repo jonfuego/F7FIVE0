@@ -646,6 +646,11 @@ class StreamStartResponse(BaseModel):
     audio_track_index: Optional[int] = None
     subtitle: Optional[Union[int, str]] = None
     quality: Optional[str] = None
+    # Where this stream starts in the source, in seconds. An HLS stream
+    # resumed mid-file (the `t` bucket) has a timeline starting at 0, so
+    # players add this to <video>.currentTime to get the source position.
+    # Always 0 for direct play.
+    offset_sec: int = 0
 
 
 # ---- Admin ----------------------------------------------------------------

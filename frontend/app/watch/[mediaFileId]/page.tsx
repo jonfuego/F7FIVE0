@@ -321,7 +321,9 @@ export default function WatchPage() {
 
   function onServerQuality(height: number) {
     writeQualityPref(String(height));
-    const at = Math.floor(videoEl?.currentTime ?? 0);
+    // Source position: a resumed HLS stream counts from its own start.
+    const base = stream?.mode === "hls" ? (stream.offset_sec ?? 0) : 0;
+    const at = Math.floor(base + (videoEl?.currentTime ?? 0));
     setQuality(height);
     setResume({ kind: "chose", resumeSec: at });
   }

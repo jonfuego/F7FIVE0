@@ -76,9 +76,19 @@ def test_other_viewers_and_files_untouched(manager, tmp_path: Path) -> None:
     mgr.get_or_start(u1, m1, _v("medium"), tmp_path / "f.mkv")   # procs[0]
     mgr.get_or_start(u2, m1, _v("medium"), tmp_path / "f.mkv")   # other viewer
     mgr.get_or_start(u1, m2, _v("medium"), tmp_path / "g.mkv")   # other file
-    mgr.get_or_start(u1, m1, _v("high"), tmp_path / "f.mkv", offset_bucket=600)  # other bucket
     mgr.get_or_start(u1, m1, _v("low"), tmp_path / "f.mkv", opts="a2")  # other track picks
     assert not any(p.terminated for p in procs)
+
+
+def test_new_start_position_replaces_old_encode(manager, tmp_path: Path) -> None:
+    """A quality switch mid-movie resumes at a new offset bucket; the encode
+    from the old position must still stop."""
+    mgr, procs = manager
+    uid, mid = uuid.uuid4(), uuid.uuid4()
+    mgr.get_or_start(uid, mid, _v("medium"), tmp_path / "f.mkv")
+    mgr.get_or_start(uid, mid, _v("high"), tmp_path / "f.mkv", offset_bucket=30, opts="q1080")
+    mgr.get_or_start(uid, mid, _v("medium"), tmp_path / "f.mkv", offset_bucket=40, opts="q720")
+    assert procs[0].terminated and procs[1].terminated and not procs[2].terminated
 
 
 def test_finished_sibling_keeps_its_cache(manager, tmp_path: Path) -> None:
