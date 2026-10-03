@@ -1,8 +1,8 @@
 import type { Config } from "tailwindcss";
 
-// F7FIVE0 Tailwind preset v2. Values come from f7five0_tokens_v2.css (import it
+// F7FIVE0 Tailwind preset v3. Values come from f7five0_tokens_v3.css (import it
 // once in app/globals.css). Theme switches with data-theme="dark" | "light" on <html>.
-// Usage in tailwind.config.ts: presets: [require("../design/f7five0_tailwind-preset_v2")]
+// Usage in tailwind.config.ts: presets: [require("../design/f7five0_tailwind-preset_v3")]
 
 const preset: Partial<Config> = {
   theme: {

@@ -1,5 +1,6 @@
-// F7FIVE0 React Native theme v1 (mobile + TV). Generated from f7five0_tokens_v1.json.
-// Fonts: load Archivo with @expo-google-fonts/archivo and map the weights in fontFor().
+// F7FIVE0 React Native theme v3 (mobile + TV). Generated from f7five0_tokens_v3.json.
+// Fonts: load Archivo with @expo-google-fonts/archivo (pin 0.2.3 like the other @expo-google-fonts packages) and map the weights in fontFor().
+// Icons: lucide-react-native with strokeWidth={2.25} strokeLinecap="square" strokeLinejoin="miter"; play/pause/skip filled.
 
 export const colors = {
   dark: {
@@ -12,9 +13,9 @@ export const colors = {
     "ink": "#ffffff",
     "ink-2": "#c4c4c4",
     "ink-3": "#9a9a9a",
-    "hive": "#970002",
-    "hive-hover": "#b3070a",
-    "hive-press": "#7d0002",
+    "hive": "#9c0404",
+    "hive-hover": "#b50808",
+    "hive-press": "#820303",
     "hive-text": "#ff5c5e",
     "hive-tint": "#2b0a0a",
     "on-hive": "#ffffff",
@@ -23,6 +24,7 @@ export const colors = {
     "positive": "#5cc8ff",
     "warning": "#f2b33d",
     "danger": "#ff5c5e",
+    "logo-plate": "#ffffff",
     "scrim": "rgba(0, 0, 0, 0.72)",
   },
   light: {
@@ -35,17 +37,18 @@ export const colors = {
     "ink": "#000000",
     "ink-2": "#3a3a3a",
     "ink-3": "#595959",
-    "hive": "#970002",
-    "hive-hover": "#7d0002",
-    "hive-press": "#650002",
-    "hive-text": "#970002",
+    "hive": "#9c0404",
+    "hive-hover": "#820303",
+    "hive-press": "#6a0202",
+    "hive-text": "#9c0404",
     "hive-tint": "#f8e6e6",
     "on-hive": "#ffffff",
-    "hive-mark": "#970002",
+    "hive-mark": "#9c0404",
     "focus": "#000000",
     "positive": "#005f9e",
     "warning": "#7f5100",
-    "danger": "#970002",
+    "danger": "#9c0404",
+    "logo-plate": "#ffffff",
     "scrim": "rgba(0, 0, 0, 0.56)",
   },
 } as const;
@@ -59,6 +62,10 @@ export const size = { "poster-s": 112, "poster-m": 160, "poster-l": 220, "topbar
 
 // The HIVE offset. RN has no hard box-shadow on Android: render a hive-colored View
 // behind the element, offset by this many px right and down.
+// Logo: always the black and red PNG. On any ground other than white, wrap it in a
+// View with backgroundColor colors[theme]["logo-plate"] and padding = logo height * 0.25.
+export const logoPlatePadRatio = 0.25;
+
 export const hiveOffset = { l: 6, s: 3 } as const;
 
 const weights: Record<number, string> = {

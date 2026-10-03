@@ -88,24 +88,24 @@
    {
     "name": "hive",
     "value": {
-     "dark": "#970002",
-     "light": "#970002"
+     "dark": "#9c0404",
+     "light": "#9c0404"
     },
-    "usage": "THE brand red, exact from the logo (#970002). Primary button fill, active nav marker fill, the offset block behind a focused poster. It is the hidden HIVE layer: spend it on one thing per view. Carries on-hive text. Not for text or thin marks on dark grounds (2.3:1 on black)."
+    "usage": "THE brand red, exact from the logo (#9C0404). Primary button fill, active nav marker fill, the offset block behind a focused poster. It is the hidden HIVE layer: spend it on one thing per view. Carries on-hive text. Not for text or thin marks on dark grounds (2.4:1 on black)."
    },
    {
     "name": "hive-hover",
     "value": {
-     "dark": "#b3070a",
-     "light": "#7d0002"
+     "dark": "#b50808",
+     "light": "#820303"
     },
     "usage": "Hover fill of hive surfaces. Derived."
    },
    {
     "name": "hive-press",
     "value": {
-     "dark": "#7d0002",
-     "light": "#650002"
+     "dark": "#820303",
+     "light": "#6a0202"
     },
     "usage": "Pressed fill of hive surfaces. Derived."
    },
@@ -113,7 +113,7 @@
     "name": "hive-text",
     "value": {
      "dark": "#ff5c5e",
-     "light": "#970002"
+     "light": "#9c0404"
     },
     "usage": "Red text and thin red marks (links, active tab label, 'New' tags, playback progress) on bg through surface-3 and hive-tint. Brightened in dark so it holds 4.5:1; equals hive in light."
    },
@@ -406,12 +406,12 @@
   "tokens": [
    {
     "name": "shadow-hive",
-    "value": "6px 6px 0 0 #970002",
+    "value": "6px 6px 0 0 #9c0404",
     "usage": "The HIVE offset: a hard red block behind a focused or hovered poster, the primary hero button, or the active nav item. One per view. Pair with the focus ring for keyboard/remote focus; the offset alone is not a focus indicator."
    },
    {
     "name": "shadow-hive-s",
-    "value": "3px 3px 0 0 #970002",
+    "value": "3px 3px 0 0 #9c0404",
     "usage": "Small HIVE offset for buttons and chips."
    },
    {
