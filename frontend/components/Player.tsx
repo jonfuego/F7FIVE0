@@ -479,14 +479,18 @@ export function Player({
     return () => video.removeEventListener("timeupdate", onTime);
   }, []);
 
+  // Markers are in source time; a resumed HLS stream's clock starts at
+  // offset_sec into the source.
+  const timeBase = stream.mode === "hls" ? (stream.offset_sec ?? 0) : 0;
+  const sourceTime = currentTime + timeBase;
   const activeMarker =
-    markers.find((m) => currentTime >= m.start_sec && currentTime < m.end_sec) ?? null;
+    markers.find((m) => sourceTime >= m.start_sec && sourceTime < m.end_sec) ?? null;
 
   function skipMarker(m: MediaMarker) {
     const video = videoRef.current;
     if (!video) return;
     try {
-      video.currentTime = m.end_sec;
+      video.currentTime = Math.max(0, m.end_sec - timeBase);
     } catch {
       /* ignore */
     }

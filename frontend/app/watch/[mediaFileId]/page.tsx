@@ -328,6 +328,11 @@ export default function WatchPage() {
     setResume({ kind: "chose", resumeSec: at });
   }
 
+  // Scrubbing to before a resumed transcode's start: restart the stream there.
+  function onSeekBeforeStart(sourceSec: number) {
+    setResume({ kind: "chose", resumeSec: Math.max(0, sourceSec) });
+  }
+
   const chosenOffset = resume.kind === "chose" ? resume.resumeSec : 0;
   const readyToPlay = stream !== null;
   const initialResume =
@@ -405,7 +410,12 @@ export default function WatchPage() {
         <div className="controls">
           {stream && !useDockAudio ? (
             // Video path: the real transport, driving the <video> directly.
-            <VideoTransport videoEl={videoEl} durationSec={totalSec} />
+            <VideoTransport
+              videoEl={videoEl}
+              durationSec={totalSec}
+              offsetSec={stream.mode === "hls" ? (stream.offset_sec ?? 0) : 0}
+              onSeekBeforeStart={onSeekBeforeStart}
+            />
           ) : (
             // Dock-audio path: the decorative scrub, driven by the dock tick.
             <div className="scrub">

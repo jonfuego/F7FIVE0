@@ -15,6 +15,13 @@
 //
 // Volume and mute persist to the same mh:volume / mh:muted localStorage keys
 // the dock uses, so the device-local level is shared across audio and video.
+//
+// Resumed transcodes: an HLS stream started with resume_sec is encoded from
+// `offsetSec` into the file, so the element's clock reads 0 there and its
+// duration is only what remains. The transport shows source time (element
+// time + offsetSec) against the full `durationSec`, and a seek to before the
+// offset is handed to `onSeekBeforeStart`, which re-requests the stream from
+// that point (the element has nothing earlier to seek to).
 
 "use client";
 
@@ -25,12 +32,22 @@ type Props = {
   // The live <video>, or null before <Player> mounts it / after it unmounts.
   videoEl: HTMLVideoElement | null;
   // Total duration hint from the stream metadata. The element's own
-  // durationchange refines this once media loads.
+  // durationchange refines this once media loads (except on a resumed
+  // transcode, where the element only knows the remaining part).
   durationSec?: number;
+  // Source seconds at which the stream's own timeline starts (stream/start's
+  // offset_sec for a resumed HLS stream; 0 otherwise).
+  offsetSec?: number;
+  // Seek to a source time before offsetSec: the page restarts the stream there.
+  onSeekBeforeStart?: (sourceSec: number) => void;
 };
 
-export function VideoTransport({ videoEl, durationSec }: Props) {
+export function VideoTransport({ videoEl, durationSec, offsetSec = 0, onSeekBeforeStart }: Props) {
+  const offset = offsetSec > 0 ? offsetSec : 0;
   const barRef = useRef<HTMLDivElement | null>(null);
+  // True while the scrub handle is held; timeupdate then leaves the readout
+  // alone so it shows where the pointer is.
+  const draggingRef = useRef(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(durationSec && durationSec > 0 ? durationSec : 0);
@@ -62,7 +79,10 @@ export function VideoTransport({ videoEl, durationSec }: Props) {
     if (!v) return;
     const onPlay = () => setIsPlaying(true);
     const onPause = () => setIsPlaying(false);
-    const onTime = () => setCurrentTime(v.currentTime || 0);
+    const onTime = () => {
+      if (draggingRef.current) return;
+      setCurrentTime(offset + (v.currentTime || 0));
+    };
     const onVol = () => {
       setVolume(v.volume);
       setMuted(v.muted);
@@ -72,7 +92,7 @@ export function VideoTransport({ videoEl, durationSec }: Props) {
     };
 
     setIsPlaying(!v.paused);
-    setCurrentTime(v.currentTime || 0);
+    setCurrentTime(offset + (v.currentTime || 0));
     if (!isNaN(v.duration) && v.duration > 0) setDuration(v.duration);
 
     v.addEventListener("play", onPlay);
@@ -87,7 +107,7 @@ export function VideoTransport({ videoEl, durationSec }: Props) {
       v.removeEventListener("volumechange", onVol);
       v.removeEventListener("durationchange", onDur);
     };
-  }, [videoEl]);
+  }, [videoEl, offset]);
 
   // Apply the persisted / adjusted level to the element.
   useEffect(() => {
@@ -104,8 +124,16 @@ export function VideoTransport({ videoEl, durationSec }: Props) {
     return () => document.removeEventListener("fullscreenchange", onFsChange);
   }, []);
 
+  // On a resumed transcode the element's duration covers only the remainder,
+  // so the stream metadata's full duration wins.
   const effectiveDuration =
-    duration > 0 ? duration : durationSec && durationSec > 0 ? durationSec : 0;
+    offset > 0 && durationSec && durationSec > 0
+      ? durationSec
+      : duration > 0
+        ? duration
+        : durationSec && durationSec > 0
+          ? durationSec
+          : 0;
   const pct =
     effectiveDuration > 0 ? Math.min(100, (currentTime / effectiveDuration) * 100) : 0;
 
@@ -122,27 +150,44 @@ export function VideoTransport({ videoEl, durationSec }: Props) {
 
   // Scrub. Derive a 0..1 ratio from where the pointer landed on the bar and
   // assign video.currentTime. Tracking pointermove while down gives
-  // click-and-drag seeking. Mirrors MiniPlayer.
-  const seekToClientX = (clientX: number) => {
+  // click-and-drag seeking. Mirrors MiniPlayer. Positions are source time;
+  // a point before a resumed stream's start only previews while dragging and
+  // restarts the stream on release.
+  const sourceTimeAt = (clientX: number): number | null => {
     const bar = barRef.current;
-    const v = videoEl;
-    if (!bar || !v || !effectiveDuration || effectiveDuration <= 0) return;
+    if (!bar || !effectiveDuration || effectiveDuration <= 0) return null;
     const rect = bar.getBoundingClientRect();
-    if (rect.width <= 0) return;
+    if (rect.width <= 0) return null;
     const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-    const t = ratio * effectiveDuration;
+    return ratio * effectiveDuration;
+  };
+  const seekToClientX = (clientX: number, release: boolean) => {
+    const v = videoEl;
+    const t = sourceTimeAt(clientX);
+    if (!v || t == null) return;
+    setCurrentTime(t);
+    if (t < offset) {
+      if (release && onSeekBeforeStart) onSeekBeforeStart(Math.floor(t));
+      return;
+    }
     try {
-      v.currentTime = t;
+      v.currentTime = t - offset;
     } catch {
       // ignore
     }
-    setCurrentTime(t);
   };
   const onScrubPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     e.preventDefault();
-    seekToClientX(e.clientX);
-    const onMove = (ev: PointerEvent) => seekToClientX(ev.clientX);
-    const onUp = () => {
+    draggingRef.current = true;
+    seekToClientX(e.clientX, false);
+    let lastX = e.clientX;
+    const onMove = (ev: PointerEvent) => {
+      lastX = ev.clientX;
+      seekToClientX(ev.clientX, false);
+    };
+    const onUp = (ev: PointerEvent) => {
+      draggingRef.current = false;
+      seekToClientX(ev.clientX ?? lastX, true);
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
     };
