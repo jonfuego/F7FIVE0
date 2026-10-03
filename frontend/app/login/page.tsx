@@ -10,6 +10,7 @@ import { Suspense, useEffect, useState, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useFeatures } from "@/lib/features";
 import { getPasskeyAssertion, passkeysSupported } from "@/lib/webauthn";
+import { HiveWordmark } from "@/components/HiveWordmark";
 
 // Wrapping the hook-using body in Suspense is what lets Next 14's static
 // prerender bail out cleanly for pages that read URL search params.
@@ -23,11 +24,11 @@ export default function LoginPage() {
 
 function LoginShellFallback() {
   return (
-    <main className="flex min-h-screen items-center justify-center bg-neutral-950 px-6">
-      <div className="w-full max-w-sm rounded-2xl border border-neutral-800 bg-neutral-900/60 p-8 shadow-xl">
+    <main className="login-shell">
+      <div className="login-card">
         <div className="mb-6">
-          <h1 className="text-2xl font-semibold tracking-tight">F7FIVE0</h1>
-          <p className="mt-1 text-sm text-neutral-400">Sign in to keep watching.</p>
+          <HiveWordmark href="/login" height={24} />
+          <p className="mt-3 text-sm text-ink-2">Sign in to keep watching.</p>
         </div>
       </div>
     </main>
@@ -127,11 +128,11 @@ function LoginPageInner() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-neutral-950 px-6">
-      <div className="w-full max-w-sm rounded-2xl border border-neutral-800 bg-neutral-900/60 p-8 shadow-xl">
+    <main className="login-shell">
+      <div className="login-card">
         <div className="mb-6">
-          <h1 className="text-2xl font-semibold tracking-tight">F7FIVE0</h1>
-          <p className="mt-1 text-sm text-neutral-400">Sign in to keep watching.</p>
+          <HiveWordmark href="/login" height={24} />
+          <p className="mt-3 text-sm text-ink-2">Sign in to keep watching.</p>
         </div>
 
         {canPasskey && (
@@ -140,21 +141,21 @@ function LoginPageInner() {
               type="button"
               onClick={onPasskey}
               disabled={passkeyBusy || submitting}
-              className="w-full rounded-lg border border-hive bg-hive-tint px-4 py-2 text-sm font-medium text-hive-text transition hover:bg-hive-tint disabled:cursor-not-allowed disabled:opacity-60"
+              className="min-h-tap w-full rounded-1 border border-line-strong bg-surface-2 px-4 py-2 text-sm font-semibold text-ink transition hover:bg-surface-3 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {passkeyBusy ? "Waiting for passkey..." : "Sign in with passkey"}
             </button>
-            <div className="my-4 flex items-center gap-3 text-xs text-neutral-600">
-              <span className="h-px flex-1 bg-neutral-800" />
+            <div className="my-4 flex items-center gap-3 text-xs text-ink-3">
+              <span className="h-px flex-1 bg-line" />
               or use your password
-              <span className="h-px flex-1 bg-neutral-800" />
+              <span className="h-px flex-1 bg-line" />
             </div>
           </div>
         )}
 
         <form onSubmit={onSubmit} className="space-y-4">
           <div>
-            <label htmlFor="username" className="block text-sm text-neutral-300">
+            <label htmlFor="username" className="block text-sm text-ink-2">
               Username
             </label>
             <input
@@ -166,12 +167,12 @@ function LoginPageInner() {
               required
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 outline-none focus:border-neutral-500"
+              className="mt-1 w-full rounded-1 border border-line-strong bg-bg px-3 py-2 text-sm text-ink outline-none focus:border-ink"
             />
           </div>
 
           <div>
-            <label htmlFor="password" className="block text-sm text-neutral-300">
+            <label htmlFor="password" className="block text-sm text-ink-2">
               Password
             </label>
             <input
@@ -181,12 +182,12 @@ function LoginPageInner() {
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 outline-none focus:border-neutral-500"
+              className="mt-1 w-full rounded-1 border border-line-strong bg-bg px-3 py-2 text-sm text-ink outline-none focus:border-ink"
             />
           </div>
 
           {error && (
-            <p role="alert" className="text-sm text-rose-400">
+            <p role="alert" className="text-sm text-danger">
               {error}
             </p>
           )}
@@ -194,7 +195,7 @@ function LoginPageInner() {
           <button
             type="submit"
             disabled={submitting}
-            className="w-full rounded-lg bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-900 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+            className="min-h-tap w-full rounded-1 bg-hive px-4 py-2 text-sm font-semibold text-on-hive transition hover:bg-hive-hover disabled:cursor-not-allowed disabled:opacity-60"
           >
             {submitting ? "Signing in..." : "Sign in"}
           </button>
