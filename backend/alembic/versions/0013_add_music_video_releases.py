@@ -1,4 +1,4 @@
-"""add music_video_releases + restructure music_videos
+r"""add music_video_releases + restructure music_videos
 
 Revision ID: 0013
 Revises: 0012

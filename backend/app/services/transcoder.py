@@ -1,4 +1,4 @@
-"""HLS transcoder session manager.
+r"""HLS transcoder session manager.
 
 Spawns an ffmpeg subprocess per active (user, media_file, variant) and keeps
 it alive while the client is fetching segments. Idle sessions are killed by

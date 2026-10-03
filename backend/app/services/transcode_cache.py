@@ -1,4 +1,4 @@
-"""Transcode segment cache: accounting + LRU eviction.
+r"""Transcode segment cache: accounting + LRU eviction.
 
 Disk layout (same as transcoder.py):
     {transcode_cache_dir}\{media_file_id}\{variant}\t{offset_bucket}\
