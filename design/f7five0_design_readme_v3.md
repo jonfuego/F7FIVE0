@@ -1,6 +1,6 @@
 # F7FIVE0 design system v3
 
-The source of truth is the F7FIVE0 Design System artifact in Claude. These files are exports of it for the code. Nothing in `frontend/` or `mobile/` uses them yet.
+The source of truth is the F7FIVE0 Design System artifact in Claude. These files are exports of it for the code. They are copied into `frontend/` and `mobile/` and kept byte-identical there.
 
 | File | For |
 |---|---|

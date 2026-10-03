@@ -24,7 +24,7 @@ Units are the wordmark's 1476 x 298 canvas. V and E don't move. Reduced motion: 
 | `mobile/f7five0_hive-wordmark_v1.tsx` | React Native component `HiveWordmark` (core Animated + Image layers, no new dependency) |
 | `mobile/hive-egg/*.png` | Its layers: one transparent 2x full-canvas PNG per piece |
 
-Not wired into `frontend/` or `mobile/` yet. To use: web, copy the component and CSS into `frontend/components/` and swap it in for `Wordmark`. Mobile, copy the component and the `hive-egg/` folder into `mobile/src/ui/` and swap it in for `Wordmark`.
+Wired into both apps: web uses `frontend/components/HiveWordmark.tsx` (plus `hive-wordmark.css`) in the top bar; mobile uses `mobile/src/ui/HiveWordmark.tsx` (plus the `hive-egg/` folder) in the header, both in place of the old `Wordmark`.
 
 On web the wordmark links to `/`, so on other pages the first tap navigates home as normal and the egg effectively lives on the home page. On mobile the first tap fires `onPress`; taps 2 to 7 only count toward the egg.
 

@@ -78,6 +78,24 @@ INSTALL.md for the operator view.
 - Writing style for docs, comments, and commits: plain and direct, no em
   dashes.
 
+## Design system
+
+`design/` is an export of the F7FIVE0 Design System artifact in Claude, not
+hand-maintained source. The web and app read from copies of it:
+
+- `frontend/app/f7five0-tokens.css` is a byte-identical copy of
+  `design/f7five0_tokens_v3.css`, imported by `app/globals.css`.
+- `frontend/tailwind.preset.ts` is a byte-identical copy of
+  `design/f7five0_tailwind-preset_v3.ts`, used by `tailwind.config.ts`.
+- `mobile/src/state/f7five0-theme.ts` is a byte-identical copy of
+  `design/f7five0_rn-theme_v3.ts`; `mobile/src/state/theme.ts` builds on it.
+
+Keep those three copies byte-identical to `design/`. To change tokens, edit the
+artifact, re-export into `design/`, and re-copy. Fonts are Archivo (400 to 900);
+icons are Lucide (stroke 2.25, square caps, miter joins) behind the shared
+`Icon` components. Marks come from `design/logos/`; the web and mobile asset
+scripts render from there. Dark only this pass; the light token block is unused.
+
 ## Checks before calling something done
 
 ```powershell
