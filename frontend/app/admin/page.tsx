@@ -9,6 +9,7 @@
 
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { AuthShell } from "@/components/AuthShell";
+import { RemoteAccessSection } from "./RemoteAccessSection";
 import { apiGet, apiPatch, apiPost, apiDelete, ApiError } from "@/lib/client-api";
 import type {
   ActiveTranscode, AdminSession, AdminUser, AuthEvent, Me, ServerHealth,
@@ -53,13 +54,14 @@ export default function AdminPage() {
         <header>
           <h1 className="text-2xl font-semibold tracking-tight">Admin</h1>
           <p className="mt-1 text-sm text-neutral-500">
-            Manage users, trigger library sync, inspect active streams and recent history.
+            Manage users and remote access, trigger library sync, inspect active streams and recent history.
           </p>
         </header>
 
         {me ? (
           <>
             <UsersSection me={me} />
+            <RemoteAccessSection />
             <LibrarySection />
             <HealthSection />
             <ActiveStreamsSection />

@@ -14,8 +14,10 @@
     5. Creates your admin account.
     6. Registers three Windows services (F7FIVE0-API, F7FIVE0-Stream,
        F7FIVE0-Web) that start with Windows.
-    7. Optionally opens the firewall for your home network and connects a
-       Cloudflare Tunnel for access from anywhere.
+    7. Optionally opens the firewall for your home network.
+    8. Registers the F7FIVE0-RemoteAccess scheduled task, which the web
+       app's Admin > Remote access page uses to set up access from anywhere
+       (Tailscale, Cloudflare, or port forwarding) after install.
 
   The Setup wizard (F7FIVE0-Setup.exe) runs this script for you. You can
   also run it by hand from an elevated PowerShell:
@@ -44,6 +46,12 @@
   Internal API port on 127.0.0.1. Default 8001. When left unset and 8001 is
   taken, setup picks the next free port (8101, 8201, ...).
 
+.PARAMETER RemoteAccess
+  Advanced / recovery: set up remote access from this console as part of
+  the install (tailscale, cloudflare, portforward, token, or none). Most
+  people use Admin > Remote access in the web app instead. Same as running
+  installer\remote-access.ps1 -Method <name> afterwards.
+
 .PARAMETER StreamPort
   Internal stream gateway port on 127.0.0.1. Default 8002, same rules as
   ApiPort. An upgrade keeps the ports saved in .env.
@@ -68,7 +76,7 @@ param(
     [int]    $ApiPort = 0,
     [int]    $StreamPort = 0,
     [string] $OpenFirewall = "",
-    [ValidateSet("", "none", "tailscale", "cloudflare", "portforward")]
+    [ValidateSet("", "none", "tailscale", "cloudflare", "portforward", "token")]
     [string] $RemoteAccess = "",
     [string] $PublicHost = "",
     [string] $DuckDnsToken = "",
@@ -94,6 +102,7 @@ $PostgresWingetId = "PostgreSQL.PostgreSQL.16"
 $NssmWingetId  = "NSSM.NSSM"
 
 $ServiceNames = @("F7FIVE0-API", "F7FIVE0-Stream", "F7FIVE0-Web")
+$RemoteAccessTask = "F7FIVE0-RemoteAccess"
 $DefaultApiPort = 8001
 $DefaultStreamPort = 8002
 $DbName = "f7five0"
@@ -108,10 +117,12 @@ function Step([string]$msg) {
     Write-Host ""
     Write-Host ("[{0}] {1}" -f $script:StepNo, $msg) -ForegroundColor Cyan
 }
-function Info([string]$msg) { Write-Host "    $msg" -ForegroundColor Gray }
-function Ok([string]$msg)   { Write-Host "    $msg" -ForegroundColor Green }
-function Warn([string]$msg) { Write-Host "    [!] $msg" -ForegroundColor Yellow }
-function Fail([string]$msg) { throw "F7FIVE0 setup stopped: $msg" }
+# Info / Ok / Warn / Fail, Download, Invoke-Winget, Set-PrivateAcl,
+# Set-EnvKey, Install-Svc, and friends live in common.ps1 (shared with
+# remote-access.ps1).
+. (Join-Path $PSScriptRoot "common.ps1")
+# Every Warn during this run, repeated in the summary at the end.
+$script:Warnings = New-Object System.Collections.Generic.List[string]
 
 function Ask([string]$prompt, [string]$default = "") {
     if ($NonInteractive) { return $default }
@@ -170,47 +181,6 @@ function New-Secret([int]$bytes = 48) {
     [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($buf)
     # URL-safe base64, no padding: safe inside .env and connection strings.
     return ([Convert]::ToBase64String($buf)).TrimEnd('=').Replace('+', '-').Replace('/', '_')
-}
-
-function Refresh-Path {
-    $machine = [Environment]::GetEnvironmentVariable("Path", "Machine")
-    $user = [Environment]::GetEnvironmentVariable("Path", "User")
-    $env:Path = "$machine;$user"
-}
-
-function Download([string]$url, [string]$dest) {
-    Info "downloading $url"
-    $tmp = "$dest.partial"
-    for ($i = 1; $i -le 3; $i++) {
-        try {
-            Invoke-WebRequest -Uri $url -OutFile $tmp -UseBasicParsing
-            Move-Item -Force $tmp $dest
-            return
-        } catch {
-            if ($i -eq 3) { throw }
-            Warn "download failed (attempt $i), retrying: $($_.Exception.Message)"
-            Start-Sleep -Seconds (3 * $i)
-        }
-    }
-}
-
-function Invoke-Winget([string]$id, [string[]]$extra = @()) {
-    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
-        Fail "winget is not available. Install 'App Installer' from the Microsoft Store, then run Setup again."
-    }
-    Info "winget install $id"
-    $wargs = @("install", "--id", $id, "-e", "--silent", "--accept-package-agreements", "--accept-source-agreements", "--disable-interactivity") + $extra
-    & winget @wargs
-    # 0 = installed; -1978335189 (0x8A15002B) = already installed / no upgrade.
-    if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne -1978335189) {
-        Fail "winget could not install $id (exit $LASTEXITCODE)."
-    }
-    Refresh-Path
-}
-
-function Set-PrivateAcl([string]$path) {
-    # Only Administrators and SYSTEM can read files that hold secrets.
-    & icacls $path /inheritance:r /grant:r "*S-1-5-32-544:F" "*S-1-5-18:F" | Out-Null
 }
 
 # ---------------------------------------------------------------------------
@@ -317,26 +287,6 @@ if (-not $IsUpgrade) {
     }
     if (-not $WebPort) { $WebPort = [int](Ask "Web port" "3001") }
     if (-not $OpenFirewall) { $OpenFirewall = if (AskYesNo "Allow phones, TVs, and other PCs on your home network to connect?" $true) { "1" } else { "0" } }
-    if (-not $RemoteAccess -and -not $TunnelToken -and -not $NonInteractive) {
-        Info "Listen from anywhere?"
-        Info "  1 = Tailscale (recommended). Free, no domain, no router changes."
-        Info "      Tailscale limits Funnel bandwidth: great for music, a video stream or two;"
-        Info "      high-bitrate video or several viewers at once may buffer."
-        Info "  2 = Cloudflare. Free, no router changes, needs a domain already on Cloudflare."
-        Info "      No F7FIVE0 bandwidth cap; Cloudflare's free-plan terms discourage heavy video."
-        Info "  3 = Port forwarding (advanced). Free, full home upload speed, no middleman."
-        Info "      Needs router access (forward ports 80 and 443) and a domain or free"
-        Info "      DuckDNS name. Your PC is reachable directly from the internet."
-        Info "  4 = Home network only"
-        $pick = Ask "Choose 1, 2, 3, or 4" "1"
-        $RemoteAccess = switch ($pick) { "2" { "cloudflare" } "3" { "portforward" } "4" { "none" } default { "tailscale" } }
-        if ($RemoteAccess -in @("cloudflare", "portforward") -and -not $PublicHost) {
-            $PublicHost = Ask "Address to use (for example music.yourdomain.com or myname.duckdns.org)" ""
-        }
-        if ($RemoteAccess -eq "portforward" -and $PublicHost -like "*.duckdns.org" -and -not $DuckDnsToken) {
-            $DuckDnsToken = Ask "DuckDNS token (from duckdns.org, keeps the name pointed at your home)" ""
-        }
-    }
     foreach ($d in @($MoviesDir, $TvDir, $MusicDir, $MusicVideosDir)) {
         if ($d -and -not (Test-Path $d)) { Warn "Folder not found right now: $d (it will be scanned once it exists)." }
     }
@@ -461,14 +411,50 @@ $Psql = Find-Psql
 $PgInstalledNow = $false
 if (-not $Psql -and -not $IsUpgrade) {
     if (-not $PgSuperPassword) { $PgSuperPassword = New-Secret 24 }
-    Info "installing PostgreSQL 16 (this is the slow one, a few minutes)"
-    Invoke-Winget $PostgresWingetId @("--override", "--mode unattended --unattendedmodeui none --superpassword `"$PgSuperPassword`" --serverport 5432 --enable-components server,commandlinetools")
-    $Psql = Find-Psql
-    if (-not $Psql) { Fail "PostgreSQL did not install. Install PostgreSQL 16 from postgresql.org, then run Setup again." }
-    $PgInstalledNow = $true
+    # Save the password BEFORE installing: winget can report failure for an
+    # install that worked, and a lost password means a manual reset.
     $pgNote = Join-Path $DataDir "postgres-superuser.txt"
     Set-Content -Path $pgNote -Value "PostgreSQL superuser 'postgres' password (created by F7FIVE0 setup):`r`n$PgSuperPassword" -Encoding ASCII
     Set-PrivateAcl $pgNote
+    Info "installing PostgreSQL 16. This is the slow one: usually 5-10 minutes with nothing on screen."
+    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+        Fail "winget is not available. Install 'App Installer' from the Microsoft Store, then run Setup again."
+    }
+    $pgOverride = "--mode unattended --unattendedmodeui none --superpassword \`"$PgSuperPassword\`" --serverport 5432 --enable-components server,commandlinetools"
+    $pgArgs = "install --id $PostgresWingetId -e --silent --accept-package-agreements --accept-source-agreements --disable-interactivity --override `"$pgOverride`""
+    $pgStart = Get-Date
+    $pgProc = Start-Process -FilePath "winget" -ArgumentList $pgArgs -NoNewWindow -PassThru
+    $null = $pgProc.Handle
+    $nextBeat = 30
+    while (-not $pgProc.WaitForExit(1000)) {
+        $elapsed = [int]((Get-Date) - $pgStart).TotalSeconds
+        if ($elapsed -ge $nextBeat) {
+            $svcNote = if (Get-Service -Name "postgresql-x64-16" -ErrorAction SilentlyContinue) { ", database service registered" } else { "" }
+            Info ("still installing PostgreSQL ({0}:{1:00} elapsed{2})" -f [int][math]::Floor($elapsed / 60), ($elapsed % 60), $svcNote)
+            $nextBeat += 30
+        }
+    }
+    $pgRc = $pgProc.ExitCode
+    Refresh-Path
+    # Judge by the result on disk, not winget's exit code (it has reported
+    # 0x80004004 "abandoned" for an install that completed).
+    $pgSvc = $null
+    for ($i = 0; $i -lt 30; $i++) {
+        $Psql = Find-Psql
+        $pgSvc = Get-Service -Name "postgresql-x64-16" -ErrorAction SilentlyContinue
+        if ($Psql -and $pgSvc -and $pgSvc.Status -eq "Running") { break }
+        Start-Sleep -Seconds 2
+    }
+    if (-not ($Psql -and $pgSvc -and $pgSvc.Status -eq "Running")) {
+        $edbLog = Join-Path $env:TEMP "install-postgresql.log"
+        if (Test-Path $edbLog) {
+            Warn "PostgreSQL installer log ($edbLog), last lines:"
+            Get-Content $edbLog -Tail 25 | ForEach-Object { Info $_ }
+        }
+        Fail "PostgreSQL did not install (winget exit $pgRc). Install PostgreSQL 16 from postgresql.org, then run Setup again. The superuser password Setup chose is in $pgNote."
+    }
+    if ($pgRc -ne 0 -and $pgRc -ne -1978335189) { Info "winget reported exit $pgRc, but PostgreSQL is installed and running; carrying on." }
+    $PgInstalledNow = $true
     Ok "PostgreSQL installed. Superuser password saved to $pgNote (Administrators only)."
 } elseif ($Psql) {
     Ok "PostgreSQL: $Psql"
@@ -675,34 +661,6 @@ if (-not $IsUpgrade -and $AdminUser) {
 # ---------------------------------------------------------------------------
 Step "Windows services"
 # ---------------------------------------------------------------------------
-function Install-Svc([string]$Name, [string]$Exe, [string]$AppArgs, [string]$WorkDir, [string[]]$ExtraEnv, [string]$Desc) {
-    $prev = $ErrorActionPreference
-    $ErrorActionPreference = "Continue"
-    if (Get-Service -Name $Name -ErrorAction SilentlyContinue) {
-        & $Nssm stop $Name *> $null
-        & $Nssm remove $Name confirm *> $null
-    }
-    & $Nssm install $Name $Exe *> $null
-    & $Nssm set $Name AppParameters $AppArgs *> $null
-    & $Nssm set $Name AppDirectory $WorkDir *> $null
-    & $Nssm set $Name DisplayName $Name *> $null
-    & $Nssm set $Name Description $Desc *> $null
-    & $Nssm set $Name Start SERVICE_AUTO_START *> $null
-    & $Nssm set $Name AppStdout (Join-Path $LogsDir "$Name.out.log") *> $null
-    & $Nssm set $Name AppStderr (Join-Path $LogsDir "$Name.err.log") *> $null
-    & $Nssm set $Name AppRotateFiles 1 *> $null
-    & $Nssm set $Name AppRotateOnline 1 *> $null
-    & $Nssm set $Name AppRotateBytes 10485760 *> $null
-    & $Nssm set $Name AppExit Default Restart *> $null
-    & $Nssm set $Name AppRestartDelay 5000 *> $null
-    if ($ServiceUser) {
-        & $Nssm set $Name ObjectName $ServiceUser $ServicePassword *> $null
-    }
-    & $Nssm set $Name AppEnvironmentExtra @ExtraEnv *> $null
-    $ErrorActionPreference = $prev
-    if (-not (Get-Service -Name $Name -ErrorAction SilentlyContinue)) { Fail "could not register service $Name" }
-    Info "registered $Name"
-}
 $pyEnv = @("PYTHONPATH=$BackendDir", "PYTHONUNBUFFERED=1", "PYTHONIOENCODING=utf-8")
 Install-Svc "F7FIVE0-API" $VenvPy "-m uvicorn app.main:app --host 127.0.0.1 --port $ApiPort --proxy-headers" $BackendDir $pyEnv "F7FIVE0 API"
 # Single worker on purpose: the transcoder session registry is in-process.
@@ -726,240 +684,65 @@ if ($OpenFirewall -eq "1" -or $lanRule) {
     } else {
         New-NetFirewallRule -DisplayName "F7FIVE0 web" -Direction Inbound -Protocol TCP -LocalPort $WebPort -Action Allow -Profile Private,Domain | Out-Null
     }
-    Ok "firewall open on port $WebPort for private networks"
-    Info "If other devices cannot connect, make sure Windows marks your home network as Private."
+    Ok "firewall open on port $WebPort for private (home) networks"
 }
 
 # ---------------------------------------------------------------------------
-# Remote access: reach F7FIVE0 from anywhere.
-#   tailscale  : free, no domain. Browser sign-in (Google/Microsoft/Apple/
-#                GitHub), then Tailscale Funnel publishes
-#                https://<name>.<tailnet>.ts.net
-#   cloudflare : free tunnel on a domain you already have on Cloudflare.
-#                Browser sign-in, then setup creates the tunnel, the DNS
-#                record, and an F7FIVE0-Tunnel service.
-#   token      : advanced, a dashboard-made tunnel token (-TunnelToken).
+Step "Remote access helper"
 # ---------------------------------------------------------------------------
-function Set-EnvKey([string]$key, [string]$value) {
-    $lines = New-Object System.Collections.Generic.List[string]
-    $found = $false
-    if (Test-Path $EnvFile) {
-        foreach ($line in Get-Content $EnvFile) {
-            if ($line -match "^\s*$key\s*=") { $lines.Add("$key=$value"); $found = $true }
-            else { $lines.Add($line) }
-        }
-    }
-    if (-not $found) { $lines.Add("$key=$value") }
-    [IO.File]::WriteAllLines($EnvFile, $lines, (New-Object Text.UTF8Encoding($false)))
+# Admin > Remote access in the web app sets up Tailscale, Cloudflare, or port
+# forwarding after install, while the person is at the screen. The API may
+# run as a non-admin account, so the privileged steps run in a scheduled task
+# (SYSTEM, on demand only) that the API's account is allowed to start. See
+# installer\remote-access.ps1.
+$RaDir = Join-Path $DataDir "remote-access"
+if (-not (Test-Path $RaDir)) { New-Item -ItemType Directory -Path $RaDir | Out-Null }
+$raGrants = @("*S-1-5-32-544:(OI)(CI)F", "*S-1-5-18:(OI)(CI)F")
+$svcSid = $null
+if ($ServiceUser) {
+    try { $svcSid = (New-Object Security.Principal.NTAccount($ServiceUser)).Translate([Security.Principal.SecurityIdentifier]).Value }
+    catch { Warn "Could not look up $ServiceUser; Admin > Remote access may not be able to start its helper." }
+    if ($svcSid) { $raGrants += "*${svcSid}:(OI)(CI)M" }
 }
-
-# Run a CLI that may pause for a browser sign-in. Output goes to temp files;
-# any sign-in link it prints is opened in the browser once.
-function Invoke-WithSignIn([string]$exe, [string]$argLine, [int]$timeoutSec, [bool]$openLinks, [scriptblock]$done) {
-    $out = Join-Path $env:TEMP ("f7five0-" + [guid]::NewGuid().ToString("N") + ".log")
-    $err = "$out.err"
-    $p = Start-Process -FilePath $exe -ArgumentList $argLine -NoNewWindow -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
-    $null = $p.Handle   # keeps ExitCode readable after the process ends
-    $opened = @{}
-    $shown = 0
-    $deadline = (Get-Date).AddSeconds($timeoutSec)
-    while ((Get-Date) -lt $deadline) {
-        $text = ""
-        foreach ($f in @($out, $err)) { if (Test-Path $f) { $text += (Get-Content -Raw -Path $f -ErrorAction SilentlyContinue) + "`n" } }
-        $newLines = @($text -split "`r?`n" | Where-Object { $_.Trim() })
-        for ($i = $shown; $i -lt $newLines.Count; $i++) { Info $newLines[$i].Trim() }
-        $shown = $newLines.Count
-        foreach ($m in [regex]::Matches($text, 'https://login\.tailscale\.com/\S+')) {
-            $u = $m.Value.TrimEnd('.', ')', ',')
-            if ($openLinks -and -not $opened.ContainsKey($u)) {
-                $opened[$u] = $true
-                Write-Host "    A browser window is opening. Sign in (or create a free account) there, then come back." -ForegroundColor Yellow
-                Start-Process $u
-            }
-        }
-        if ($p.HasExited) { break }
-        if ($done -and (& $done)) { break }
-        Start-Sleep -Seconds 1
-    }
-    if (-not $p.HasExited) {
-        if ($done -and (& $done)) { try { $p.Kill() } catch { } }
-        else { try { $p.Kill() } catch { }; Remove-Item -Force $out, $err -ErrorAction SilentlyContinue; return $false }
-    }
-    Remove-Item -Force $out, $err -ErrorAction SilentlyContinue
-    if ($done) { return [bool](& $done) }
-    return ($p.ExitCode -eq 0)
+# Requests can carry tokens: only admins, SYSTEM, and the service account.
+& icacls $RaDir /inheritance:r /grant:r @raGrants | Out-Null
+# The task runs installer\remote-access.ps1 as SYSTEM, so only
+# administrators may change the installer folder.
+& icacls (Join-Path $InstallDir "installer") /inheritance:r /grant:r "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-545:(OI)(CI)RX" | Out-Null
+$raScript = Join-Path $InstallDir "installer\remote-access.ps1"
+$raAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$raScript`" -InstallDir `"$InstallDir`" -FromRequest" -WorkingDirectory $InstallDir
+$raPrincipal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+$raSettings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Minutes 45) -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+Register-ScheduledTask -TaskName $RemoteAccessTask -Action $raAction -Principal $raPrincipal -Settings $raSettings -Description "Runs F7FIVE0 remote access setup when an admin starts it from the web app." -Force | Out-Null
+if ($svcSid) {
+    # Read + execute on the task lets that account start it (schtasks /Run).
+    $sched = New-Object -ComObject Schedule.Service
+    $sched.Connect()
+    $raTask = $sched.GetFolder("\").GetTask($RemoteAccessTask)
+    $sddl = $raTask.GetSecurityDescriptor(4)   # DACL only
+    if ($sddl -notmatch [regex]::Escape($svcSid)) { $raTask.SetSecurityDescriptor("$sddl(A;;GRGX;;;$svcSid)", 0) }
 }
+Ok "scheduled task $RemoteAccessTask registered (used by Admin > Remote access)"
 
-function Setup-Tailscale {
-    $ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
-    if (-not (Test-Path $ts)) {
-        Invoke-Winget "Tailscale.Tailscale" @("--scope", "machine")
-        for ($i = 0; $i -lt 30 -and -not (Test-Path $ts); $i++) { Start-Sleep -Seconds 2 }
+# Command-line remote access (advanced and recovery). The Setup wizard
+# installs for home use only and never runs this.
+$PublicUrl = Get-EnvValue "PUBLIC_URL"
+$raMethod = $RemoteAccess
+if (-not $raMethod -and $TunnelToken) { $raMethod = "token" }
+$RemoteAccessFailed = $false
+if ($raMethod -and $raMethod -ne "none") {
+    Step "Remote access: $raMethod"
+    $raArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $raScript, "-InstallDir", $InstallDir, "-Method", $raMethod, "-NoRestart")
+    if ($PublicHost) { $raArgs += @("-PublicHost", $PublicHost) }
+    if ($DuckDnsToken) { $raArgs += @("-DuckDnsToken", $DuckDnsToken) }
+    if ($TunnelToken) { $raArgs += @("-TunnelToken", $TunnelToken) }
+    & powershell.exe @raArgs
+    if ($LASTEXITCODE -eq 0) {
+        $PublicUrl = Get-EnvValue "PUBLIC_URL"
+    } else {
+        $RemoteAccessFailed = $true
+        Warn "Remote access is not set up. F7FIVE0 still works at home; finish it from Admin > Remote access."
     }
-    if (-not (Test-Path $ts)) { Warn "Tailscale did not install. Install it from tailscale.com, then run: installer\install.ps1 -RemoteAccess tailscale"; return $null }
-    $prev = $ErrorActionPreference; $ErrorActionPreference = "Continue"
-    try {
-        $state = { try { (& $ts status --json 2>$null | Out-String | ConvertFrom-Json) } catch { $null } }
-        for ($i = 0; $i -lt 20 -and -not (& $state); $i++) { Start-Sleep -Seconds 2 }   # service warming up
-        $st = & $state
-        if (-not $st -or $st.BackendState -ne "Running") {
-            Info "Signing this PC in to Tailscale (free). If you're new, pick Google, Microsoft, Apple, or GitHub to create an account."
-            # --unattended keeps the connection up when nobody is logged in to Windows.
-            $ok = Invoke-WithSignIn $ts "up --unattended --hostname=f7five0 --timeout=0s" 900 $true {
-                $s = & $state; $s -and $s.BackendState -eq "Running"
-            }
-            if (-not $ok) { Warn "Tailscale sign-in did not finish. Run: installer\install.ps1 -RemoteAccess tailscale"; return $null }
-        } else {
-            Info "this PC is already signed in to Tailscale as $($st.Self.HostName)"
-        }
-        Info "publishing F7FIVE0 with Tailscale Funnel (the first time, Tailscale may ask you to allow Funnel in the browser)"
-        $ok = Invoke-WithSignIn $ts "funnel --bg $WebPort" 600 $true $null
-        if (-not $ok) { Warn "Tailscale Funnel did not start. Run: installer\install.ps1 -RemoteAccess tailscale"; return $null }
-        $dns = ((& $state).Self.DNSName).TrimEnd('.')
-        if (-not $dns) { Warn "Could not read this PC's Tailscale name."; return $null }
-        return "https://$dns"
-    } finally { $ErrorActionPreference = $prev }
-}
-
-function Setup-Cloudflare([string]$hostName) {
-    if (-not $hostName) { Warn "No address given for Cloudflare (for example music.yourdomain.com). Skipping."; return $null }
-    $cfd = Join-Path $BinDir "cloudflared.exe"
-    if (-not (Test-Path $cfd)) { Download $CloudflaredUrl $cfd }
-    $cfDir = Join-Path $InstallDir "cloudflared"
-    if (-not (Test-Path $cfDir)) { New-Item -ItemType Directory -Path $cfDir | Out-Null }
-    $cert = Join-Path $cfDir "cert.pem"
-    $cred = Join-Path $cfDir "tunnel.json"
-    $cfg  = Join-Path $cfDir "config.yml"
-    $name = "f7five0"
-    $prev = $ErrorActionPreference; $ErrorActionPreference = "Continue"
-    try {
-        if (-not (Test-Path $cert)) {
-            Info "A browser window will open. Sign in to Cloudflare (or create a free account), then click the domain '$(($hostName -split '\.', 2)[1])' and Authorize."
-            $userCert = Join-Path $env:USERPROFILE ".cloudflared\cert.pem"
-            if (Test-Path $userCert) { Move-Item -Force $userCert "$userCert.bak-f7five0" }
-            $ok = Invoke-WithSignIn $cfd "tunnel login" 900 $false { Test-Path $userCert }
-            if (-not $ok) { Warn "Cloudflare sign-in did not finish. Run: installer\install.ps1 -RemoteAccess cloudflare -PublicHost $hostName"; return $null }
-            Move-Item -Force $userCert $cert
-            if (Test-Path "$userCert.bak-f7five0") { Move-Item -Force "$userCert.bak-f7five0" $userCert }
-            Set-PrivateAcl $cert
-        }
-        $list = & $cfd tunnel --origincert $cert list --output json 2>$null | Out-String
-        $tunnel = @($list | ConvertFrom-Json -ErrorAction SilentlyContinue) | Where-Object { $_.name -eq $name -and -not $_.deleted_at } | Select-Object -First 1
-        if (-not $tunnel) {
-            & $cfd tunnel --origincert $cert create --credentials-file $cred $name | ForEach-Object { Info $_ }
-            if ($LASTEXITCODE -ne 0) { Warn "Could not create the Cloudflare tunnel."; return $null }
-            $list = & $cfd tunnel --origincert $cert list --output json 2>$null | Out-String
-            $tunnel = @($list | ConvertFrom-Json) | Where-Object { $_.name -eq $name } | Select-Object -First 1
-        } elseif (-not (Test-Path $cred)) {
-            & $cfd tunnel --origincert $cert token --cred-file $cred $name | Out-Null
-        }
-        if (-not $tunnel -or -not (Test-Path $cred)) { Warn "Cloudflare tunnel credentials are missing."; return $null }
-        Set-PrivateAcl $cred
-        & $cfd tunnel --origincert $cert route dns --overwrite-dns $name $hostName | ForEach-Object { Info $_ }
-        if ($LASTEXITCODE -ne 0) { Warn "Could not point $hostName at the tunnel. Is that domain on the Cloudflare account you picked?"; return $null }
-        $yaml = @(
-            "# Written by F7FIVE0 setup.",
-            "tunnel: $($tunnel.id)",
-            "credentials-file: $cred",
-            "ingress:",
-            "  - hostname: $hostName",
-            "    service: http://127.0.0.1:$WebPort",
-            "  - service: http_status:404"
-        )
-        [IO.File]::WriteAllLines($cfg, $yaml, (New-Object Text.UTF8Encoding($false)))
-        # Its own service, so an existing 'Cloudflared' service is never touched.
-        Install-Svc "F7FIVE0-Tunnel" $cfd "tunnel --no-autoupdate --config `"$cfg`" run" $cfDir @() "F7FIVE0 Cloudflare Tunnel"
-        Start-Service -Name "F7FIVE0-Tunnel"
-        return "https://$hostName"
-    } finally { $ErrorActionPreference = $prev }
-}
-
-function Setup-PortForward([string]$hostName, [string]$duckToken) {
-    if (-not $hostName) { Warn "No address given for port forwarding (for example music.yourdomain.com or myname.duckdns.org). Skipping."; return $null }
-    $caddy = Join-Path $BinDir "caddy.exe"
-    if (-not (Test-Path $caddy)) { Download $CaddyUrl $caddy }
-    $caddyDir = Join-Path $InstallDir "caddy"
-    $caddyData = Join-Path $DataDir "caddy"
-    foreach ($d in @($caddyDir, $caddyData)) { if (-not (Test-Path $d)) { New-Item -ItemType Directory -Path $d | Out-Null } }
-
-    foreach ($port in 80, 443) {
-        $busy = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |
-            Where-Object { (Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue).ProcessName -ne "caddy" }
-        if ($busy) { Warn "Port $port is already used by another program (often IIS or another web server). HTTPS will not work until it is freed." }
-    }
-
-    # Keep a DuckDNS name pointed at this home's public IP.
-    if ($duckToken -and $hostName -like "*.duckdns.org") {
-        $sub = $hostName -replace '\.duckdns\.org$', ''
-        $updateUrl = "https://www.duckdns.org/update?domains=$sub&token=$duckToken&ip="
-        try {
-            $r = Invoke-RestMethod -Uri $updateUrl -UseBasicParsing -TimeoutSec 15
-            if ("$r" -match "OK") { Ok "DuckDNS updated for $hostName" } else { Warn "DuckDNS did not accept the update ($r). Check the token." }
-        } catch { Warn "Could not reach DuckDNS: $($_.Exception.Message)" }
-        $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -WindowStyle Hidden -Command `"Invoke-RestMethod -UseBasicParsing '$updateUrl' | Out-Null`""
-        $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 5)
-        $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
-        Register-ScheduledTask -TaskName "F7FIVE0-DuckDNS" -Action $action -Trigger $trigger -Principal $principal -Force | Out-Null
-        Ok "DuckDNS will be refreshed every 5 minutes (scheduled task F7FIVE0-DuckDNS)"
-    }
-
-    $caddyfile = Join-Path $caddyDir "Caddyfile"
-    $global = if ($ContactEmail) { "{`r`n    email $ContactEmail`r`n}`r`n`r`n" } else { "" }
-    $body = "$hostName {`r`n    reverse_proxy 127.0.0.1:$WebPort`r`n}`r`n"
-    [IO.File]::WriteAllText($caddyfile, "# Written by F7FIVE0 setup. Caddy gets and renews the HTTPS certificate.`r`n$global$body", (New-Object Text.UTF8Encoding($false)))
-    $proxyEnv = @("XDG_DATA_HOME=$caddyData", "XDG_CONFIG_HOME=$caddyData")
-    Install-Svc "F7FIVE0-Proxy" $caddy "run --config `"$caddyfile`" --adapter caddyfile" $caddyDir $proxyEnv "F7FIVE0 HTTPS proxy (Caddy)"
-    if (-not (Get-NetFirewallRule -DisplayName "F7FIVE0 HTTPS" -ErrorAction SilentlyContinue)) {
-        New-NetFirewallRule -DisplayName "F7FIVE0 HTTPS" -Direction Inbound -Protocol TCP -LocalPort 80, 443 -Action Allow -Profile Any | Out-Null
-    }
-    Start-Service -Name "F7FIVE0-Proxy"
-
-    $lanIp = @(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
-        Where-Object { $_.IPAddress -notmatch '^(127\.|169\.254\.)' -and $_.PrefixOrigin -ne "WellKnown" } |
-        Select-Object -ExpandProperty IPAddress | Select-Object -First 1)
-    $publicIp = $null
-    try { $publicIp = (Invoke-RestMethod -Uri "https://api.ipify.org" -UseBasicParsing -TimeoutSec 10).ToString().Trim() } catch { }
-    $resolved = $null
-    try { $resolved = (Resolve-DnsName -Name $hostName -Type A -DnsOnly -ErrorAction Stop | Where-Object { $_.IPAddress } | Select-Object -First 1).IPAddress } catch { }
-
-    Write-Host ""
-    Write-Host "    Finish on your router (one time):" -ForegroundColor Yellow
-    Write-Host "      Forward TCP port 443 and TCP port 80 to $lanIp (this PC)." -ForegroundColor Yellow
-    Write-Host "      Give this PC a fixed/reserved IP in the router so the rule keeps working." -ForegroundColor Yellow
-    if ($publicIp -and $resolved -and $resolved -ne $publicIp) {
-        Warn "$hostName points to $resolved, but this home's public IP is $publicIp. Update the DNS record (or DuckDNS) to $publicIp."
-    } elseif ($publicIp -and -not $resolved) {
-        Warn "$hostName does not resolve yet. Point it at $publicIp."
-    }
-    Info "Once the router forwards those ports, Caddy fetches the HTTPS certificate on its own (retries until it works)."
-    return "https://$hostName"
-}
-
-$PublicUrl = $null
-if ($RemoteAccess -eq "tailscale") {
-    Step "Remote access: Tailscale"
-    $PublicUrl = Setup-Tailscale
-} elseif ($RemoteAccess -eq "cloudflare") {
-    Step "Remote access: Cloudflare"
-    $PublicUrl = Setup-Cloudflare $PublicHost
-} elseif ($RemoteAccess -eq "portforward") {
-    Step "Remote access: port forwarding (advanced)"
-    $PublicUrl = Setup-PortForward $PublicHost $DuckDnsToken
-} elseif ($TunnelToken) {
-    Step "Remote access: Cloudflare tunnel token"
-    $cfd = Join-Path $BinDir "cloudflared.exe"
-    if (-not (Test-Path $cfd)) { Download $CloudflaredUrl $cfd }
-    Install-Svc "F7FIVE0-Tunnel" $cfd "tunnel --no-autoupdate run --token $TunnelToken" $BinDir @() "F7FIVE0 Cloudflare Tunnel"
-    Start-Service -Name "F7FIVE0-Tunnel"
-    Ok "tunnel connected. In the Cloudflare dashboard, give it a public hostname pointing at http://localhost:$WebPort"
-    if ($PublicHost) { $PublicUrl = "https://$PublicHost" }
-}
-if ($PublicUrl) {
-    Set-EnvKey "PUBLIC_URL" $PublicUrl
-    Set-PrivateAcl $EnvFile
-    Ok "F7FIVE0 will be reachable at $PublicUrl"
-} elseif ($RemoteAccess -in @("tailscale", "cloudflare", "portforward")) {
-    Warn "Remote access is not set up yet. F7FIVE0 still works at home; rerun setup to try again."
 }
 
 # ---------------------------------------------------------------------------
@@ -985,24 +768,54 @@ $webUp = Wait-Http "http://127.0.0.1:$WebPort/login" 90
 if ($apiUp) { Ok "API is up" } else { Warn "API did not answer yet. Check $LogsDir\F7FIVE0-API.err.log" }
 if ($webUp) { Ok "web app is up" } else { Warn "web app did not answer yet. Check $LogsDir\F7FIVE0-Web.err.log" }
 
-$lan = @(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
-    Where-Object { $_.IPAddress -notmatch '^(127\.|169\.254\.)' -and $_.PrefixOrigin -ne "WellKnown" } |
-    Select-Object -ExpandProperty IPAddress)
-Write-Host ""
-Write-Host "  F7FIVE0 is installed." -ForegroundColor Green
-Write-Host "  On this PC:        http://localhost:$WebPort" -ForegroundColor White
-if ($OpenFirewall -eq "1" -and $lan.Count) {
-    Write-Host "  On your network:   http://$($lan[0]):$WebPort" -ForegroundColor White
+# ---------------------------------------------------------------------------
+# Summary (console, and logs\setup-summary.txt for the wizard's last page)
+# ---------------------------------------------------------------------------
+$lanOn = ($bind -eq "0.0.0.0")
+$lan = @(Get-LanIPv4)
+$publicNets = @()
+if ($lanOn) {
+    $publicNets = @(Get-NetConnectionProfile -ErrorAction SilentlyContinue |
+        Where-Object { $_.NetworkCategory -eq "Public" } | Select-Object -ExpandProperty Name)
+}
+$summary = New-Object System.Collections.Generic.List[string]
+$attention = New-Object System.Collections.Generic.List[string]
+$summary.Add("F7FIVE0 is installed.")
+$summary.Add("")
+$summary.Add("On this PC:  http://localhost:$WebPort")
+if ($lanOn) {
+    if ($lan.Count) { $summary.Add("At home:  http://$($lan[0]):$WebPort  (phones, TVs, other computers)") }
+    foreach ($n in $publicNets) {
+        $attention.Add("Windows treats the network '$n' as Public, so its firewall blocks phones and TVs. Set it to Private: Settings > Network & internet > (your Wi-Fi or Ethernet) > Network profile type > Private.")
+    }
+} else {
+    $summary.Add("Home network access: off. Only this PC can open F7FIVE0.")
+    $summary.Add("  To let phones and TVs connect, run in an elevated PowerShell:")
+    $summary.Add("  & '$InstallDir\installer\install.ps1' -OpenFirewall 1")
 }
 if ($PublicUrl) {
-    Write-Host "  From anywhere:     $PublicUrl" -ForegroundColor White
-    Write-Host "  (Your Account page shows a QR code for this address, handy for phones.)" -ForegroundColor Gray
+    $summary.Add("From anywhere:  $PublicUrl")
+} else {
+    $summary.Add("Away from home: sign in and go to Admin > Remote access.")
 }
 if (-not $IsUpgrade) {
-    Write-Host "  Sign in as '$AdminUser'. Your libraries fill in over the next few minutes." -ForegroundColor Gray
+    $summary.Add("")
+    $summary.Add("Sign in as '$AdminUser'. Your libraries fill in over the next few minutes.")
+}
+foreach ($w in $script:Warnings) { $attention.Add($w) }
+if ($attention.Count) {
+    $summary.Add("")
+    $summary.Add("Needs attention:")
+    foreach ($w in $attention) { $summary.Add("- $w") }
+}
+Write-Host ""
+foreach ($line in $summary) {
+    $color = if ($line -like "- *" -or $line -eq "Needs attention:") { "Yellow" } elseif ($line -like "F7FIVE0 is installed*") { "Green" } else { "White" }
+    Write-Host "  $line" -ForegroundColor $color
 }
 Write-Host "  Settings: $EnvFile   Logs: $LogsDir" -ForegroundColor Gray
 Write-Host ""
+try { [IO.File]::WriteAllLines((Join-Path $LogsDir "setup-summary.txt"), $summary, (New-Object Text.UTF8Encoding($false))) } catch { }
 } catch {
     Write-Host ""
     Write-Host $_.Exception.Message -ForegroundColor Red

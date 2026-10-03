@@ -84,9 +84,9 @@ var
   AdminPage: TInputQueryWizardPage;
   PgPage: TInputQueryWizardPage;
   NetPage: TInputOptionWizardPage;
-  RemotePage: TInputOptionWizardPage;
-  CfHostPage: TInputQueryWizardPage;
   OptionsPage: TInputQueryWizardPage;
+  PortsPage: TInputQueryWizardPage;
+  TmdbLink: TNewStaticText;
   InstallFailed: Boolean;
 
 function IsUpgrade: Boolean;
@@ -120,8 +120,8 @@ begin
   Result := '';
   if IsUpgrade then
     Result := ReadEnvPort;
-  if (Result = '') and (OptionsPage <> nil) then
-    Result := Trim(OptionsPage.Values[0]);
+  if (Result = '') and (PortsPage <> nil) then
+    Result := Trim(PortsPage.Values[0]);
   if Result = '' then
     Result := '3001';
 end;
@@ -151,6 +151,13 @@ begin
   if not Last then
     Result := Result + ',';
   Result := Result + #13#10;
+end;
+
+procedure TmdbLinkClick(Sender: TObject);
+var
+  ErrorCode: Integer;
+begin
+  ShellExec('open', 'https://www.themoviedb.org/settings/api', '', '', SW_SHOWNORMAL, ewNoWait, ErrorCode);
 end;
 
 procedure BrowseMediaClick(Sender: TObject);
@@ -209,59 +216,59 @@ begin
 
   NetPage := CreateInputOptionPage(PgPage.ID,
     'Access', 'Who can reach F7FIVE0?',
-    'F7FIVE0 always works on this PC. Choose whether other devices at home can use it too.',
+    'F7FIVE0 always works on this PC. Choose whether other devices at home can use it too.' + #13#10#13#10 +
+    'Away from home: once F7FIVE0 is running, sign in and go to Admin > Remote access. ' +
+    'It walks you through Tailscale, Cloudflare, or port forwarding while you watch.',
     False, False);
   NetPage.Add('Let phones, TVs, and other computers on my home network connect');
   NetPage.Values[0] := True;
 
-  RemotePage := CreateInputOptionPage(NetPage.ID,
-    'Listen from anywhere', 'How should you reach F7FIVE0 away from home? All options are free.',
-    'TAILSCALE: no domain, no router changes. One browser sign-in (Google, Microsoft, Apple, GitHub). ' +
-    'Tailscale limits Funnel bandwidth: great for music and a video stream or two, but high-bitrate ' +
-    'video or several viewers at once may buffer.' + #13#10#13#10 +
-    'CLOUDFLARE: no router changes, needs a domain already on Cloudflare. No bandwidth cap from ' +
-    'F7FIVE0, but Cloudflare''s free-plan terms discourage heavy video streaming.' + #13#10#13#10 +
-    'PORT FORWARDING (advanced): full home upload speed, no middleman. Needs router access ' +
-    '(ports 80 and 443) and a domain or free DuckDNS name. Your PC is reachable directly from the internet.',
-    True, False);
-  RemotePage.Add('Tailscale (recommended for most people)');
-  RemotePage.Add('Cloudflare (I have a domain on Cloudflare)');
-  RemotePage.Add('Port forwarding (advanced: I can change my router settings)');
-  RemotePage.Add('Home network only (add remote access later)');
-  RemotePage.SelectedValueIndex := 0;
-
-  CfHostPage := CreateInputQueryPage(RemotePage.ID,
-    'Your address', 'Which address should F7FIVE0 use?',
-    'Cloudflare: any name on a domain in your Cloudflare account (music.yourdomain.com). Setup creates ' +
-    'the tunnel and DNS record.' + #13#10 +
-    'Port forwarding: your own domain, or a free name from duckdns.org (myname.duckdns.org) plus its ' +
-    'token so the name follows your home internet address. Setup adds HTTPS and shows the router rules.');
-  CfHostPage.Add('Address (for example music.yourdomain.com):', False);
-  CfHostPage.Add('DuckDNS token (port forwarding with duckdns.org only):', False);
-
-  OptionsPage := CreateInputQueryPage(CfHostPage.ID,
-    'Optional extras', 'Everything on this page can be left blank',
-    'Cloudflare Tunnel token: only if you made a tunnel yourself in the Cloudflare dashboard.' + #13#10 +
-    'TMDB API key (free at themoviedb.org): posters and descriptions for movies and shows.' + #13#10 +
+  OptionsPage := CreateInputQueryPage(NetPage.ID,
+    'Optional extras', 'Both can be left blank',
+    'TMDB API key: posters and descriptions for movies and shows. It is free: make a TMDB account, ' +
+    'then request a key under Settings > API (link below).' + #13#10 +
     'Contact email: sent to MusicBrainz with music lookups, as their rules ask.');
-  OptionsPage.Add('Web port:', False);
-  OptionsPage.Add('Cloudflare Tunnel token (advanced):', False);
   OptionsPage.Add('TMDB API key:', False);
   OptionsPage.Add('Contact email:', False);
-  OptionsPage.Add('API port (advanced, blank = 8001 or the next free port):', False);
-  OptionsPage.Add('Stream port (advanced, blank = 8002 or the next free port):', False);
-  OptionsPage.Values[0] := '3001';
+  TmdbLink := TNewStaticText.Create(OptionsPage);
+  TmdbLink.Parent := OptionsPage.Surface;
+  TmdbLink.Caption := 'Get a free TMDB API key (themoviedb.org)';
+  TmdbLink.Cursor := crHand;
+  TmdbLink.Font.Color := clHighlight;
+  TmdbLink.Font.Style := [fsUnderline];
+  TmdbLink.Top := OptionsPage.Edits[1].Top + OptionsPage.Edits[1].Height + ScaleY(14);
+  TmdbLink.Left := OptionsPage.Edits[1].Left;
+  TmdbLink.OnClick := @TmdbLinkClick;
+
+  PortsPage := CreateInputQueryPage(OptionsPage.ID,
+    'Ports (advanced)', 'Most people keep these as they are',
+    'Web port: the one port browsers, phones, and the app connect to (http://this-pc:3001). ' +
+    'Change it only if another program already uses 3001.' + #13#10 +
+    'API and stream ports are internal (this PC only). Leave them blank and Setup uses 8001 and 8002, ' +
+    'or the next free ports.');
+  PortsPage.Add('Web port:', False);
+  PortsPage.Add('API port (blank = automatic):', False);
+  PortsPage.Add('Stream port (blank = automatic):', False);
+  PortsPage.Values[0] := '3001';
 end;
 
 procedure CurPageChanged(CurPageID: Integer);
 var
-  PortForward: Boolean;
+  Summary: AnsiString;
 begin
-  if CurPageID = CfHostPage.ID then
+  if CurPageID = wpFinished then
   begin
-    PortForward := RemotePage.SelectedValueIndex = 2;
-    CfHostPage.Edits[1].Visible := PortForward;
-    CfHostPage.PromptLabels[1].Visible := PortForward;
+    if InstallFailed then
+      Exit;
+    // install.ps1 writes a short summary (addresses, home network access,
+    // anything that still needs doing).
+    if LoadStringFromFile(ExpandConstant('{app}\logs\setup-summary.txt'), Summary) then
+    begin
+      WizardForm.FinishedLabel.Caption := String(Summary);
+      WizardForm.FinishedLabel.AutoSize := False;
+      WizardForm.FinishedLabel.Height := WizardForm.FinishedPage.Height - WizardForm.FinishedLabel.Top - ScaleY(70);
+      WizardForm.RunList.Top := WizardForm.FinishedPage.Height - ScaleY(60);
+    end;
   end;
 end;
 
@@ -269,10 +276,7 @@ function ShouldSkipPage(PageID: Integer): Boolean;
 begin
   Result := False;
   if IsUpgrade and ((PageID = MediaPage.ID) or (PageID = AdminPage.ID) or (PageID = PgPage.ID)
-      or (PageID = NetPage.ID) or (PageID = RemotePage.ID) or (PageID = CfHostPage.ID)
-      or (PageID = OptionsPage.ID)) then
-    Result := True
-  else if (PageID = CfHostPage.ID) and (RemotePage.SelectedValueIndex <> 1) and (RemotePage.SelectedValueIndex <> 2) then
+      or (PageID = NetPage.ID) or (PageID = OptionsPage.ID) or (PageID = PortsPage.ID)) then
     Result := True
   else if (PageID = PgPage.ID) and not PostgresInstalled then
     Result := True;
@@ -325,24 +329,15 @@ begin
       Result := False;
     end;
   end
-  else if CurPageID = CfHostPage.ID then
+  else if CurPageID = PortsPage.ID then
   begin
-    CfHostPage.Values[0] := Lowercase(Trim(CfHostPage.Values[0]));
-    if (Pos('.', CfHostPage.Values[0]) = 0) or (Pos('/', CfHostPage.Values[0]) > 0) or (Pos(' ', CfHostPage.Values[0]) > 0) then
-    begin
-      MsgBox('Enter just the address, like music.yourdomain.com (no https:// and no slashes).', mbError, MB_OK);
-      Result := False;
-    end;
-  end
-  else if CurPageID = OptionsPage.ID then
-  begin
-    Port := StrToIntDef(Trim(OptionsPage.Values[0]), 0);
+    Port := StrToIntDef(Trim(PortsPage.Values[0]), 0);
     if (Port < 1024) or (Port > 65535) then
     begin
       MsgBox('Pick a web port between 1024 and 65535 (3001 is fine).', mbError, MB_OK);
       Result := False;
     end
-    else if not OptionalPortOk(OptionsPage.Values[4]) or not OptionalPortOk(OptionsPage.Values[5]) then
+    else if not OptionalPortOk(PortsPage.Values[1]) or not OptionalPortOk(PortsPage.Values[2]) then
     begin
       MsgBox('API and stream ports are optional. If you fill one in, use a number between 1024 and 65535.', mbError, MB_OK);
       Result := False;
@@ -363,7 +358,7 @@ end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 var
-  Cfg, CfgPath, Params, Lan, Remote: String;
+  Cfg, CfgPath, Params, Lan: String;
   ResultCode: Integer;
 begin
   if CurStep <> ssPostInstall then
@@ -371,13 +366,6 @@ begin
 
   CfgPath := ExpandConstant('{tmp}\f7five0-setup.json');
   if NetPage.Values[0] then Lan := '1' else Lan := '0';
-  case RemotePage.SelectedValueIndex of
-    0: Remote := 'tailscale';
-    1: Remote := 'cloudflare';
-    2: Remote := 'portforward';
-  else
-    Remote := 'none';
-  end;
   Cfg := '{' + #13#10;
   if not IsUpgrade then
   begin
@@ -390,16 +378,12 @@ begin
       JsonPair('musicDir', MediaPage.Values[2], False) +
       JsonPair('musicVideosDir', MediaPage.Values[3], False) +
       JsonPair('openFirewall', Lan, False) +
-      JsonPair('webPort', Trim(OptionsPage.Values[0]), False) +
-      JsonPair('apiPort', Trim(OptionsPage.Values[4]), False) +
-      JsonPair('streamPort', Trim(OptionsPage.Values[5]), False) +
-      JsonPair('tunnelToken', Trim(OptionsPage.Values[1]), False) +
-      JsonPair('tmdbKey', Trim(OptionsPage.Values[2]), False) +
-      JsonPair('remoteAccess', Remote, False) +
-      JsonPair('publicHost', CfHostPage.Values[0], False) +
-      JsonPair('duckDnsToken', Trim(CfHostPage.Values[1]), False);
+      JsonPair('webPort', Trim(PortsPage.Values[0]), False) +
+      JsonPair('apiPort', Trim(PortsPage.Values[1]), False) +
+      JsonPair('streamPort', Trim(PortsPage.Values[2]), False) +
+      JsonPair('tmdbKey', Trim(OptionsPage.Values[0]), False);
   end;
-  Cfg := Cfg + JsonPair('contactEmail', Trim(OptionsPage.Values[3]), True) + '}';
+  Cfg := Cfg + JsonPair('contactEmail', Trim(OptionsPage.Values[1]), True) + '}';
   SaveStringToFile(CfgPath, Cfg, False);
 
   Params := '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\installer\install.ps1') +

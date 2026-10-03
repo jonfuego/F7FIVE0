@@ -562,7 +562,7 @@ function AnywhereCard() {
       <p className="mt-1 text-xs text-neutral-500">
         {remote
           ? "This address works at home and away. Scan it with your phone's camera, or type it into the Android app."
-          : "Scan with your phone's camera to open F7FIVE0. Remote access isn't set up, so this only works on your home network."}
+          : "Scan with your phone's camera to open F7FIVE0. Remote access isn't set up, so this only works on your home network. An admin can turn it on in Admin > Remote access."}
       </p>
       <div className="mt-4 flex flex-wrap items-center gap-5">
         {qr ? (

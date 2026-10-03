@@ -23,6 +23,7 @@ from app.api import library as library_routes
 from app.api import media_files as media_files_routes
 from app.api import passkeys as passkeys_routes
 from app.api import queue as queue_routes
+from app.api import remote_access as remote_access_routes
 from app.api import tracks as tracks_routes
 from app.api import requests as requests_routes
 from app.api import sessions as sessions_routes
@@ -133,6 +134,7 @@ app.include_router(tracks_routes.router, prefix="/api", tags=["library", "tracks
 app.include_router(media_files_routes.router, prefix="/api", tags=["library", "media-files"])
 app.include_router(stream_routes.router, prefix="/api", tags=["stream"])
 app.include_router(webhook_routes.router, prefix="/api/webhooks", tags=["webhooks"])
+app.include_router(remote_access_routes.router, prefix="/api/admin/remote-access", tags=["admin", "remote-access"])
 app.include_router(admin_routes.router, prefix="/api/admin", tags=["admin"])
 app.include_router(art_routes.admin_router, prefix="/api/admin/art", tags=["admin", "art"])
 app.include_router(art_routes.read_router, prefix="/api/art", tags=["art"])

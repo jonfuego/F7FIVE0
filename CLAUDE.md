@@ -13,8 +13,10 @@ INSTALL.md for the operator view.
 - `mobile/`: Expo SDK 51 + react-native-tvos 0.74 (phone, Android TV,
   Android Auto). `npm ci` relies on `.npmrc` legacy-peer-deps.
 - `installer/`: `install.ps1` (does all the work, idempotent),
-  `uninstall.ps1`, `build-dist.ps1` (assembles the release payload),
-  `F7FIVE0.iss` (Inno Setup wizard that only collects answers).
+  `remote-access.ps1` (Tailscale / Cloudflare / port forwarding / token /
+  off), `common.ps1` (helpers both dot-source), `uninstall.ps1`,
+  `build-dist.ps1` (assembles the release payload; list new installer files
+  there), `F7FIVE0.iss` (Inno Setup wizard that only collects answers).
 - `scripts/`: dev helpers, `publish.ps1` (deploy a git checkout to
   C:\F7FIVE0), nightly backup.
 - `.github/workflows/`: CI (pytest, web build, mobile tsc+jest) and Release
@@ -49,13 +51,21 @@ INSTALL.md for the operator view.
 - Config comes from `.env` at the install root via pydantic-settings. New
   settings need a default, an `.env.example` entry, and (if setup should
   write it) a line in `install.ps1`.
-- Remote access is set up by `install.ps1 -RemoteAccess tailscale|cloudflare|portforward`:
+- Setup installs for home use only and never waits on a person. Remote access
+  is set up afterwards from Admin > Remote access: the API writes
+  `data/remote-access/request.json` and starts the `F7FIVE0-RemoteAccess`
+  scheduled task (SYSTEM, on demand, startable by the service account), which
+  runs `installer/remote-access.ps1 -FromRequest` and reports through
+  `status.json` / `run.log` (`backend/app/services/remote_access.py` is the
+  other side). The helper treats the request as untrusted input. Methods:
   Tailscale Funnel; a named Cloudflare tunnel run by its own NSSM service
-  `F7FIVE0-Tunnel` (never touch a pre-existing `Cloudflared` service); or Caddy
-  (`F7FIVE0-Proxy`, automatic HTTPS, optional DuckDNS refresh task). Never offer
-  plain-HTTP port forwarding. The
-  result lands in `.env` as `PUBLIC_URL` and reaches clients through
-  `/api/client/features`.
+  `F7FIVE0-Tunnel` (never touch a pre-existing `Cloudflared` service); a
+  dashboard tunnel token (same service); or Caddy (`F7FIVE0-Proxy`, automatic
+  HTTPS, optional DuckDNS refresh task). Never offer plain-HTTP port
+  forwarding. The result lands in `.env` as `PUBLIC_URL`; the helper restarts
+  API and Web, and clients read it from `/api/client/features`.
+  `install.ps1 -RemoteAccess <method>` and `remote-access.ps1 -Method` are the
+  console (advanced / recovery) paths.
 - Passkeys (WebAuthn) are on only when an RP id resolves (WEBAUTHN_RP_ID or
   the host of an https PUBLIC_URL); clients read `/api/client/features`.
   Allowed Android apps and certs come from WEBAUTHN_ANDROID_CERT_SHA256 /

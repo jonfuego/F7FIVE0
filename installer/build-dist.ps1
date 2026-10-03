@@ -8,7 +8,7 @@
 
     backend\     FastAPI source + requirements.txt (no venv, no tests)
     web\         Next.js standalone bundle, ready for `node server.js`
-    installer\   install.ps1 / uninstall.ps1
+    installer\   install.ps1 / uninstall.ps1 / remote-access.ps1 / common.ps1
     alembic.ini  .env.example  LICENSE  README.md  INSTALL.md  VERSION
 
   Then, if Inno Setup is installed (or -Compile is passed), compiles
@@ -58,7 +58,7 @@ Mirror (Join-Path $Frontend "public") (Join-Path $Dist "web\public")
 Mirror (Join-Path $Repo "backend") (Join-Path $Dist "backend") @(".venv", "__pycache__", ".pytest_cache", "tests", "_reports") @("*.pyc")
 Mirror (Join-Path $Repo "scripts") (Join-Path $Dist "scripts") @() @("dev-*.ps1", "publish.ps1")
 New-Item -ItemType Directory -Path (Join-Path $Dist "installer") | Out-Null
-foreach ($f in @("install.ps1", "uninstall.ps1")) {
+foreach ($f in @("install.ps1", "uninstall.ps1", "common.ps1", "remote-access.ps1")) {
     Copy-Item (Join-Path $PSScriptRoot $f) (Join-Path $Dist "installer\$f")
 }
 foreach ($f in @("alembic.ini", ".env.example", "LICENSE", "README.md", "INSTALL.md")) {

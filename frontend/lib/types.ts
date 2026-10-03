@@ -314,6 +314,41 @@ export type ServerHealth = {
   last_sync_at: string | null;
 };
 
+// ---- Admin > Remote access --------------------------------------------------
+export type RemoteAccessMethod = "tailscale" | "cloudflare" | "portforward" | "token";
+
+export type RemoteAccessRunState =
+  | "idle" | "queued" | "running" | "signin" | "restarting"
+  | "succeeded" | "failed" | "cancelled";
+
+export type RemoteAccessRun = {
+  id: string | null;
+  method: RemoteAccessMethod | "off" | null;
+  host: string | null;
+  state: RemoteAccessRunState;
+  step: string | null;
+  sign_in_url: string | null;
+  sign_in_deadline: string | null;
+  sign_in_seconds_left: number | null;
+  public_url: string | null;
+  error: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  log: string[];
+};
+
+export type RemoteAccessStatus = {
+  available: boolean;
+  method: RemoteAccessMethod | null;
+  public_url: string | null;
+  pending_public_url: string | null;
+  reachable: boolean | null;
+  tunnel_service: string | null;
+  proxy_service: string | null;
+  web_port: number;
+  run: RemoteAccessRun;
+};
+
 // ---- Intro/credits markers -------------------------------------------------
 export type MediaMarker = {
   kind: "intro" | "credits";

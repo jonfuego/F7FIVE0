@@ -13,7 +13,8 @@
   A Cloudflare tunnel made by setup (F7FIVE0-Tunnel) is removed as a
   service; delete the tunnel itself in the Cloudflare dashboard if you like.
   Tailscale Funnel is switched off. The port-forwarding proxy (F7FIVE0-Proxy),
-  its firewall rule, and the DuckDNS refresh task are removed; remove the
+  its firewall rule, the DuckDNS refresh task, and the F7FIVE0-RemoteAccess
+  task are removed; remove the
   port-forward rules on your router yourself.
 
   PostgreSQL, Python, and Tailscale are left installed
@@ -40,6 +41,7 @@ foreach ($svc in @("F7FIVE0-Proxy", "F7FIVE0-Tunnel", "F7FIVE0-Web", "F7FIVE0-St
 Get-NetFirewallRule -DisplayName "F7FIVE0 web" -ErrorAction SilentlyContinue | Remove-NetFirewallRule
 Get-NetFirewallRule -DisplayName "F7FIVE0 HTTPS" -ErrorAction SilentlyContinue | Remove-NetFirewallRule
 Unregister-ScheduledTask -TaskName "F7FIVE0-DuckDNS" -Confirm:$false -ErrorAction SilentlyContinue
+Unregister-ScheduledTask -TaskName "F7FIVE0-RemoteAccess" -Confirm:$false -ErrorAction SilentlyContinue
 
 # Stop publishing through Tailscale Funnel (Tailscale itself stays installed).
 $ts = "$env:ProgramFiles\Tailscale\tailscale.exe"

@@ -192,6 +192,12 @@ class Settings(BaseSettings):
     stream_port: int = 8002
     web_port: int = 3001
 
+    # Admin > Remote access. The web app hands requests to a SYSTEM scheduled
+    # task through files in this folder (installer/remote-access.ps1). Blank
+    # means <install folder>/data/remote-access.
+    remote_access_dir: str = ""
+    remote_access_task: str = "F7FIVE0-RemoteAccess"
+
     # Cloudflare
     cloudflare_tunnel_name: str = "f7five0"
     cloudflare_tunnel_uuid: str = ""

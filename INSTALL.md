@@ -21,15 +21,19 @@
 3. Point it at your media folders. Leave any you don't have blank.
 4. Create your admin account.
 5. Choose whether other devices on your home network can connect.
-6. Choose how to listen from anywhere: Tailscale, Cloudflare, port
-   forwarding, or home network only (compared below).
-7. Optional extras: a TMDB API key and a contact email. Both can be added
-   later.
+6. Optional extras: a TMDB API key (there's a link to get a free one) and a
+   contact email. Both can be added later.
+7. Ports: keep the defaults unless another program already uses port 3001.
 
 When you click Install, a console window shows progress while Setup
 installs Python 3.12, PostgreSQL 16, Node.js, ffmpeg, and NSSM, creates the
-database, and starts the three F7FIVE0 services. Then open
-**http://localhost:3001**.
+database, and starts the three F7FIVE0 services. PostgreSQL is the slow
+part (often 5-10 minutes); the window prints the elapsed time while it
+works. The last page shows your addresses, whether home network access is
+on, and anything that still needs doing. Then open **http://localhost:3001**.
+
+Setup installs F7FIVE0 for use at home. To use it away from home, sign in
+and go to **Admin > Remote access** (below).
 
 Setup is safe to run again. If something fails, fix what the message says
 and rerun it; it picks up where it stopped. The full log is in
@@ -42,8 +46,16 @@ connect", browse to `http://<this-PC's-IP>:3001` from any device. Setup
 prints the address at the end.
 
 Can't connect? Windows only opens the port on networks marked **Private**.
-Open **Settings > Network & internet**, pick your connection, and set the
+Setup warns at the end if your network is marked Public. Open
+**Settings > Network & internet**, pick your connection, and set the
 network profile to Private.
+
+Left the box unticked? Setup's last page says "Home network access: off".
+Turn it on later from an elevated PowerShell:
+
+```powershell
+& C:\F7FIVE0\installer\install.ps1 -OpenFirewall 1
+```
 
 The web app can be installed like an app (Add to Home Screen, or the install
 icon in the browser's address bar) once you reach it over HTTPS, which the
@@ -51,9 +63,13 @@ remote access options below provide.
 
 ## Listening from anywhere
 
-Setup offers three free ways to reach F7FIVE0 away from home. Pick one on
-the "Listen from anywhere" page (or later, see the end of this section).
-Your Account page then shows the address with a QR code for your phone.
+Set this up after install, from the web app: sign in as an admin and go to
+**Admin > Remote access**. It works from any browser on your home network,
+so you can do it from your phone. Pick one of the free options below, and
+stay on the page while it runs: Tailscale and Cloudflare show a **Sign in**
+button you click to finish. Your Account page then shows the address with a
+QR code for your phone. The same page shows whether the address works,
+lets you switch to another option, and turns remote access off.
 
 | | Tailscale (recommended) | Cloudflare | Port forwarding (advanced) |
 |---|---|---|---|
@@ -65,47 +81,58 @@ Your Account page then shows the address with a QR code for your phone.
 | Traffic passes through | Tailscale's relays | Cloudflare's network | Nobody: straight to your PC |
 | Exposure | Only F7FIVE0, via Tailscale | Only F7FIVE0, via Cloudflare | Ports 80/443 on your PC are open to the internet |
 
-**Tailscale.** Setup installs Tailscale and opens a browser to sign in
-(creating the free account if you're new). It then turns on Tailscale Funnel.
-The first time, Tailscale asks you to allow Funnel for your account; click
-the button it shows.
+**Tailscale.** F7FIVE0 installs Tailscale, then shows **Sign in to
+Tailscale** (this creates the free account if you're new). It then turns on
+Tailscale Funnel. The first time, Tailscale asks you to allow Funnel for
+your account; click the button it shows.
 
-**Cloudflare.** Tell Setup the address you want, such as
-`music.yourdomain.com`. A browser opens: sign in, click your domain, and
-**Authorize**. Setup creates the tunnel, the DNS record, and an
+**Cloudflare.** Enter the address you want, such as
+`music.yourdomain.com`. Click **Sign in to Cloudflare**, sign in, click
+your domain, and **Authorize**. Cloudflare gives you about 9 minutes; the
+page counts down. F7FIVE0 creates the tunnel, the DNS record, and an
 `F7FIVE0-Tunnel` service.
 
 **Port forwarding (advanced).** For people comfortable with their router.
-Setup installs Caddy as the `F7FIVE0-Proxy` service, which gets and renews a
-free HTTPS certificate (Let's Encrypt) for your address, and opens ports 80
-and 443 in Windows Firewall. You then:
+F7FIVE0 installs Caddy as the `F7FIVE0-Proxy` service, which gets and
+renews a free HTTPS certificate (Let's Encrypt) for your address, and opens
+ports 80 and 443 in Windows Firewall. You then:
 
 1. Point your address at your home. With your own domain, create an A record
-   for your home's public IP (Setup prints it). With DuckDNS, create a free
-   name at duckdns.org and give Setup the token; a scheduled task
+   for your home's public IP (the page's Details show it). With DuckDNS,
+   create a free name at duckdns.org and enter its token; a scheduled task
    (`F7FIVE0-DuckDNS`) keeps it pointed at your home when your IP changes.
 2. In your router, reserve a fixed IP for this PC and forward **TCP 80** and
-   **TCP 443** to it. Setup prints the exact IP.
+   **TCP 443** to it. The page's Details show the exact IP.
 
 Caddy keeps retrying until the certificate works, so it's fine to do the
-router step after Setup finishes. Port 80 is only used to prove you own the
-name and to redirect to HTTPS; nothing is ever served unencrypted. If your
-internet provider blocks ports 80/443 or uses carrier-grade NAT (common on
-cellular and some fiber plans), port forwarding can't work; use Tailscale or
+router step afterwards. Port 80 is only used to prove you own the name and
+to redirect to HTTPS; nothing is ever served unencrypted. If your internet
+provider blocks ports 80/443 or uses carrier-grade NAT (common on cellular
+and some fiber plans), port forwarding can't work; use Tailscale or
 Cloudflare instead.
 
-Add or change remote access later from an elevated PowerShell:
+**Cloudflare tunnel token (advanced).** Already made a tunnel in the
+Cloudflare dashboard? Pick this option, enter the address and the token,
+and point the tunnel's public hostname at `http://localhost:3001` in the
+dashboard.
+
+How it works: Setup registers a scheduled task, `F7FIVE0-RemoteAccess`,
+that runs as SYSTEM only when an admin starts it from this page. The page
+hands it the request through `C:\F7FIVE0\data\remote-access\` and shows its
+progress. When it finishes, F7FIVE0 restarts its API and web app to use the
+new address.
+
+Advanced and recovery: the same steps run from an elevated PowerShell.
+Stay at the screen for the sign-in.
 
 ```powershell
 cd C:\F7FIVE0
-.\installer\install.ps1 -RemoteAccess tailscale
-.\installer\install.ps1 -RemoteAccess cloudflare -PublicHost music.yourdomain.com
-.\installer\install.ps1 -RemoteAccess portforward -PublicHost myname.duckdns.org -DuckDnsToken <token>
+.\installer\remote-access.ps1 -Method tailscale
+.\installer\remote-access.ps1 -Method cloudflare -PublicHost music.yourdomain.com
+.\installer\remote-access.ps1 -Method portforward -PublicHost myname.duckdns.org -DuckDnsToken <token>
+.\installer\remote-access.ps1 -Method token -PublicHost music.yourdomain.com -TunnelToken <token>
+.\installer\remote-access.ps1 -Method off
 ```
-
-Already made a tunnel in the Cloudflare dashboard? Pass its token instead
-(`-TunnelToken <token> -PublicHost music.yourdomain.com`) and point the
-tunnel's public hostname at `http://localhost:3001`.
 
 ## Media on a NAS or network drive
 
@@ -134,6 +161,10 @@ a separate `f7five0` database and user, and never stores the `postgres`
 password. If you've lost that password, reset it by following PostgreSQL's
 documentation for `pg_hba.conf` "trust" mode, then run Setup again.
 
+When Setup installs PostgreSQL itself, it saves the `postgres` password in
+`C:\F7FIVE0\data\postgres-superuser.txt` (readable by Administrators only)
+before the install starts, so it survives a failed or interrupted run.
+
 ## Optional integrations
 
 All of these go in `C:\F7FIVE0\.env`. Restart the services afterward:
@@ -142,7 +173,8 @@ All of these go in `C:\F7FIVE0\.env`. Restart the services afterward:
 Restart-Service F7FIVE0-API, F7FIVE0-Stream, F7FIVE0-Web
 ```
 
-- **TMDB** (`TMDB_API_KEY`): free key from themoviedb.org. Matches movies
+- **TMDB** (`TMDB_API_KEY`): free key from themoviedb.org (make an account,
+  then Settings > API: https://www.themoviedb.org/settings/api). Matches movies
   and shows by title and year and adds posters, descriptions, and cast.
 - **MusicBrainz** (`MUSICBRAINZ_USER_AGENT_EMAIL`): your email, sent with
   music lookups as MusicBrainz asks.
@@ -239,6 +271,8 @@ them from Settings > Apps if you don't need them.
 | Sign-in page loads but sign-in fails | Check `F7FIVE0-API.err.log`. The API needs PostgreSQL running (`Get-Service postgresql*`). |
 | Library stays empty | Check the folder paths in `.env`, then `F7FIVE0-API.err.log` for "folder scan". Scans run 30 seconds after start and every 30 minutes. Admins can also trigger a sync from the Admin page. |
 | Network share shows nothing | See "Media on a NAS" above. SYSTEM can't read shares. |
+| Admin > Remote access says the helper isn't installed | Run Setup again (it registers the `F7FIVE0-RemoteAccess` task), or use `installer\remote-access.ps1` from an elevated PowerShell. |
+| Remote access run failed | Open **Details** on the page, or `C:\F7FIVE0\data\remote-access\run.log`. |
 | Remote address doesn't load (port forwarding) | Check `F7FIVE0-Proxy.err.log`. Most often the router rule is missing, the address points at the wrong IP, or the provider blocks ports 80/443. |
 | Remote address buffers on video (Tailscale) | That's Funnel's bandwidth limit. Use a lower quality in the player, or switch to Cloudflare or port forwarding. |
 | Other devices can't connect | Network profile must be Private; the port must match `WEB_PORT`. |
@@ -257,6 +291,8 @@ powershell -ExecutionPolicy Bypass -File .\installer\install.ps1
 
 It asks the same questions as Setup. Useful switches: `-InstallDir`,
 `-MoviesDir`, `-TvDir`, `-MusicDir`, `-MusicVideosDir`, `-WebPort`,
-`-OpenFirewall 1`, `-RemoteAccess tailscale|cloudflare|portforward|none`,
-`-PublicHost`, `-DuckDnsToken`,
-`-TunnelToken`, `-TmdbKey`, `-ServiceUser`, `-NonInteractive`.
+`-OpenFirewall 1`, `-TmdbKey`, `-ServiceUser`, `-NonInteractive`.
+`-RemoteAccess tailscale|cloudflare|portforward|token` (with `-PublicHost`,
+`-DuckDnsToken`, `-TunnelToken`) also sets up remote access from the
+console at the end of the install; most people use Admin > Remote access
+instead.
