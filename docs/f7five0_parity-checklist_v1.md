@@ -60,7 +60,7 @@ F7FIVE0 was forked from arcHIVE at about 1.2.0 (Alembic head 0021). The parity g
 - [x] Resume, mark watched / unwatched
 - [x] Skip intro, skip credits, next episode
 - [x] Subtitle and audio track pickers, quality picker (signed track-opts)
-- [ ] Transcoding on non-NVIDIA hardware (QuickSync, AMD, CPU): confirm acceptable. 2026-10-01 VM test: plays, but slow start and stalls because the web player auto-switches quality and spawns a second ffmpeg (task `cpu-transcode-variant-switch`). Retest on real hardware with NVENC off.
+- [ ] Transcoding on non-NVIDIA hardware (QuickSync, AMD, CPU): confirm acceptable. Fixed 2026-10-02 (`ddd2e5e`, `4fd5036`): without NVENC each stream carries one rendition (pick or 720p), one encode per viewer at a time; VM-verified. Still to confirm on real hardware with NVENC off (side-by-side install).
 
 ## 5. Casting
 
