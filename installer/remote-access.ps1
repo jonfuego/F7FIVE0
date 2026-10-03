@@ -306,14 +306,21 @@ function Setup-Cloudflare([string]$hostName) {
             Set-PrivateAcl $cert
         }
         Step "Creating the Cloudflare tunnel"
-        $list = & $cfd tunnel --origincert $cert list --output json 2>$null | Out-String
-        $tunnel = @($list | ConvertFrom-Json -ErrorAction SilentlyContinue) | Where-Object { $_.name -eq $name -and -not $_.deleted_at } | Select-Object -First 1
+        # `tunnel list` only returns live tunnels. Don't filter on deleted_at:
+        # live tunnels report it as "0001-01-01T00:00:00Z", not blank.
+        $findTunnel = {
+            $json = & $cfd tunnel --origincert $cert list --name $name --output json 2>$null | Out-String
+            if (-not $json.Trim()) { return $null }
+            try { @($json | ConvertFrom-Json) | Where-Object { $_.name -eq $name } | Select-Object -First 1 } catch { $null }
+        }
+        $tunnel = & $findTunnel
         if (-not $tunnel) {
-            & $cfd tunnel --origincert $cert create --credentials-file $cred $name 2>&1 | ForEach-Object { Info "$_" }
-            if ($LASTEXITCODE -ne 0) { Warn "Could not create the Cloudflare tunnel."; return $null }
-            $list = & $cfd tunnel --origincert $cert list --output json 2>$null | Out-String
-            $tunnel = @($list | ConvertFrom-Json) | Where-Object { $_.name -eq $name -and -not $_.deleted_at } | Select-Object -First 1
-        } elseif (-not (Test-Path $cred)) {
+            $out = @(& $cfd tunnel --origincert $cert create --credentials-file $cred $name 2>&1 | ForEach-Object { "$_" })
+            $out | ForEach-Object { Info $_ }
+            $tunnel = & $findTunnel
+            if (-not $tunnel) { Warn "Could not create the Cloudflare tunnel."; return $null }
+        }
+        if (-not (Test-Path $cred)) {
             # The tunnel exists on Cloudflare (an earlier install) but this PC
             # has no credentials for it. Fetch them.
             Info "Found the existing '$name' tunnel on your Cloudflare account; fetching its credentials."
@@ -323,8 +330,7 @@ function Setup-Cloudflare([string]$hostName) {
                 & $cfd tunnel --origincert $cert cleanup $name 2>&1 | ForEach-Object { Info "$_" }
                 & $cfd tunnel --origincert $cert delete -f $name 2>&1 | ForEach-Object { Info "$_" }
                 & $cfd tunnel --origincert $cert create --credentials-file $cred $name 2>&1 | ForEach-Object { Info "$_" }
-                $list = & $cfd tunnel --origincert $cert list --output json 2>$null | Out-String
-                $tunnel = @($list | ConvertFrom-Json) | Where-Object { $_.name -eq $name -and -not $_.deleted_at } | Select-Object -First 1
+                $tunnel = & $findTunnel
             }
         }
         if (-not $tunnel -or -not (Test-Path $cred)) { Warn "Cloudflare tunnel credentials are missing."; return $null }
