@@ -19,7 +19,7 @@ interface ChipBarProps {
 }
 
 /** The PWA's `.filter-bar` + `.chip` row: a mono label, then pill chips; the
- * selected chip is the ivory "bulb" with a soft glow. Scrolls sideways on
+ * selected chip uses the hive tint and text. Scrolls sideways on
  * phones instead of wrapping into five rows like the web does. */
 export function ChipBar({ label, options, value, onChange, divider = true }: ChipBarProps): React.ReactElement {
   // Keep the selected chip in view (e.g. a remembered "Mixes" or a genre far
@@ -77,15 +77,15 @@ export const chipStyles = StyleSheet.create({
     justifyContent: "center",
   },
   on: {
-    backgroundColor: colors.bulb,
-    borderColor: colors.bulb,
-    shadowColor: colors.bulb,
+    backgroundColor: colors.accent,
+    borderColor: colors.accent,
+    shadowColor: colors.accent,
     shadowOpacity: 0.35,
     shadowRadius: 9,
     shadowOffset: { width: 0, height: 0 },
     elevation: 4,
   },
-  focused: { borderColor: colors.bulb, borderWidth: 2 },
+  focused: { borderColor: colors.accent, borderWidth: 2 },
   pressed: { backgroundColor: colors.surfaceHi },
   txt: { fontFamily: fonts.uiMedium, fontSize: 13, color: colors.ink2 },
   txtOn: { fontFamily: fonts.uiSemiBold, color: colors.background },

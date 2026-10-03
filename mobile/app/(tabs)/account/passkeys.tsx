@@ -1,4 +1,4 @@
-import { Ionicons } from "@expo/vector-icons";
+import { Fingerprint, Pencil, Trash2 } from "lucide-react-native";
 import React, { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
@@ -12,6 +12,7 @@ import {
 import { useApi } from "@/state/auth";
 import { getApiBase } from "@/state/config";
 import { colors, fonts, MIN_TOUCH, radius, spacing, typography } from "@/state/theme";
+import { Icon } from "@/ui/Icon";
 import { IconButton } from "@/ui/IconButton";
 import { Screen } from "@/ui/Screen";
 
@@ -117,7 +118,7 @@ export default function PasskeysScreen(): React.ReactElement {
         ) : (
           items.map((p) => (
             <View key={p.id} style={styles.row}>
-              <Ionicons name="finger-print" size={22} color={colors.accent} />
+              <Icon icon={Fingerprint} size={22} color={colors.accent} />
               <View style={styles.meta}>
                 <Text style={styles.name}>{p.name}</Text>
                 <Text style={styles.sub}>
@@ -126,13 +127,13 @@ export default function PasskeysScreen(): React.ReactElement {
                 </Text>
               </View>
               <IconButton
-                name="create-outline"
+                icon={Pencil}
                 onPress={() => onRename(p)}
                 accessibilityLabel={`Rename ${p.name}`}
                 color={colors.textMuted}
               />
               <IconButton
-                name="trash-outline"
+                icon={Trash2}
                 onPress={() => onDelete(p)}
                 accessibilityLabel={`Delete ${p.name}`}
                 color={colors.danger}
@@ -184,7 +185,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderRadius: radius.pill,
-    backgroundColor: colors.bulb,
+    backgroundColor: colors.accent,
     marginTop: spacing.xl,
   },
   addBtnDim: { opacity: 0.6 },

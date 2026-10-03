@@ -1,8 +1,9 @@
-import { Ionicons } from "@expo/vector-icons";
+import { Download, List, Play, Radio, Shuffle, SkipForward, type LucideIcon } from "lucide-react-native";
 import React from "react";
 import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
 
 import { colors, fonts, MIN_TOUCH, radius, spacing } from "@/state/theme";
+import { Icon } from "./Icon";
 
 export interface AlbumTileMenuProps {
   visible: boolean;
@@ -20,7 +21,9 @@ export interface AlbumTileMenuProps {
 
 interface Item {
   label: string;
-  icon: keyof typeof Ionicons.glyphMap;
+  icon: LucideIcon;
+  /** play / skip glyphs render filled. */
+  fill?: boolean;
   onPress?: () => void;
 }
 
@@ -39,12 +42,12 @@ export function AlbumTileMenu({
   onClose,
 }: AlbumTileMenuProps): React.ReactElement {
   const items: Item[] = [
-    ...(onPlayNow ? [{ label: "Play now", icon: "play" as const, onPress: onPlayNow }] : []),
-    { label: "Play next", icon: "play-forward", onPress: onPlayNext },
-    { label: "Add to queue", icon: "list", onPress: onAddToQueue },
-    { label: "Shuffle", icon: "shuffle", onPress: onShuffle },
-    ...(onTrackRadio ? [{ label: "Track radio", icon: "radio" as const, onPress: onTrackRadio }] : []),
-    ...(onDownload ? [{ label: "Download", icon: "download" as const, onPress: onDownload }] : []),
+    ...(onPlayNow ? [{ label: "Play now", icon: Play, fill: true, onPress: onPlayNow }] : []),
+    { label: "Play next", icon: SkipForward, fill: true, onPress: onPlayNext },
+    { label: "Add to queue", icon: List, onPress: onAddToQueue },
+    { label: "Shuffle", icon: Shuffle, onPress: onShuffle },
+    ...(onTrackRadio ? [{ label: "Track radio", icon: Radio, onPress: onTrackRadio }] : []),
+    ...(onDownload ? [{ label: "Download", icon: Download, onPress: onDownload }] : []),
   ];
 
   return (
@@ -67,7 +70,7 @@ export function AlbumTileMenu({
                 onClose();
               }}
             >
-              <Ionicons name={it.icon} size={18} color={colors.textMuted} />
+              <Icon icon={it.icon} size={18} color={colors.textMuted} fill={it.fill} />
               <Text style={styles.label}>{it.label}</Text>
             </Pressable>
           ))}

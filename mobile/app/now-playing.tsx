@@ -1,6 +1,20 @@
-import { Ionicons } from "@expo/vector-icons";
 import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
+import {
+  ChevronDown,
+  FileText,
+  List,
+  Minus,
+  PauseCircle,
+  PlayCircle,
+  Plus,
+  Radio,
+  Repeat,
+  Shuffle,
+  SkipBack,
+  SkipForward,
+  SlidersHorizontal,
+} from "lucide-react-native";
 import React, { useEffect, useRef, useState } from "react";
 import { Modal, Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -9,6 +23,7 @@ import { CastButton, useCast } from "@/cast";
 import { usePlayer } from "@/player/PlayerProvider";
 import { colors, MIN_TOUCH, radius, spacing, typography } from "@/state/theme";
 import { Artwork } from "@/ui/Artwork";
+import { Icon } from "@/ui/Icon";
 import { tick } from "@/ui/haptics";
 import { fetchWaveform } from "@/api/media";
 import { useTrackRadio } from "@/player/useTrackRadio";
@@ -94,7 +109,7 @@ export default function NowPlayingScreen(): React.ReactElement {
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.topBar}>
-        <IconButton name="chevron-down" onPress={() => router.back()} accessibilityLabel="Close now playing" />
+        <IconButton icon={ChevronDown} onPress={() => router.back()} accessibilityLabel="Close now playing" />
         <Text style={styles.header}>Now Playing</Text>
         <View style={styles.topRight}>
           <View style={styles.queueBtn}>
@@ -106,7 +121,7 @@ export default function NowPlayingScreen(): React.ReactElement {
             accessibilityLabel="Open lyrics"
             style={styles.queueBtn}
           >
-            <Ionicons name="text" size={24} color={colors.text} />
+            <Icon icon={FileText} size={24} color={colors.text} />
           </Pressable>
           <Pressable
             onPress={() => setOptionsOpen(true)}
@@ -114,7 +129,7 @@ export default function NowPlayingScreen(): React.ReactElement {
             accessibilityLabel="Player options"
             style={styles.queueBtn}
           >
-            <Ionicons name="options-outline" size={24} color={colors.text} />
+            <Icon icon={SlidersHorizontal} size={24} color={colors.text} />
           </Pressable>
           <Pressable
             onPress={() => setQueueOpen(true)}
@@ -122,7 +137,7 @@ export default function NowPlayingScreen(): React.ReactElement {
             accessibilityLabel="Open queue"
             style={styles.queueBtn}
           >
-            <Ionicons name="list" size={24} color={colors.text} />
+            <Icon icon={List} size={24} color={colors.text} />
           </Pressable>
         </View>
       </View>
@@ -153,26 +168,27 @@ export default function NowPlayingScreen(): React.ReactElement {
 
       <View style={styles.transport}>
         <IconButton
-          name="shuffle"
+          icon={Shuffle}
           onPress={() => {
             tick();
             void toggleShuffle();
           }}
           accessibilityLabel="Shuffle"
           size={24}
-          color={shuffleOn ? colors.bulb : colors.textMuted}
+          color={shuffleOn ? colors.accent : colors.textMuted}
         />
         <IconButton
-          name="play-skip-back"
+          icon={SkipBack}
           onPress={() => {
             tick();
             void previous();
           }}
           accessibilityLabel="Previous track"
           size={34}
+          fill
         />
         <IconButton
-          name={isPlaying ? "pause-circle" : "play-circle"}
+          icon={isPlaying ? PauseCircle : PlayCircle}
           onPress={() => {
             tick();
             void togglePlay();
@@ -182,24 +198,25 @@ export default function NowPlayingScreen(): React.ReactElement {
           color={colors.accent}
         />
         <IconButton
-          name="play-skip-forward"
+          icon={SkipForward}
           onPress={() => {
             tick();
             void next();
           }}
           accessibilityLabel="Next track"
           size={34}
+          fill
         />
         <View style={styles.repeatWrap}>
           <IconButton
-            name="repeat"
+            icon={Repeat}
             onPress={() => {
               tick();
               void cycleRepeat();
             }}
             accessibilityLabel={`Repeat ${repeatMode}`}
             size={24}
-            color={repeatMode !== "off" ? colors.bulb : colors.textMuted}
+            color={repeatMode !== "off" ? colors.accent : colors.textMuted}
           />
           {repeatMode === "one" ? <Text style={styles.repeatOne}>1</Text> : null}
         </View>
@@ -214,7 +231,7 @@ export default function NowPlayingScreen(): React.ReactElement {
             <View style={styles.sheetHead}>
               <Text style={styles.sheetTitle}>Playback</Text>
               <Pressable onPress={() => setOptionsOpen(false)} accessibilityLabel="Close options" style={styles.queueBtn}>
-                <Ionicons name="chevron-down" size={22} color={colors.text} />
+                <Icon icon={ChevronDown} size={22} color={colors.text} />
               </Pressable>
             </View>
             <ScrollView>
@@ -229,7 +246,7 @@ export default function NowPlayingScreen(): React.ReactElement {
                 }}
                 style={[styles.radioBtn, !trackId && styles.radioBtnOff]}
               >
-                <Ionicons name="radio" size={20} color={colors.background} />
+                <Icon icon={Radio} size={20} color={colors.background} />
                 <Text style={styles.radioBtnTxt}>Start track radio</Text>
               </Pressable>
 
@@ -276,14 +293,14 @@ export default function NowPlayingScreen(): React.ReactElement {
                   onPress={() => setCrossfade(crossfadeSec - 1)}
                   style={styles.stepBtn}
                 >
-                  <Ionicons name="remove" size={20} color={colors.text} />
+                  <Icon icon={Minus} size={20} color={colors.text} />
                 </Pressable>
                 <Pressable
                   accessibilityLabel="Increase crossfade"
                   onPress={() => setCrossfade(crossfadeSec + 1)}
                   style={styles.stepBtn}
                 >
-                  <Ionicons name="add" size={20} color={colors.text} />
+                  <Icon icon={Plus} size={20} color={colors.text} />
                 </Pressable>
               </View>
 
@@ -294,7 +311,7 @@ export default function NowPlayingScreen(): React.ReactElement {
                   value={loudnessOn}
                   onValueChange={setLoudness}
                   accessibilityLabel="Toggle loudness leveling"
-                  trackColor={{ true: colors.bulb, false: colors.line }}
+                  trackColor={{ true: colors.accent, false: colors.line }}
                   thumbColor={colors.text}
                 />
               </View>
@@ -305,7 +322,7 @@ export default function NowPlayingScreen(): React.ReactElement {
                   onValueChange={setLoudnessAlbumMode}
                   disabled={!loudnessOn}
                   accessibilityLabel="Toggle album loudness mode"
-                  trackColor={{ true: colors.bulb, false: colors.line }}
+                  trackColor={{ true: colors.accent, false: colors.line }}
                   thumbColor={colors.text}
                 />
               </View>
@@ -316,7 +333,7 @@ export default function NowPlayingScreen(): React.ReactElement {
                   onValueChange={setLoudnessAllowBoost}
                   disabled={!loudnessOn}
                   accessibilityLabel="Toggle loudness boost"
-                  trackColor={{ true: colors.bulb, false: colors.line }}
+                  trackColor={{ true: colors.accent, false: colors.line }}
                   thumbColor={colors.text}
                 />
               </View>
@@ -348,7 +365,7 @@ const styles = StyleSheet.create({
   queueBtn: { minWidth: MIN_TOUCH, minHeight: MIN_TOUCH, alignItems: "center", justifyContent: "center" },
   topRight: { flexDirection: "row", alignItems: "center" },
   repeatWrap: { justifyContent: "center", alignItems: "center" },
-  repeatOne: { position: "absolute", top: 2, right: 2, ...typography.caption, color: colors.bulb, fontSize: 9 },
+  repeatOne: { position: "absolute", top: 2, right: 2, ...typography.caption, color: colors.accent, fontSize: 9 },
   sheetBackdrop: { flex: 1, backgroundColor: colors.overlay, justifyContent: "flex-end" },
   sheet: {
     maxHeight: "70%",
@@ -369,7 +386,7 @@ const styles = StyleSheet.create({
     borderColor: colors.line,
     justifyContent: "center",
   },
-  chipOn: { backgroundColor: colors.bulb, borderColor: colors.bulb },
+  chipOn: { backgroundColor: colors.accent, borderColor: colors.accent },
   chipTxt: { color: colors.text, fontWeight: "600" },
   chipTxtOn: { color: colors.background },
   stepBtn: {
@@ -396,7 +413,7 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     minHeight: MIN_TOUCH,
     borderRadius: radius.pill,
-    backgroundColor: colors.bulb,
+    backgroundColor: colors.accent,
     marginBottom: spacing.sm,
   },
   radioBtnOff: { opacity: 0.4 },

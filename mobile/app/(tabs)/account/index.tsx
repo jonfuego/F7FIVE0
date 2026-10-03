@@ -1,6 +1,14 @@
-import { Ionicons } from "@expo/vector-icons";
 import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
+import {
+  ChevronRight,
+  Download,
+  Fingerprint,
+  PlusCircle,
+  Smartphone,
+  Tv,
+  XCircle,
+} from "lucide-react-native";
 import React, { useState } from "react";
 import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View, RefreshControl } from "react-native";
 
@@ -12,6 +20,7 @@ import { useApi, useAuth } from "@/state/auth";
 import { passkeysAvailable } from "@/auth/passkey";
 import { getApiBase } from "@/state/config";
 import { colors, fonts, MIN_TOUCH, radius, spacing, typography } from "@/state/theme";
+import { Icon } from "@/ui/Icon";
 import { IconButton } from "@/ui/IconButton";
 import { QueryState } from "@/ui/QueryState";
 import { Screen } from "@/ui/Screen";
@@ -117,9 +126,9 @@ export default function AccountScreen(): React.ReactElement {
             accessibilityLabel="My requests"
             style={styles.link}
           >
-            <Ionicons name="add-circle" size={22} color={colors.accent} />
+            <Icon icon={PlusCircle} size={22} color={colors.accent} />
             <Text style={styles.linkText}>My requests</Text>
-            <Ionicons name="chevron-forward" size={20} color={colors.textFaint} />
+            <Icon icon={ChevronRight} size={20} color={colors.textFaint} />
           </Pressable>
         ) : null}
 
@@ -129,9 +138,9 @@ export default function AccountScreen(): React.ReactElement {
           accessibilityLabel="Downloads"
           style={styles.link}
         >
-          <Ionicons name="download" size={22} color={colors.accent} />
+          <Icon icon={Download} size={22} color={colors.accent} />
           <Text style={styles.linkText}>Downloads</Text>
-          <Ionicons name="chevron-forward" size={20} color={colors.textFaint} />
+          <Icon icon={ChevronRight} size={20} color={colors.textFaint} />
         </Pressable>
 
         {passkeysOn ? (
@@ -141,9 +150,9 @@ export default function AccountScreen(): React.ReactElement {
             accessibilityLabel="Passkeys"
             style={styles.link}
           >
-            <Ionicons name="finger-print" size={22} color={colors.accent} />
+            <Icon icon={Fingerprint} size={22} color={colors.accent} />
             <Text style={styles.linkText}>Passkeys</Text>
-            <Ionicons name="chevron-forward" size={20} color={colors.textFaint} />
+            <Icon icon={ChevronRight} size={20} color={colors.textFaint} />
           </Pressable>
         ) : null}
 
@@ -217,8 +226,8 @@ export default function AccountScreen(): React.ReactElement {
             <View>
               {rows.map((s) => (
                 <View key={s.id} style={styles.sessionRow}>
-                  <Ionicons
-                    name={s.platform === "android_tv" || s.platform === "tvos" ? "tv" : "phone-portrait"}
+                  <Icon
+                    icon={s.platform === "android_tv" || s.platform === "tvos" ? Tv : Smartphone}
                     size={22}
                     color={colors.textMuted}
                   />
@@ -234,7 +243,7 @@ export default function AccountScreen(): React.ReactElement {
                     <Text style={styles.current}>current</Text>
                   ) : (
                     <IconButton
-                      name="close-circle"
+                      icon={XCircle}
                       onPress={() => revokeOne(s)}
                       accessibilityLabel={`Revoke ${s.device_label ?? "device"}`}
                       color={colors.danger}
@@ -300,7 +309,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderRadius: radius.pill,
-    backgroundColor: colors.bulb,
+    backgroundColor: colors.accent,
   },
   saveBtnDim: { opacity: 0.6 },
   saveText: { fontFamily: fonts.uiSemiBold, color: colors.background, fontSize: 15 },

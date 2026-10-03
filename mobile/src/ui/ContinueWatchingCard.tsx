@@ -1,10 +1,11 @@
-import { Ionicons } from "@expo/vector-icons";
+import { Play, PlayCircle } from "lucide-react-native";
 import React, { useState } from "react";
 import { Image, Pressable, StyleSheet, Text, View } from "react-native";
 
 import { resolveArtUri } from "@/api/media";
 import { useApi } from "@/state/auth";
 import { colors, fonts, radius, spacing } from "@/state/theme";
+import { Icon } from "./Icon";
 
 interface ContinueWatchingCardProps {
   title: string;
@@ -74,11 +75,11 @@ export function ContinueWatchingCard({
           />
         ) : (
           <View style={[styles.placeholder, frame]}>
-            <Ionicons name="play-circle-outline" size={44} color={colors.textFaint} />
+            <Icon icon={PlayCircle} size={44} color={colors.textFaint} />
           </View>
         )}
         <View style={styles.overlay}>
-          <Ionicons name="play" size={22} color={colors.background} />
+          <Icon icon={Play} size={22} color={colors.background} fill />
         </View>
         {left ? <Text style={styles.badge}>{left}</Text> : null}
         {pct > 0 ? (
@@ -106,7 +107,7 @@ const styles = StyleSheet.create({
   art: { position: "absolute", left: 0, top: 0 },
   placeholder: { alignItems: "center", justifyContent: "center" },
   focused: { transform: [{ scale: 1.04 }] },
-  frameFocused: { borderWidth: 2, borderColor: colors.bulb },
+  frameFocused: { borderWidth: 2, borderColor: colors.accent },
   pressed: { opacity: 0.8 },
   overlay: {
     position: "absolute",
@@ -116,7 +117,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: colors.bulb,
+    backgroundColor: colors.accent,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -131,7 +132,7 @@ const styles = StyleSheet.create({
     textShadowRadius: 4,
   },
   progressTrack: { position: "absolute", left: 0, right: 0, bottom: 0, height: 3, backgroundColor: "rgba(0,0,0,0.5)" },
-  progressFill: { height: 3, backgroundColor: colors.bulb },
+  progressFill: { height: 3, backgroundColor: colors.accent },
   title: { fontFamily: fonts.uiSemiBold, fontSize: 14, color: colors.text, marginTop: spacing.xs },
   subtitle: { fontFamily: fonts.mono, fontSize: 11, color: colors.textFaint },
 });

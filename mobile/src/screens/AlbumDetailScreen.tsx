@@ -1,5 +1,5 @@
-import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams } from "expo-router";
+import { Ellipsis, Shuffle } from "lucide-react-native";
 import React, { useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View, RefreshControl } from "react-native";
 
@@ -8,9 +8,10 @@ import type { SongRow } from "@/api/types";
 import { useDownloads } from "@/download/DownloadProvider";
 import { songEntries } from "@/download/entries";
 import { usePlayer } from "@/player/PlayerProvider";
-import { colors, MIN_TOUCH, spacing, typography } from "@/state/theme";
+import { colors, fonts, MIN_TOUCH, spacing, typography } from "@/state/theme";
 import { AlbumTileMenu } from "@/ui/AlbumTileMenu";
 import { Artwork } from "@/ui/Artwork";
+import { Icon } from "@/ui/Icon";
 import { QueryState } from "@/ui/QueryState";
 import { Screen } from "@/ui/Screen";
 import { TrackRow } from "@/ui/TrackRow";
@@ -70,7 +71,7 @@ export default function AlbumDetailScreen(): React.ReactElement {
                     onPress={() => playSongs(shuffled(songs), 0)}
                     style={({ pressed }) => [styles.shuffleBtn, pressed && styles.pressed]}
                   >
-                    <Ionicons name="shuffle" size={18} color={colors.background} />
+                    <Icon icon={Shuffle} size={18} color={colors.background} />
                     <Text style={styles.shuffleText}>Shuffle</Text>
                   </Pressable>
                   <Pressable
@@ -79,7 +80,7 @@ export default function AlbumDetailScreen(): React.ReactElement {
                     onPress={() => setMenuOpen(true)}
                     style={styles.kebab}
                   >
-                    <Ionicons name="ellipsis-horizontal" size={22} color={colors.text} />
+                    <Icon icon={Ellipsis} size={22} color={colors.text} />
                   </Pressable>
                 </View>
               </View>
@@ -123,9 +124,9 @@ const styles = StyleSheet.create({
     minHeight: MIN_TOUCH,
     paddingHorizontal: spacing.lg,
     borderRadius: 999,
-    backgroundColor: colors.bulb,
+    backgroundColor: colors.accent,
   },
-  shuffleText: { fontFamily: "Inter_600SemiBold", color: colors.background, fontSize: 15 },
+  shuffleText: { fontFamily: fonts.uiSemiBold, color: colors.background, fontSize: 15 },
   pressed: { opacity: 0.8 },
   kebab: { minWidth: MIN_TOUCH, minHeight: MIN_TOUCH, alignItems: "center", justifyContent: "center" },
 });

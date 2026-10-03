@@ -1,9 +1,10 @@
-import { Ionicons } from "@expo/vector-icons";
+import { CheckCircle, CloudOff, Download, XCircle } from "lucide-react-native";
 import React from "react";
 import { Pressable, StyleSheet, Text } from "react-native";
 
 import { useDownloads, type EnqueueOptions } from "@/download/DownloadProvider";
 import { colors, MIN_TOUCH, radius, spacing } from "@/state/theme";
+import { Icon } from "./Icon";
 
 interface DownloadButtonProps {
   mediaFileId: string;
@@ -34,12 +35,12 @@ export function DownloadButton({ mediaFileId, title, opts, compact }: DownloadBu
             ? "Retry download"
             : "Download";
   const icon = unavailable
-    ? "cloud-offline-outline"
+    ? CloudOff
     : status === "done"
-      ? "checkmark-circle"
+      ? CheckCircle
       : status === "downloading" || status === "queued"
-        ? "close-circle-outline"
-        : "download-outline";
+        ? XCircle
+        : Download;
 
   const onPress = () => {
     if (status === "downloading" || status === "queued") cancel(mediaFileId);
@@ -58,7 +59,7 @@ export function DownloadButton({ mediaFileId, title, opts, compact }: DownloadBu
         pressed && styles.pressed,
       ]}
     >
-      <Ionicons name={icon} size={compact ? 22 : 18} color={status === "done" ? colors.bulb : colors.text} />
+      <Icon icon={icon} size={compact ? 22 : 18} color={status === "done" ? colors.accent : colors.text} />
       {compact ? null : <Text style={styles.txt}>{label}</Text>}
     </Pressable>
   );
@@ -77,6 +78,6 @@ const styles = StyleSheet.create({
   },
   icon: { width: MIN_TOUCH, height: MIN_TOUCH, alignItems: "center", justifyContent: "center", borderRadius: radius.pill },
   txt: { fontSize: 16, fontWeight: "600", color: colors.text },
-  focused: { borderWidth: 2, borderColor: colors.bulb },
+  focused: { borderWidth: 2, borderColor: colors.accent },
   pressed: { opacity: 0.7 },
 });

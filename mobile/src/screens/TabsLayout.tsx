@@ -1,11 +1,12 @@
-import { Ionicons } from "@expo/vector-icons";
 import { BottomTabBar } from "@react-navigation/bottom-tabs";
 import { Tabs, useRootNavigationState, useRouter } from "expo-router";
+import { Film, Home, Music, Search, UserCircle } from "lucide-react-native";
 import React, { useEffect, useRef } from "react";
 import { View } from "react-native";
 
 import { useDownloads } from "@/download/DownloadProvider";
 import { colors } from "@/state/theme";
+import { Icon } from "@/ui/Icon";
 import { MiniPlayer } from "@/ui/MiniPlayer";
 
 /** If the app starts with no network, open Downloads (spec J offline mode:
@@ -55,35 +56,35 @@ export default function TabsLayout(): React.ReactElement {
         name="index"
         options={{
           title: "Home",
-          tabBarIcon: ({ color, size }) => <Ionicons name="home" color={color} size={size} />,
+          tabBarIcon: ({ color, size }) => <Icon icon={Home} color={color} size={size} />,
         }}
       />
       <Tabs.Screen
         name="music"
         options={{
           title: "Music",
-          tabBarIcon: ({ color, size }) => <Ionicons name="musical-notes" color={color} size={size} />,
+          tabBarIcon: ({ color, size }) => <Icon icon={Music} color={color} size={size} />,
         }}
       />
       <Tabs.Screen
         name="movies"
         options={{
           title: "Movies & Shows",
-          tabBarIcon: ({ color, size }) => <Ionicons name="film" color={color} size={size} />,
+          tabBarIcon: ({ color, size }) => <Icon icon={Film} color={color} size={size} />,
         }}
       />
       <Tabs.Screen
         name="search"
         options={{
           title: "Search",
-          tabBarIcon: ({ color, size }) => <Ionicons name="search" color={color} size={size} />,
+          tabBarIcon: ({ color, size }) => <Icon icon={Search} color={color} size={size} />,
         }}
       />
       <Tabs.Screen
         name="account"
         options={{
           title: "Account",
-          tabBarIcon: ({ color, size }) => <Ionicons name="person-circle" color={color} size={size} />,
+          tabBarIcon: ({ color, size }) => <Icon icon={UserCircle} color={color} size={size} />,
         }}
       />
     </Tabs>

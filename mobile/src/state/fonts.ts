@@ -1,38 +1,28 @@
 import {
-  BebasNeue_400Regular,
-} from "@expo-google-fonts/bebas-neue";
-import {
-  Fraunces_400Regular,
-  Fraunces_600SemiBold,
-} from "@expo-google-fonts/fraunces";
-import {
-  Inter_400Regular,
-  Inter_500Medium,
-  Inter_600SemiBold,
-  Inter_700Bold,
-} from "@expo-google-fonts/inter";
-import {
-  JetBrainsMono_400Regular,
-} from "@expo-google-fonts/jetbrains-mono";
+  Archivo_400Regular,
+  Archivo_500Medium,
+  Archivo_600SemiBold,
+  Archivo_700Bold,
+  Archivo_800ExtraBold,
+  Archivo_900Black,
+} from "@expo-google-fonts/archivo";
 import { useFonts } from "expo-font";
 
-/** The four PWA type families, bundled with expo-font and pinned exact in
- * package.json (see globals.css --display / --serif / --grotesk / --mono).
- * Loaded once at the root; screens reference the family names via
- * `fonts` in src/state/theme.ts. */
+/** Archivo 400 to 900, bundled with expo-font and pinned exact in package.json.
+ * The RN theme (src/state/f7five0-theme.ts) maps each weight to these keys via
+ * fontFor(); src/state/theme.ts re-exports them under the fonts object. Loaded
+ * once at the root so the UI never flashes a fallback face. */
 export const APP_FONTS = {
-  BebasNeue_400Regular,
-  Fraunces_400Regular,
-  Fraunces_600SemiBold,
-  Inter_400Regular,
-  Inter_500Medium,
-  Inter_600SemiBold,
-  Inter_700Bold,
-  JetBrainsMono_400Regular,
+  Archivo_400Regular,
+  Archivo_500Medium,
+  Archivo_600SemiBold,
+  Archivo_700Bold,
+  Archivo_800ExtraBold,
+  Archivo_900Black,
 } as const;
 
 /** Returns [loaded, error]. The root layout keeps the splash up until fonts
- * are ready so the marquee never flashes a fallback face. */
+ * are ready. */
 export function useAppFonts(): [boolean, Error | null] {
   const [loaded, error] = useFonts(APP_FONTS);
   return [loaded, error ?? null];

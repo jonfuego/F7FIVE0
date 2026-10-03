@@ -1,10 +1,11 @@
-import { Ionicons } from "@expo/vector-icons";
+import { Music } from "lucide-react-native";
 import React, { useState } from "react";
 import { Image, StyleSheet, View } from "react-native";
 
 import { resolveArtUri } from "@/api/media";
 import { useApi } from "@/state/auth";
 import { colors, radius } from "@/state/theme";
+import { Icon } from "@/ui/Icon";
 
 interface ArtworkProps {
   path?: string | null;
@@ -32,7 +33,7 @@ export function Artwork({ path, size, rounded, headers }: ArtworkProps): React.R
   if (!uri || failedUri === uri) {
     return (
       <View style={[styles.placeholder, style]}>
-        <Ionicons name="musical-notes" size={Math.round(size * 0.36)} color={colors.textFaint} />
+        <Icon icon={Music} size={Math.round(size * 0.36)} color={colors.textFaint} />
       </View>
     );
   }

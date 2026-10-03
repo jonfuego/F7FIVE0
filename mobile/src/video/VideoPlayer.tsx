@@ -1,5 +1,13 @@
-import { Ionicons } from "@expo/vector-icons";
 import { useQuery } from "@tanstack/react-query";
+import {
+  Check,
+  ChevronDown,
+  Pause,
+  Play,
+  SkipBack,
+  SkipForward,
+  SlidersHorizontal,
+} from "lucide-react-native";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -26,6 +34,7 @@ import { useApi } from "@/state/auth";
 import { deviceName } from "@/state/config";
 import { getSetting, setSetting } from "@/state/settings";
 import { colors, fonts, MIN_TOUCH, radius, spacing, typography } from "@/state/theme";
+import { Icon } from "@/ui/Icon";
 import { IconButton } from "@/ui/IconButton";
 import { Scrubber } from "@/ui/Scrubber";
 import {
@@ -410,13 +419,13 @@ export function VideoPlayer({ mediaFileId, resumeSec = 0, onClose, onPlayNext }:
       {controlsVisible ? (
         <View style={styles.overlay} pointerEvents="box-none">
           <View style={styles.topBar}>
-            <IconButton name="chevron-down" onPress={onClose} accessibilityLabel="Close player" color="#fff" />
+            <IconButton icon={ChevronDown} onPress={onClose} accessibilityLabel="Close player" color="#fff" />
             <Text style={styles.title} numberOfLines={1}>
               {stream.title ?? "Now playing"}
             </Text>
             <CastButton tintColor="#fff" />
             <IconButton
-              name="options"
+              icon={SlidersHorizontal}
               onPress={() => setPickerOpen(true)}
               accessibilityLabel="Audio, subtitles and quality"
               color="#fff"
@@ -432,11 +441,11 @@ export function VideoPlayer({ mediaFileId, resumeSec = 0, onClose, onPlayNext }:
               accessibilityLabel="Back 10 seconds"
               style={styles.jump}
             >
-              <Ionicons name="play-back" size={30} color="#fff" />
+              <Icon icon={SkipBack} size={30} color="#fff" fill />
               <Text style={styles.jumpTxt}>10</Text>
             </Pressable>
             <IconButton
-              name={paused ? "play" : "pause"}
+              icon={paused ? Play : Pause}
               onPress={() => {
                 setPaused((p) => !p);
                 scheduleHide();
@@ -444,6 +453,7 @@ export function VideoPlayer({ mediaFileId, resumeSec = 0, onClose, onPlayNext }:
               accessibilityLabel={paused ? "Play" : "Pause"}
               color="#fff"
               size={56}
+              fill
             />
             <Pressable
               onPress={() => {
@@ -454,7 +464,7 @@ export function VideoPlayer({ mediaFileId, resumeSec = 0, onClose, onPlayNext }:
               accessibilityLabel="Forward 30 seconds"
               style={styles.jump}
             >
-              <Ionicons name="play-forward" size={30} color="#fff" />
+              <Icon icon={SkipForward} size={30} color="#fff" fill />
               <Text style={styles.jumpTxt}>30</Text>
             </Pressable>
           </View>
@@ -509,7 +519,7 @@ export function VideoPlayer({ mediaFileId, resumeSec = 0, onClose, onPlayNext }:
           <Text style={styles.upNextCount}>Playing in {upNext.secondsLeft}s</Text>
           <View style={styles.upNextRow}>
             <Pressable onPress={advance} accessibilityRole="button" accessibilityLabel="Play next episode now" style={styles.upNextPlay}>
-              <Ionicons name="play" size={16} color={colors.background} />
+              <Icon icon={Play} size={16} color={colors.background} fill />
               <Text style={styles.upNextPlayTxt}>Play now</Text>
             </Pressable>
             <Pressable
@@ -534,7 +544,7 @@ export function VideoPlayer({ mediaFileId, resumeSec = 0, onClose, onPlayNext }:
                 accessibilityLabel="Close picker"
                 style={styles.closeBtn}
               >
-                <Ionicons name="chevron-down" size={22} color={colors.text} />
+                <Icon icon={ChevronDown} size={22} color={colors.text} />
               </Pressable>
             </View>
             <ScrollView>
@@ -581,7 +591,7 @@ export function VideoPlayer({ mediaFileId, resumeSec = 0, onClose, onPlayNext }:
                     style={[styles.optRow, audioIndex === a.index && styles.optRowOn]}
                   >
                     <Text style={styles.optRowTxt}>{audioLabel(a)}</Text>
-                    {audioIndex === a.index ? <Ionicons name="checkmark" size={18} color={colors.bulb} /> : null}
+                    {audioIndex === a.index ? <Icon icon={Check} size={18} color={colors.accent} /> : null}
                   </Pressable>
                 ))
               )}
@@ -594,7 +604,7 @@ export function VideoPlayer({ mediaFileId, resumeSec = 0, onClose, onPlayNext }:
                 style={[styles.optRow, subtitle === "off" && styles.optRowOn]}
               >
                 <Text style={styles.optRowTxt}>Off</Text>
-                {subtitle === "off" ? <Ionicons name="checkmark" size={18} color={colors.bulb} /> : null}
+                {subtitle === "off" ? <Icon icon={Check} size={18} color={colors.accent} /> : null}
               </Pressable>
               {(streams.data?.subtitles ?? []).map((s) => (
                 <Pressable
@@ -605,7 +615,7 @@ export function VideoPlayer({ mediaFileId, resumeSec = 0, onClose, onPlayNext }:
                   style={[styles.optRow, subtitle === s.index && styles.optRowOn]}
                 >
                   <Text style={styles.optRowTxt}>{subtitleLabel(s)}</Text>
-                  {subtitle === s.index ? <Ionicons name="checkmark" size={18} color={colors.bulb} /> : null}
+                  {subtitle === s.index ? <Icon icon={Check} size={18} color={colors.accent} /> : null}
                 </Pressable>
               ))}
               <Pressable
@@ -615,7 +625,7 @@ export function VideoPlayer({ mediaFileId, resumeSec = 0, onClose, onPlayNext }:
                 style={[styles.optRow, subtitle === "burn" && styles.optRowOn]}
               >
                 <Text style={styles.optRowTxt}>Burn in (image subs)</Text>
-                {subtitle === "burn" ? <Ionicons name="checkmark" size={18} color={colors.bulb} /> : null}
+                {subtitle === "burn" ? <Icon icon={Check} size={18} color={colors.accent} /> : null}
               </Pressable>
             </ScrollView>
           </View>
@@ -669,7 +679,7 @@ const styles = StyleSheet.create({
   },
   upNextLabel: { color: colors.textMuted, fontFamily: fonts.mono, fontSize: 11, letterSpacing: 1 },
   upNextTitle: { color: colors.text, fontFamily: fonts.uiSemiBold, fontSize: 16 },
-  upNextCount: { color: colors.bulb, fontFamily: fonts.mono, fontSize: 12 },
+  upNextCount: { color: colors.accent, fontFamily: fonts.mono, fontSize: 12 },
   upNextRow: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.sm },
   upNextPlay: {
     flexDirection: "row",
@@ -678,7 +688,7 @@ const styles = StyleSheet.create({
     minHeight: MIN_TOUCH,
     paddingHorizontal: spacing.lg,
     borderRadius: radius.pill,
-    backgroundColor: colors.bulb,
+    backgroundColor: colors.accent,
   },
   upNextPlayTxt: { color: colors.background, fontWeight: "700" },
   upNextCancel: { minHeight: MIN_TOUCH, paddingHorizontal: spacing.lg, justifyContent: "center" },
@@ -710,7 +720,7 @@ const styles = StyleSheet.create({
     borderColor: colors.line,
     justifyContent: "center",
   },
-  chipOn: { backgroundColor: colors.bulb, borderColor: colors.bulb },
+  chipOn: { backgroundColor: colors.accent, borderColor: colors.accent },
   chipTxt: { color: colors.text, fontWeight: "600" },
   chipTxtOn: { color: colors.background },
   optRow: {

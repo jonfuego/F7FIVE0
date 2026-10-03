@@ -1,5 +1,5 @@
-import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { Circle, CircleCheck, Play } from "lucide-react-native";
 import React, { useEffect, useMemo, useState } from "react";
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 
@@ -13,6 +13,7 @@ import { colors, MIN_TOUCH, radius, spacing, typography } from "@/state/theme";
 import { Artwork } from "@/ui/Artwork";
 import { Backdrop } from "@/ui/Backdrop";
 import { DownloadButton } from "@/ui/DownloadButton";
+import { Icon } from "@/ui/Icon";
 import { QueryState } from "@/ui/QueryState";
 import { Screen } from "@/ui/Screen";
 
@@ -116,7 +117,7 @@ export default function ShowDetailScreen(): React.ReactElement {
                 onPress={() => router.push(`/watch/${onDeckEp.media_files[0].id}`)}
                 style={({ pressed }) => [styles.playNext, pressed && styles.pressed]}
               >
-                <Ionicons name="play" size={18} color={colors.background} />
+                <Icon icon={Play} size={18} color={colors.background} fill />
                 <Text style={styles.playNextText} numberOfLines={1}>
                   {(progressMap[onDeckEp.media_files[0].id]?.position_sec ?? 0) > 0 ? "Resume" : "Play"}{" "}
                   S{onDeckEp.season_number} E{onDeckEp.episode_number}
@@ -188,10 +189,10 @@ export default function ShowDetailScreen(): React.ReactElement {
                       onPress={() => void toggleWatched(fileId)}
                       style={styles.epWatched}
                     >
-                      <Ionicons
-                        name={isWatched ? "checkmark-circle" : "ellipse-outline"}
+                      <Icon
+                        icon={isWatched ? CircleCheck : Circle}
                         size={22}
-                        color={isWatched ? colors.bulb : colors.textFaint}
+                        color={isWatched ? colors.accent : colors.textFaint}
                       />
                     </Pressable>
                   ) : null}
@@ -215,7 +216,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     marginBottom: spacing.md,
     borderRadius: radius.pill,
-    backgroundColor: colors.bulb,
+    backgroundColor: colors.accent,
     alignSelf: "flex-start",
     maxWidth: "100%",
   },

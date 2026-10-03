@@ -70,7 +70,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     paddingHorizontal: spacing.lg,
     color: colors.text,
-    fontSize: 22,
+    fontSize: 24,
   },
   flex: { flex: 1 },
   grid: { flexDirection: "row", flexWrap: "wrap", gap: spacing.lg },

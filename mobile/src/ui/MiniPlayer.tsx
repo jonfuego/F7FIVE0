@@ -1,4 +1,5 @@
 import { useRouter } from "expo-router";
+import { Pause, Play, SkipForward } from "lucide-react-native";
 import React from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
@@ -34,11 +35,12 @@ export function MiniPlayer(): React.ReactElement | null {
         ) : null}
       </View>
       <IconButton
-        name={isPlaying ? "pause" : "play"}
+        icon={isPlaying ? Pause : Play}
         onPress={togglePlay}
         accessibilityLabel={isPlaying ? "Pause" : "Play"}
+        fill
       />
-      <IconButton name="play-skip-forward" onPress={next} accessibilityLabel="Next track" />
+      <IconButton icon={SkipForward} onPress={next} accessibilityLabel="Next track" fill />
     </Pressable>
   );
 }

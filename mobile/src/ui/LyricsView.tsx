@@ -1,5 +1,5 @@
-import { Ionicons } from "@expo/vector-icons";
 import { useQuery } from "@tanstack/react-query";
+import { ChevronDown } from "lucide-react-native";
 import React, { useEffect, useMemo, useRef } from "react";
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
@@ -8,6 +8,7 @@ import { activeLyricIndex, plainTextLines } from "@/player/lyrics";
 import { usePlayer } from "@/player/PlayerProvider";
 import { useApi } from "@/state/auth";
 import { colors, MIN_TOUCH, spacing, typography } from "@/state/theme";
+import { Icon } from "@/ui/Icon";
 
 interface LyricsViewProps {
   visible: boolean;
@@ -61,7 +62,7 @@ export function LyricsView({ visible, onClose }: LyricsViewProps): React.ReactEl
             accessibilityLabel="Close lyrics"
             style={styles.closeBtn}
           >
-            <Ionicons name="chevron-down" size={26} color={colors.text} />
+            <Icon icon={ChevronDown} size={26} color={colors.text} />
           </Pressable>
         </View>
 
@@ -113,7 +114,7 @@ const styles = StyleSheet.create({
   empty: { ...typography.body, color: colors.textMuted },
   scroll: { paddingHorizontal: spacing.xl, paddingVertical: spacing.xxl, paddingBottom: 240 },
   line: { minHeight: LINE_HEIGHT, fontSize: 20, lineHeight: LINE_HEIGHT, textAlign: "center" },
-  lineActive: { color: colors.bulb, fontWeight: "700" },
+  lineActive: { color: colors.accent, fontWeight: "700" },
   lineDim: { color: colors.textFaint },
   linePlain: { color: colors.text, fontSize: 17, lineHeight: 28, textAlign: "left", minHeight: 28 },
 });

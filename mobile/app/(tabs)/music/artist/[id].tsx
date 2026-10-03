@@ -1,5 +1,5 @@
-import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { Radio, Shuffle } from "lucide-react-native";
 import React, { useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View, RefreshControl } from "react-native";
 
@@ -8,6 +8,7 @@ import { usePlayer } from "@/player/PlayerProvider";
 import { useApi } from "@/state/auth";
 import { colors, fonts, MIN_TOUCH, radius, spacing, typography } from "@/state/theme";
 import { Artwork } from "@/ui/Artwork";
+import { Icon } from "@/ui/Icon";
 import { QueryState } from "@/ui/QueryState";
 import { Screen } from "@/ui/Screen";
 import { Tile } from "@/ui/Tile";
@@ -63,7 +64,7 @@ export default function ArtistDetailScreen(): React.ReactElement {
                   onPress={() => void start("shuffle")}
                   style={({ pressed }) => [styles.primary, pressed && styles.pressed]}
                 >
-                  <Ionicons name="shuffle" size={18} color={colors.background} />
+                  <Icon icon={Shuffle} size={18} color={colors.background} />
                   <Text style={styles.primaryText}>{busy === "shuffle" ? "Loading..." : "Shuffle"}</Text>
                 </Pressable>
                 <Pressable
@@ -73,7 +74,7 @@ export default function ArtistDetailScreen(): React.ReactElement {
                   onPress={() => void start("radio")}
                   style={({ pressed }) => [styles.ghost, pressed && styles.pressed]}
                 >
-                  <Ionicons name="radio" size={18} color={colors.text} />
+                  <Icon icon={Radio} size={18} color={colors.text} />
                   <Text style={styles.ghostText}>{busy === "radio" ? "Loading..." : "Start radio"}</Text>
                 </Pressable>
               </View>
@@ -109,7 +110,7 @@ const styles = StyleSheet.create({
     minHeight: MIN_TOUCH,
     paddingHorizontal: spacing.lg,
     borderRadius: radius.pill,
-    backgroundColor: colors.bulb,
+    backgroundColor: colors.accent,
   },
   primaryText: { fontFamily: fonts.uiSemiBold, color: colors.background, fontSize: 15 },
   ghost: {

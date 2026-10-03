@@ -1,5 +1,5 @@
-import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
+import { CloudOff, Trash2, XCircle } from "lucide-react-native";
 import React from "react";
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
@@ -10,6 +10,7 @@ import { usePlayer } from "@/player/PlayerProvider";
 import { formatBytes, limitFraction } from "@/download/format";
 import { useSetting, SETTINGS } from "@/state/settings";
 import { colors, MIN_TOUCH, radius, spacing, typography } from "@/state/theme";
+import { Icon } from "@/ui/Icon";
 import { IconButton } from "@/ui/IconButton";
 import { Screen } from "@/ui/Screen";
 
@@ -50,7 +51,7 @@ export default function DownloadsScreen(): React.ReactElement {
       <ScrollView>
         {!online ? (
           <View style={styles.offlineBanner} accessibilityLabel="Offline mode">
-            <Ionicons name="cloud-offline" size={18} color={colors.background} />
+            <Icon icon={CloudOff} size={18} color={colors.background} />
             <Text style={styles.offlineText}>Offline - playing from downloads</Text>
           </View>
         ) : null}
@@ -125,14 +126,14 @@ export default function DownloadsScreen(): React.ReactElement {
               </Pressable>
               {it.status === "downloading" || it.status === "queued" ? (
                 <IconButton
-                  name="close-circle"
+                  icon={XCircle}
                   onPress={() => cancel(it.id)}
                   accessibilityLabel={`Cancel download of ${it.title}`}
                   color={colors.danger}
                 />
               ) : (
                 <IconButton
-                  name="trash"
+                  icon={Trash2}
                   onPress={() => confirmRemove(it.id, it.title)}
                   accessibilityLabel={`Delete download of ${it.title}`}
                   color={colors.danger}
@@ -151,7 +152,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: spacing.sm,
-    backgroundColor: colors.bulb,
+    backgroundColor: colors.accent,
     borderRadius: radius.md,
     padding: spacing.md,
     marginBottom: spacing.md,
@@ -170,7 +171,7 @@ const styles = StyleSheet.create({
     borderColor: colors.line,
     justifyContent: "center",
   },
-  chipOn: { backgroundColor: colors.bulb, borderColor: colors.bulb },
+  chipOn: { backgroundColor: colors.accent, borderColor: colors.accent },
   chipTxt: { color: colors.text, fontWeight: "600" },
   chipTxtOn: { color: colors.background },
   empty: { ...typography.body, color: colors.textMuted },

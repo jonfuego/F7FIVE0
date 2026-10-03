@@ -1,10 +1,11 @@
-import { Ionicons } from "@expo/vector-icons";
+import { Search } from "lucide-react-native";
 import { useRouter } from "expo-router";
 import React from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import { colors, fonts, MIN_TOUCH, spacing } from "@/state/theme";
-import { Wordmark } from "./Wordmark";
+import { HiveWordmark } from "./HiveWordmark";
+import { Icon } from "./Icon";
 
 interface MarqueeHeaderProps {
   /** Optional section label shown under the wordmark in the mono meta face. */
@@ -21,7 +22,7 @@ export function MarqueeHeader({ section, search = true }: MarqueeHeaderProps): R
   return (
     <View style={styles.wrap}>
       <View style={styles.row}>
-        <Wordmark />
+        <HiveWordmark />
         {search ? (
           <Pressable
             onPress={() => router.push("/(tabs)/search")}
@@ -29,7 +30,7 @@ export function MarqueeHeader({ section, search = true }: MarqueeHeaderProps): R
             accessibilityLabel="Search"
             style={({ pressed }) => [styles.searchBtn, pressed && styles.pressed]}
           >
-            <Ionicons name="search" size={20} color={colors.textMuted} />
+            <Icon icon={Search} size={20} color={colors.textMuted} />
           </Pressable>
         ) : null}
       </View>

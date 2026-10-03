@@ -1,4 +1,4 @@
-import { Ionicons } from "@expo/vector-icons";
+import { ChevronDown, Download, Hourglass, Radio, Sparkles, X } from "lucide-react-native";
 import React, { useMemo, useState } from "react";
 import { FlatList, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
@@ -8,6 +8,7 @@ import { songEntries } from "@/download/entries";
 import { usePlayer } from "@/player/PlayerProvider";
 import { useApi } from "@/state/auth";
 import { colors, fonts, MIN_TOUCH, radius, spacing } from "@/state/theme";
+import { Icon } from "@/ui/Icon";
 import { LibraryScreen } from "@/ui/LibraryScreen";
 
 // Every auto-playlist kind the backend exposes (app/api/auto_playlist.py, 12
@@ -117,7 +118,7 @@ export function MixesLibrary(): React.ReactElement {
               style={({ pressed }) => [styles.card, pressed && styles.pressed]}
             >
               <View style={styles.cardTop}>
-                <Ionicons name="sparkles" size={20} color={colors.bulb} />
+                <Icon icon={Sparkles} size={20} color={colors.accent} />
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel={`Download ${m.title} mix`}
@@ -125,8 +126,8 @@ export function MixesLibrary(): React.ReactElement {
                   onPress={() => void downloadMix(m.slug, m.title)}
                   style={styles.dlBtn}
                 >
-                  <Ionicons
-                    name={busy === `dl-${m.slug}` ? "hourglass" : "download-outline"}
+                  <Icon
+                    icon={busy === `dl-${m.slug}` ? Hourglass : Download}
                     size={18}
                     color={colors.textMuted}
                   />
@@ -145,7 +146,7 @@ export function MixesLibrary(): React.ReactElement {
             onPress={() => nowPlaying?.trackId && void playBy(TRACK_RADIO, nowPlaying.trackId)}
             style={({ pressed }) => [styles.card, pressed && styles.pressed, !nowPlaying?.trackId && styles.off]}
           >
-            <Ionicons name="radio" size={20} color={colors.bulb} />
+            <Icon icon={Radio} size={20} color={colors.accent} />
             <Text style={styles.cardTitle}>Track Radio</Text>
             <Text style={styles.cardSub} numberOfLines={2}>
               {busy === TRACK_RADIO
@@ -180,7 +181,7 @@ export function MixesLibrary(): React.ReactElement {
                 <Text style={artistFor[p.slug] ? styles.chosen : styles.placeholder} numberOfLines={1}>
                   {artistFor[p.slug]?.name ?? "Choose an artist"}
                 </Text>
-                <Ionicons name="chevron-down" size={16} color={colors.textMuted} />
+                <Icon icon={ChevronDown} size={16} color={colors.textMuted} />
               </Pressable>
               <Pressable
                 accessibilityRole="button"
@@ -244,7 +245,7 @@ export function MixesLibrary(): React.ReactElement {
             <View style={styles.sheetHead}>
               <Text style={styles.pickerTitle}>Choose an artist</Text>
               <Pressable accessibilityRole="button" accessibilityLabel="Close artist chooser" onPress={() => setChoosing(null)} style={styles.closeBtn}>
-                <Ionicons name="close" size={22} color={colors.text} />
+                <Icon icon={X} size={22} color={colors.text} />
               </Pressable>
             </View>
             <TextInput
@@ -336,13 +337,13 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderRadius: radius.pill,
-    backgroundColor: colors.bulb,
+    backgroundColor: colors.accent,
   },
   playText: { fontFamily: fonts.uiSemiBold, color: colors.background, fontSize: 15 },
   off: { opacity: 0.45 },
   cardTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   dlBtn: { minWidth: 32, minHeight: 32, alignItems: "flex-end", justifyContent: "center" },
-  notice: { fontFamily: fonts.mono, fontSize: 12, color: colors.bulb, marginTop: spacing.sm },
+  notice: { fontFamily: fonts.mono, fontSize: 12, color: colors.accent, marginTop: spacing.sm },
   chooser: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   chosen: { fontFamily: fonts.ui, fontSize: 15, color: colors.text, flexShrink: 1 },
   placeholder: { fontFamily: fonts.ui, fontSize: 15, color: colors.textFaint },
@@ -355,7 +356,7 @@ const styles = StyleSheet.create({
     borderColor: colors.line,
     justifyContent: "center",
   },
-  decadeOn: { backgroundColor: colors.bulb, borderColor: colors.bulb },
+  decadeOn: { backgroundColor: colors.accent, borderColor: colors.accent },
   decadeTxt: { fontFamily: fonts.mono, fontSize: 12, color: colors.text },
   decadeTxtOn: { color: colors.background },
   sheetBackdrop: { flex: 1, backgroundColor: colors.overlay, justifyContent: "flex-end" },

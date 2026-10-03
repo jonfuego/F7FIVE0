@@ -1,10 +1,12 @@
-import { Ionicons } from "@expo/vector-icons";
+import { Check, Film, Music } from "lucide-react-native";
 import React, { useState } from "react";
 import { Image, Pressable, StyleSheet, Text, View } from "react-native";
 
 import { resolveArtUri } from "@/api/media";
 import { useApi } from "@/state/auth";
 import { colors, fonts, radius, spacing } from "@/state/theme";
+import { Icon } from "./Icon";
+import { tvFocusStyle } from "./tvFocus";
 
 interface PosterCardProps {
   title: string;
@@ -68,7 +70,7 @@ export function PosterCard({
       style={({ pressed, focused }) => [
         styles.card,
         { width },
-        focused && styles.focused,
+        tvFocusStyle(focused),
         pressed && styles.pressed,
       ]}
     >
@@ -83,8 +85,8 @@ export function PosterCard({
           />
         ) : (
           <View style={[styles.placeholder, frame]}>
-            <Ionicons
-              name={square ? "musical-notes" : "film-outline"}
+            <Icon
+              icon={square ? Music : Film}
               size={Math.round(width * 0.28)}
               color={colors.textFaint}
             />
@@ -92,7 +94,7 @@ export function PosterCard({
         )}
         {watched ? (
           <View style={[styles.check, compact && styles.checkCompact]}>
-            <Ionicons name="checkmark" size={compact ? 11 : 13} color={colors.background} />
+            <Icon icon={Check} size={compact ? 11 : 13} color={colors.background} />
           </View>
         ) : null}
         {pct > 0 ? (
@@ -118,7 +120,6 @@ const styles = StyleSheet.create({
   frame: { overflow: "hidden" },
   art: { position: "absolute", left: 0, top: 0 },
   placeholder: { alignItems: "center", justifyContent: "center" },
-  focused: { transform: [{ scale: 1.06 }], borderWidth: 2, borderColor: colors.bulb, borderRadius: radius.md },
   pressed: { opacity: 0.75 },
   check: {
     position: "absolute",
@@ -127,7 +128,7 @@ const styles = StyleSheet.create({
     width: 22,
     height: 22,
     borderRadius: 11,
-    backgroundColor: colors.bulb,
+    backgroundColor: colors.accent,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -140,7 +141,7 @@ const styles = StyleSheet.create({
     height: 3,
     backgroundColor: "rgba(0,0,0,0.5)",
   },
-  progressFill: { height: 3, backgroundColor: colors.bulb },
+  progressFill: { height: 3, backgroundColor: colors.accent },
   title: { fontFamily: fonts.uiSemiBold, fontSize: 14, color: colors.text, marginTop: spacing.xs },
   meta: { fontFamily: fonts.mono, fontSize: 11, color: colors.textFaint, marginTop: 1 },
   titleCompact: { fontSize: 12 },

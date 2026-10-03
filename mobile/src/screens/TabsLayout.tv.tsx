@@ -1,10 +1,11 @@
-import { Ionicons } from "@expo/vector-icons";
 import { BottomTabBar } from "@react-navigation/bottom-tabs";
 import { Tabs } from "expo-router";
+import { Film, Home, Music, Search } from "lucide-react-native";
 import React from "react";
 import { View } from "react-native";
 
 import { colors } from "@/state/theme";
+import { Icon } from "@/ui/Icon";
 import { MiniPlayer } from "@/ui/MiniPlayer";
 
 /** Android TV navigation (spec F): Home (10-foot browse rails), Music, Movies &
@@ -21,9 +22,9 @@ export default function TvTabsLayout(): React.ReactElement {
       )}
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: colors.bulb,
+        tabBarActiveTintColor: colors.accent,
         tabBarInactiveTintColor: colors.textMuted,
-        tabBarLabelStyle: { fontSize: 16 },
+        tabBarLabelStyle: { fontSize: 24 },
         tabBarStyle: {
           height: 72,
           backgroundColor: colors.surface,
@@ -36,28 +37,28 @@ export default function TvTabsLayout(): React.ReactElement {
         name="index"
         options={{
           title: "Home",
-          tabBarIcon: ({ color }) => <Ionicons name="home" color={color} size={26} />,
+          tabBarIcon: ({ color }) => <Icon icon={Home} color={color} size={26} />,
         }}
       />
       <Tabs.Screen
         name="music"
         options={{
           title: "Music",
-          tabBarIcon: ({ color }) => <Ionicons name="musical-notes" color={color} size={26} />,
+          tabBarIcon: ({ color }) => <Icon icon={Music} color={color} size={26} />,
         }}
       />
       <Tabs.Screen
         name="movies"
         options={{
           title: "Movies & Shows",
-          tabBarIcon: ({ color }) => <Ionicons name="film" color={color} size={26} />,
+          tabBarIcon: ({ color }) => <Icon icon={Film} color={color} size={26} />,
         }}
       />
       <Tabs.Screen
         name="search"
         options={{
           title: "Search",
-          tabBarIcon: ({ color }) => <Ionicons name="search" color={color} size={26} />,
+          tabBarIcon: ({ color }) => <Icon icon={Search} color={color} size={26} />,
         }}
       />
       {/* Not reachable on TV. */}

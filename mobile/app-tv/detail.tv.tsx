@@ -10,6 +10,7 @@ import { Artwork } from "@/ui/Artwork";
 import { QueryState } from "@/ui/QueryState";
 import { Screen } from "@/ui/Screen";
 import { TrackRow } from "@/ui/TrackRow";
+import { tvFocusStyle } from "@/ui/tvFocus";
 
 /** TV album detail: large art, a "Play album" button that takes initial D-pad
  * focus (Select plays), and a focusable track list. */
@@ -47,7 +48,7 @@ export default function TvDetail(): React.ReactElement {
                     onPress={() => playSongs(songs, 0)}
                     accessibilityRole="button"
                     accessibilityLabel="Play album"
-                    style={({ focused }) => [styles.play, focused && styles.playFocused]}
+                    style={({ focused }) => [styles.play, tvFocusStyle(focused), focused && styles.playFocused]}
                   >
                     {({ focused }) => (
                       <Text style={[styles.playTxt, focused && { color: colors.background }]}>Play album</Text>
@@ -77,7 +78,7 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: "transparent",
   },
-  playFocused: { backgroundColor: colors.bulb, borderColor: colors.bulb, transform: [{ scale: 1.06 }] },
+  playFocused: { backgroundColor: colors.accent },
   playTxt: { ...typography.heading, color: colors.text },
   header: { flexDirection: "row", gap: spacing.xl, paddingVertical: spacing.xl, alignItems: "center" },
   meta: { flex: 1, gap: spacing.sm },

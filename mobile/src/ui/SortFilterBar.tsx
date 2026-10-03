@@ -1,9 +1,10 @@
-import { Ionicons } from "@expo/vector-icons";
+import { ArrowDown, ArrowUp } from "lucide-react-native";
 import React from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { colors, fonts, spacing } from "@/state/theme";
 import { chipStyles } from "./ChipBar";
+import { Icon } from "./Icon";
 import type { FilterOption, SortDir, SortOption } from "./sortFilter";
 
 interface SortFilterBarProps<T> {
@@ -96,7 +97,7 @@ export function SortFilterBar<T>({
           onPress={onToggleDir}
           style={styles.dirBtn}
         >
-          <Ionicons name={dir === "asc" ? "arrow-up" : "arrow-down"} size={16} color={colors.ink2} />
+          <Icon icon={dir === "asc" ? ArrowUp : ArrowDown} size={16} color={colors.ink2} />
         </Pressable>
       </ScrollView>
     </View>

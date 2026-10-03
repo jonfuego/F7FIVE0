@@ -132,7 +132,7 @@ const styles = StyleSheet.create({
     borderColor: colors.line,
     gap: spacing.xs,
   },
-  mixFocused: { borderColor: colors.bulb, borderWidth: 2 },
+  mixFocused: { borderColor: colors.accent, borderWidth: 2 },
   pressed: { opacity: 0.75 },
   mixTitle: { fontFamily: fonts.display, fontSize: 20, letterSpacing: 0.5, color: colors.text },
   mixSub: { fontFamily: fonts.ui, fontSize: 11, color: colors.textMuted },

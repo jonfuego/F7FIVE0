@@ -20,11 +20,11 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   orientation: "default",
   icon: "./assets/icon.png",
   userInterfaceStyle: "dark",
-  backgroundColor: "#0b0604",
+  backgroundColor: "#000000",
   splash: {
     image: "./assets/splash.png",
     resizeMode: "contain",
-    backgroundColor: "#0b0604",
+    backgroundColor: "#000000",
   },
   assetBundlePatterns: ["**/*"],
   ios: {
@@ -41,7 +41,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     versionCode: 1,
     adaptiveIcon: {
       foregroundImage: "./assets/adaptive-icon.png",
-      backgroundColor: "#0b0604",
+      backgroundColor: "#FFFFFF",
     },
     // Foreground service so react-native-track-player keeps audio alive when
     // the screen locks or the app backgrounds.
@@ -75,7 +75,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     [
       "expo-splash-screen",
       {
-        backgroundColor: "#0b0604",
+        backgroundColor: "#000000",
         image: "./assets/splash.png",
         imageWidth: 200,
       },

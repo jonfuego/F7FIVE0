@@ -1,3 +1,4 @@
+import { Eye, EyeOff } from "lucide-react-native";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -185,7 +186,7 @@ export default function LoginScreen(): React.ReactElement {
               accessibilityLabel="Password"
             />
             <IconButton
-              name={showPassword ? "eye-off" : "eye"}
+              icon={showPassword ? EyeOff : Eye}
               onPress={() => setShowPassword((v) => !v)}
               accessibilityLabel={showPassword ? "Hide password" : "Show password"}
               color={colors.textMuted}

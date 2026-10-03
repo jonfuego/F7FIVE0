@@ -1,10 +1,11 @@
-import { Ionicons } from "@expo/vector-icons";
+import { Search } from "lucide-react-native";
 import { useRouter } from "expo-router";
 import React from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import { colors, fonts, spacing } from "@/state/theme";
-import { Wordmark } from "./Wordmark";
+import { HiveWordmark } from "./HiveWordmark";
+import { Icon } from "./Icon";
 
 interface MarqueeHeaderProps {
   section?: string;
@@ -20,7 +21,7 @@ export function MarqueeHeader({ section, search = true }: MarqueeHeaderProps): R
   return (
     <View style={styles.wrap}>
       <View style={styles.row}>
-        <Wordmark size={48} />
+        <HiveWordmark height={48} />
         {search ? (
           <Pressable
             onPress={() => router.push("/(tabs)/search")}
@@ -32,7 +33,7 @@ export function MarqueeHeader({ section, search = true }: MarqueeHeaderProps): R
               pressed && styles.pressed,
             ]}
           >
-            <Ionicons name="search" size={28} color={colors.text} />
+            <Icon icon={Search} size={28} color={colors.text} />
             <Text style={styles.searchLabel}>Search</Text>
           </Pressable>
         ) : null}
@@ -60,12 +61,12 @@ const styles = StyleSheet.create({
     borderColor: "transparent",
     backgroundColor: colors.bg2,
   },
-  focused: { borderColor: colors.bulb, transform: [{ scale: 1.06 }] },
+  focused: { borderColor: colors.accent, transform: [{ scale: 1.06 }] },
   pressed: { opacity: 0.7 },
-  searchLabel: { fontFamily: fonts.uiSemiBold, fontSize: 20, color: colors.text },
+  searchLabel: { fontFamily: fonts.uiSemiBold, fontSize: 24, color: colors.text },
   section: {
     fontFamily: fonts.mono,
-    fontSize: 14,
+    fontSize: 24,
     letterSpacing: 3,
     color: colors.textFaint,
     marginTop: spacing.sm,

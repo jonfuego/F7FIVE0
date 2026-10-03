@@ -1,4 +1,4 @@
-import { Ionicons } from "@expo/vector-icons";
+import { Tv } from "lucide-react-native";
 import React, { useCallback } from "react";
 import { Pressable, View } from "react-native";
 import CastContext, {
@@ -8,6 +8,7 @@ import CastContext, {
 } from "react-native-google-cast";
 
 import { colors, MIN_TOUCH } from "@/state/theme";
+import { Icon } from "@/ui/Icon";
 
 // Cast icon button (phone only; the TV build uses CastButton.tv.tsx).
 //
@@ -49,8 +50,8 @@ export function CastButton({
         hitSlop={8}
         style={{ width: MIN_TOUCH, height: MIN_TOUCH, alignItems: "center", justifyContent: "center" }}
       >
-        <Ionicons
-          name={active ? "tv" : "tv-outline"}
+        <Icon
+          icon={Tv}
           size={size}
           color={active ? colors.accent : tintColor}
         />

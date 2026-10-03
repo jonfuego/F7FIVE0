@@ -1,16 +1,15 @@
-import { Ionicons } from "@expo/vector-icons";
+import { ChevronDown, ChevronUp, Repeat, Shuffle, Trash2, Volume2, X } from "lucide-react-native";
 import React from "react";
 import { FlatList, Modal, Pressable, StyleSheet, Text, View } from "react-native";
 
 import { usePlayer } from "@/player/PlayerProvider";
 import { colors, fonts, MIN_TOUCH, radius, spacing } from "@/state/theme";
+import { Icon } from "./Icon";
 
 export interface QueuePanelProps {
   visible: boolean;
   onClose: () => void;
 }
-
-const REPEAT_ICON = { off: "repeat", all: "repeat", one: "repeat" } as const;
 
 /** Up Next queue, ported from frontend/components/QueuePanel.tsx: jump-to,
  * remove, clear, reorder (TrackPlayer.move via the up/down handles), shuffle,
@@ -34,7 +33,7 @@ export function QueuePanel({ visible, onClose }: QueuePanelProps): React.ReactEl
                 accessibilityLabel="Shuffle queue"
                 style={styles.headerBtn}
               >
-                <Ionicons name="shuffle" size={20} color={player.shuffleOn ? colors.bulb : colors.textMuted} />
+                <Icon icon={Shuffle} size={20} color={player.shuffleOn ? colors.accent : colors.textMuted} />
               </Pressable>
               <Pressable
                 onPress={() => void player.cycleRepeat()}
@@ -42,10 +41,10 @@ export function QueuePanel({ visible, onClose }: QueuePanelProps): React.ReactEl
                 accessibilityLabel={`Repeat ${player.repeatMode}`}
                 style={styles.headerBtn}
               >
-                <Ionicons
-                  name={REPEAT_ICON[player.repeatMode]}
+                <Icon
+                  icon={Repeat}
                   size={20}
-                  color={player.repeatMode !== "off" ? colors.bulb : colors.textMuted}
+                  color={player.repeatMode !== "off" ? colors.accent : colors.textMuted}
                 />
                 {player.repeatMode === "one" ? <Text style={styles.one}>1</Text> : null}
               </Pressable>
@@ -55,10 +54,10 @@ export function QueuePanel({ visible, onClose }: QueuePanelProps): React.ReactEl
                 accessibilityLabel="Clear queue"
                 style={styles.headerBtn}
               >
-                <Ionicons name="trash-outline" size={20} color={colors.textMuted} />
+                <Icon icon={Trash2} size={20} color={colors.textMuted} />
               </Pressable>
               <Pressable onPress={onClose} accessibilityRole="button" accessibilityLabel="Close queue" style={styles.headerBtn}>
-                <Ionicons name="chevron-down" size={22} color={colors.text} />
+                <Icon icon={ChevronDown} size={22} color={colors.text} />
               </Pressable>
             </View>
           </View>
@@ -78,7 +77,7 @@ export function QueuePanel({ visible, onClose }: QueuePanelProps): React.ReactEl
                     accessibilityLabel={`Play ${item.title}`}
                   >
                     {isActive ? (
-                      <Ionicons name="volume-medium" size={16} color={colors.bulb} style={styles.playing} />
+                      <Icon icon={Volume2} size={16} color={colors.accent} style={styles.playing} />
                     ) : null}
                     <View style={styles.rowText}>
                       <Text style={styles.rowTitle} numberOfLines={1}>
@@ -97,7 +96,7 @@ export function QueuePanel({ visible, onClose }: QueuePanelProps): React.ReactEl
                     accessibilityLabel="Move up"
                     style={styles.iconBtn}
                   >
-                    <Ionicons name="chevron-up" size={18} color={index <= 0 ? colors.textFaint : colors.textMuted} />
+                    <Icon icon={ChevronUp} size={18} color={index <= 0 ? colors.textFaint : colors.textMuted} />
                   </Pressable>
                   <Pressable
                     disabled={index >= metas.length - 1}
@@ -105,8 +104,8 @@ export function QueuePanel({ visible, onClose }: QueuePanelProps): React.ReactEl
                     accessibilityLabel="Move down"
                     style={styles.iconBtn}
                   >
-                    <Ionicons
-                      name="chevron-down"
+                    <Icon
+                      icon={ChevronDown}
                       size={18}
                       color={index >= metas.length - 1 ? colors.textFaint : colors.textMuted}
                     />
@@ -117,7 +116,7 @@ export function QueuePanel({ visible, onClose }: QueuePanelProps): React.ReactEl
                     accessibilityLabel="Remove from queue"
                     style={styles.iconBtn}
                   >
-                    <Ionicons name="close" size={18} color={isActive ? colors.textFaint : colors.danger} />
+                    <Icon icon={X} size={18} color={isActive ? colors.textFaint : colors.danger} />
                   </Pressable>
                 </View>
               );
@@ -150,7 +149,7 @@ const styles = StyleSheet.create({
   title: { fontFamily: fonts.display, fontSize: 24, letterSpacing: 1, color: colors.text },
   headerActions: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
   headerBtn: { minWidth: MIN_TOUCH, minHeight: MIN_TOUCH, alignItems: "center", justifyContent: "center" },
-  one: { position: "absolute", top: 6, right: 6, fontFamily: fonts.mono, fontSize: 9, color: colors.bulb },
+  one: { position: "absolute", top: 6, right: 6, fontFamily: fonts.mono, fontSize: 9, color: colors.accent },
   row: {
     flexDirection: "row",
     alignItems: "center",

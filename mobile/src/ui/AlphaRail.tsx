@@ -50,6 +50,6 @@ const styles = StyleSheet.create({
     width: 22,
   },
   hit: { minHeight: Math.floor(MIN_TOUCH / 3), justifyContent: "center" },
-  letter: { fontFamily: fonts.mono, fontSize: 10, color: colors.bulb2, paddingVertical: 1 },
+  letter: { fontFamily: fonts.mono, fontSize: 10, color: colors.accent, paddingVertical: 1 },
   disabled: { color: colors.textFaint, opacity: 0.4 },
 });
