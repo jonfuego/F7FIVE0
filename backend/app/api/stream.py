@@ -229,6 +229,7 @@ def stream_start(
             quality=body.quality,
             source_height=mf.height,
             streams=streams,
+            keep_source_height=not settings.nvenc_enabled,
         )
         opts_token = opts.to_token()
         if opts_token:

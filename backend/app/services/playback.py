@@ -132,6 +132,27 @@ def pick_variants(mf: MediaFile) -> tuple[Variant, ...]:
     return tuple(at_or_below)
 
 
+# Without hardware encoding each rung is a full CPU encode, and players that
+# switch rungs on their own (Firefox / Chrome native HLS, ExoPlayer, Safari)
+# start a second cold encode. So a CPU-only server offers ONE rung per stream:
+# the viewer's pick (the `q` ceiling) or this default.
+CPU_DEFAULT_HEIGHT = 720
+
+
+def single_rung_for_cpu(
+    variants: tuple[Variant, ...], max_height: Optional[int],
+) -> tuple[Variant, ...]:
+    """The one rung a CPU-only server offers: the highest at or below the
+    viewer's ceiling (or CPU_DEFAULT_HEIGHT), else the smallest rung."""
+    if not variants:
+        return variants
+    ceiling = max_height or CPU_DEFAULT_HEIGHT
+    fitting = [v for v in variants if v.height <= ceiling]
+    if fitting:
+        return (max(fitting, key=lambda v: v.height),)
+    return (min(variants, key=lambda v: v.height),)
+
+
 def decide(mf: MediaFile) -> PlaybackDecision:
     ok, reason = can_direct_play(mf)
     if ok:

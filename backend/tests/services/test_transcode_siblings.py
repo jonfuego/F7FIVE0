@@ -91,3 +91,21 @@ def test_finished_sibling_keeps_its_cache(manager, tmp_path: Path) -> None:
     mgr.get_or_start(uid, mid, _v("low"), tmp_path / "f.mkv")
     assert not procs[0].terminated
     assert mgr.get(uid, mid, "medium") is not None
+
+
+def test_quality_change_via_new_stream_stops_old_encode(manager, tmp_path: Path) -> None:
+    """CPU-only servers change quality by re-requesting the stream with a `q`
+    ceiling, so the new job differs only in its quality token."""
+    mgr, procs = manager
+    uid, mid = uuid.uuid4(), uuid.uuid4()
+    mgr.get_or_start(uid, mid, _v("medium"), tmp_path / "f.mkv")              # default 720p
+    mgr.get_or_start(uid, mid, _v("high"), tmp_path / "f.mkv", opts="q1080")  # viewer picks 1080p
+    assert procs[0].terminated
+
+
+def test_different_audio_pick_is_not_a_sibling(manager, tmp_path: Path) -> None:
+    mgr, procs = manager
+    uid, mid = uuid.uuid4(), uuid.uuid4()
+    mgr.get_or_start(uid, mid, _v("medium"), tmp_path / "f.mkv", opts="a2")
+    mgr.get_or_start(uid, mid, _v("high"), tmp_path / "f.mkv", opts="a3-q1080")
+    assert not procs[0].terminated

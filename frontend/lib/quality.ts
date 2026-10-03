@@ -4,8 +4,24 @@
 
 // Per-browser quality choice: "auto" or a level height such as "720".
 const QUALITY_KEY = "f7five0:video-quality";
-// Start ceiling for software (CPU) transcoding.
-const CPU_START_HEIGHT = 720;
+// Start ceiling for software (CPU) transcoding. Matches the server's
+// playback.CPU_DEFAULT_HEIGHT.
+export const CPU_START_HEIGHT = 720;
+const SERVER_HEIGHTS = [1080, 720, 480];
+
+/** Saved pick as a height, or null for none / "auto". */
+export function prefHeight(pref: string | null): number | null {
+  if (!pref || !/^\d+$/.test(pref)) return null;
+  const h = Number(pref);
+  return SERVER_HEIGHTS.includes(h) ? h : null;
+}
+
+/** Quality choices a CPU-only server can encode for a source this tall. */
+export function serverQualityHeights(sourceHeight: number | null | undefined): number[] {
+  if (!sourceHeight) return SERVER_HEIGHTS;
+  const fit = SERVER_HEIGHTS.filter((h) => h <= sourceHeight);
+  return fit.length ? fit : [SERVER_HEIGHTS[SERVER_HEIGHTS.length - 1]];
+}
 
 export function readQualityPref(): string | null {
   try {

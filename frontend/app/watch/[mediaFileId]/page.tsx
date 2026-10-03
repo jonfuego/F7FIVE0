@@ -18,6 +18,8 @@ import { apiGet, apiPost, ApiError } from "@/lib/client-api";
 import { formatDuration, formatResolution } from "@/lib/format";
 import { useQueue, type QueueItem } from "@/lib/queue";
 import type { MediaMarker, Progress, StreamStart, StreamStartRequest } from "@/lib/types";
+import { loadFeatures } from "@/lib/features";
+import { prefHeight, readQualityPref, writeQualityPref } from "@/lib/quality";
 
 const AUDIO_CONTAINERS = new Set([
   "mp3", "m4a", "aac", "wav", "flac", "ogg", "oga", "opus", "wma",
@@ -104,6 +106,9 @@ export default function WatchPage() {
   // The live <video> element, handed up from <Player> via onVideoEl. Drives
   // the custom VideoTransport. Replaces the old ".np video" DOM poll.
   const [videoEl, setVideoEl] = useState<HTMLVideoElement | null>(null);
+  // Saved quality pick (height). Sent to stream/start on CPU-only servers,
+  // which encode exactly one rendition per stream.
+  const [quality, setQuality] = useState<number | null>(() => prefHeight(readQualityPref()));
 
   // Detect "queue advanced past route while we were linked" and follow
   // it by replacing the route. Without this, /watch falls through to
@@ -296,6 +301,12 @@ export default function WatchPage() {
       try {
         const body: StreamStartRequest = { file_id: mediaFileId };
         if (resume.resumeSec > 0) body.resume_sec = resume.resumeSec;
+        if (quality) {
+          const features = await loadFeatures();
+          if (!features.transcode?.hardware) {
+            body.quality = `${quality}p` as StreamStartRequest["quality"];
+          }
+        }
         const data = await apiPost<StreamStart>("/api/stream/start", body);
         if (!cancelled) setStream(data);
       } catch (err) {
@@ -306,7 +317,14 @@ export default function WatchPage() {
     return () => {
       cancelled = true;
     };
-  }, [mediaFileId, resume, useDockAudio]);
+  }, [mediaFileId, resume, useDockAudio, quality]);
+
+  function onServerQuality(height: number) {
+    writeQualityPref(String(height));
+    const at = Math.floor(videoEl?.currentTime ?? 0);
+    setQuality(height);
+    setResume({ kind: "chose", resumeSec: at });
+  }
 
   const chosenOffset = resume.kind === "chose" ? resume.resumeSec : 0;
   const readyToPlay = stream !== null;
@@ -369,6 +387,8 @@ export default function WatchPage() {
             initialResume={initialResume}
             markers={markers}
             onVideoEl={setVideoEl}
+            serverQuality={quality}
+            onServerQuality={onServerQuality}
           />
         ) : resume.kind === "prompt" ? (
           <ResumePrompt

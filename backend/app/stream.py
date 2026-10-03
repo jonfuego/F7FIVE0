@@ -39,7 +39,7 @@ from app.db import SessionLocal
 from app.models.media_file import MediaFile, ScanState
 from app.models.transcode import TranscodeSession
 from app.services import transcode_cache, transcoder
-from app.services.playback import pick_variants
+from app.services.playback import pick_variants, single_rung_for_cpu
 from app.services.range_response import ensure_under_roots, serve_file_range
 from app.services.security import verify_stream_url_params
 from app.services.track_opts import TrackOptsError, parse_token
@@ -232,9 +232,15 @@ def _signed_query(uid: str, mid: uuid.UUID, exp: int, sig: str, t: int = 0,
 
 
 def _variants_for(mf: MediaFile, o: str):
-    """The source ladder, capped at the track-options quality ceiling."""
+    """The source ladder, capped at the track-options quality ceiling.
+
+    Without NVENC the master playlist carries a single rung (see
+    playback.single_rung_for_cpu) so no player can start a second encode by
+    switching quality on its own."""
     variants = pick_variants(mf)
     max_h = parse_token(o).max_height
+    if not settings.nvenc_enabled:
+        return single_rung_for_cpu(variants, max_h)
     if max_h:
         capped = tuple(v for v in variants if v.height <= max_h)
         variants = capped or (variants[-1],)

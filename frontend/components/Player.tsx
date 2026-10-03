@@ -53,8 +53,14 @@ import { apiPut } from "@/lib/client-api";
 import type { MediaMarker, Progress, StreamStart } from "@/lib/types";
 import CastButton from "./CastButton";
 import { useCast } from "@/lib/cast";
-import { loadFeatures } from "@/lib/features";
-import { pickStartLevel, readQualityPref, writeQualityPref } from "@/lib/quality";
+import { loadFeatures, useFeatures } from "@/lib/features";
+import {
+  CPU_START_HEIGHT,
+  pickStartLevel,
+  readQualityPref,
+  serverQualityHeights,
+  writeQualityPref,
+} from "@/lib/quality";
 
 type Props = {
   stream: StreamStart;
@@ -72,6 +78,10 @@ type Props = {
   // custom VideoTransport can drive it. Called with the element on mount and
   // null on unmount. Replaces the old document.querySelector(".np video") poll.
   onVideoEl?: (el: HTMLVideoElement | null) => void;
+  // CPU-only servers send one rendition per stream, so quality changes go
+  // back to the server: the page re-requests the stream at this height.
+  serverQuality?: number | null;
+  onServerQuality?: (height: number) => void;
 };
 
 const HEARTBEAT_MS = 10_000;
@@ -100,7 +110,10 @@ export function Player({
   posterUrl,
   markers = [],
   onVideoEl,
+  serverQuality,
+  onServerQuality,
 }: Props) {
+  const features = useFeatures();
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const hlsRef = useRef<HlsType | null>(null);
 
@@ -222,14 +235,6 @@ export function Player({
         return;
       }
 
-      // HLS path. Prefer native (Safari, iOS) — it's smoother and uses
-      // fewer CPU cycles than MSE-driven playback.
-      if (video.canPlayType("application/vnd.apple.mpegurl")) {
-        video.src = stream.url;
-        setReady(true);
-        return;
-      }
-
       try {
         const [{ default: Hls }, features] = await Promise.all([
           import("hls.js"),
@@ -237,7 +242,16 @@ export function Player({
         ]);
         if (disposed) return;
         const hardware = Boolean(features.transcode?.hardware);
+        // Prefer hls.js wherever MSE works. Native HLS players (Firefox and
+        // Chrome on Android, Safari) switch levels on their own, and each
+        // level is a separate ffmpeg on the server. Native is the fallback
+        // for browsers without MSE (older iPhones).
         if (!Hls.isSupported()) {
+          if (video.canPlayType("application/vnd.apple.mpegurl")) {
+            video.src = stream.url;
+            setReady(true);
+            return;
+          }
           onError?.("HLS playback is not supported in this browser.");
           return;
         }
@@ -538,6 +552,12 @@ export function Player({
             userLevel={userLevel}
             onSelect={selectLevel}
           />
+        ) : stream.mode === "hls" && onServerQuality && features && !features.transcode?.hardware && !isCasting ? (
+          <ServerQualityMenu
+            heights={serverQualityHeights(stream.height)}
+            current={serverQuality ?? CPU_START_HEIGHT}
+            onSelect={onServerQuality}
+          />
         ) : null}
       </div>
     </div>
@@ -612,6 +632,67 @@ function QualityMenu({
               label={e.height ? `${e.height}p` : `Level ${e.index}`}
               selected={userLevel === e.index}
               onClick={() => { onSelect(e.index); setOpen(false); }}
+            />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** Quality picker for CPU-only servers: each choice restarts the stream at
+ * that height (one encode at a time), rather than switching hls.js levels. */
+function ServerQualityMenu({
+  heights,
+  current,
+  onSelect,
+}: {
+  heights: number[];
+  current: number;
+  onSelect: (height: number) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onDocClick(e: MouseEvent) {
+      if (!rootRef.current) return;
+      if (!rootRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [open]);
+
+  const shown = heights.includes(current) ? current : heights[0];
+
+  return (
+    <div ref={rootRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex items-center gap-1.5 rounded-md bg-black/60 px-2.5 py-1 text-xs font-medium text-neutral-100 backdrop-blur-sm transition hover:bg-black/75"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title="Quality"
+      >
+        <GearIcon />
+        <span className="hidden sm:inline">{`${shown}p`}</span>
+      </button>
+      {open ? (
+        <div
+          role="menu"
+          className="absolute right-0 mt-1 min-w-[9rem] overflow-hidden rounded-md border border-neutral-800 bg-neutral-950/95 text-sm shadow-lg backdrop-blur-sm"
+        >
+          {heights.map((h) => (
+            <MenuItem
+              key={h}
+              label={`${h}p`}
+              selected={h === shown}
+              onClick={() => {
+                setOpen(false);
+                if (h !== shown) onSelect(h);
+              }}
             />
           ))}
         </div>

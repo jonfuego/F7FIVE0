@@ -83,6 +83,7 @@ def resolve_track_opts(
     quality: Optional[str],
     source_height: Optional[int],
     streams: Optional[dict],
+    keep_source_height: bool = False,
 ) -> TrackOpts:
     """Turn the stream/start request choices into TrackOpts.
 
@@ -92,7 +93,9 @@ def resolve_track_opts(
       picks the first image-based subtitle. Text subs are side-loaded as
       WebVTT by the client, so they never force a transcode. "off"/None -> none.
     - quality: a ceiling below the source height; "original" or a ceiling at or
-      above the source height is a no-op.
+      above the source height is a no-op. With `keep_source_height` (CPU-only
+      servers, where no ceiling means CPU_DEFAULT_HEIGHT) a ceiling equal to
+      the source height is kept so "1080p" on a 1080p file means 1080p.
 
     `streams` is the `{subtitles, audio}` shape from media_streams.parse_streams
     (or None when ffprobe is unavailable, in which case audio/subtitle choices
@@ -124,7 +127,7 @@ def resolve_track_opts(
 
     if quality and quality in QUALITY_HEIGHTS:
         h = QUALITY_HEIGHTS[quality]
-        if not source_height or h < source_height:
+        if not source_height or h < source_height or (keep_source_height and h == source_height):
             max_h = h
 
     return TrackOpts(audio_index=audio_idx, burn_sub_index=burn_idx, max_height=max_h)

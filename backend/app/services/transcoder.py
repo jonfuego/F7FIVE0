@@ -275,6 +275,17 @@ class TranscodeJob:
                 log.exception("error killing ffmpeg for %s", self.key)
 
 
+def _opts_without_quality(opts: str) -> str:
+    """The track-options token minus its quality ceiling. On CPU-only servers
+    a quality change arrives as a new stream with a different `q`, so sibling
+    matching must ignore it (audio and subtitle picks still have to match)."""
+    try:
+        o = parse_token(opts)
+    except Exception:
+        return opts
+    return TrackOpts(audio_index=o.audio_index, burn_sub_index=o.burn_sub_index).to_token()
+
+
 class TranscodeManager:
     """Thread-safe registry of active jobs.
 
@@ -345,7 +356,8 @@ class TranscodeManager:
         self, key: tuple[uuid.UUID, uuid.UUID, str, int, str],
     ) -> list[TranscodeJob]:
         """Remove and return running jobs for the same viewer, file, offset
-        bucket and track picks but a different variant. Caller holds the lock.
+        bucket and audio/subtitle picks but a different variant or quality
+        ceiling. Caller holds the lock.
 
         A player that changes quality (hls.js level switch, or a manual pick)
         starts a new variant; the old variant's ffmpeg would otherwise keep
@@ -354,10 +366,14 @@ class TranscodeManager:
         keep serving.
         """
         user_id, media_file_id, label, bucket, opts = key
+        base = _opts_without_quality(opts)
         out: list[TranscodeJob] = []
         for k, j in list(self._jobs.items()):
+            if k == key or not j.is_running():
+                continue
             if (k[0] == user_id and k[1] == media_file_id and k[3] == bucket
-                    and k[4] == opts and k[2] != label and j.is_running()):
+                    and _opts_without_quality(k[4]) == base
+                    and (k[2] != label or k[4] != opts)):
                 self._jobs.pop(k, None)
                 out.append(j)
         return out

@@ -399,6 +399,9 @@ export type StreamStartRequest = {
   // and bakes it into the signed URL as `t=`. Only honored for HLS streams;
   // direct-play ignores it (the client seeks via byte-range instead).
   resume_sec?: number;
+  // Rendition ceiling. On CPU-only servers it picks the one rendition the
+  // stream carries (default 720p).
+  quality?: "original" | "1080p" | "720p" | "480p";
 };
 
 export type StreamStart = {
