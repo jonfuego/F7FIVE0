@@ -18,6 +18,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   scheme: "f7five0",
   version: "1.0.0",
   orientation: "default",
+  // Expo SDK 54 is the last SDK with the old architecture. The app stays on it
+  // until react-native-track-player and the other native libraries are moved
+  // to New Architecture builds (SDK 55+ requires it).
+  newArchEnabled: false,
   icon: "./assets/icon.png",
   userInterfaceStyle: "dark",
   backgroundColor: "#000000",
@@ -81,10 +85,6 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       },
     ],
     // Wire the release build to the F7FIVE0 release keystore (outside the repo).
-    // Pin kotlin-stdlib to 1.9.x so androidx.credentials (pulled by
-    // react-native-passkey) can't drag in a 2.1.0 stdlib the SDK 51 Kotlin
-    // compiler can't read. Both builds need it (passkey is autolinked in both).
-    "./plugins/withKotlinStdlibPin.js",
     "./plugins/withAndroidReleaseSigning.js",
     // Official builds ship one ABI (F7FIVE0_ABIS, set by release-apk.ps1).
     "./plugins/withAbiFilter.js",

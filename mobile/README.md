@@ -134,5 +134,6 @@ cd C:\F7FIVE0\backend
 maestro test -e F7FIVE0_SERVER=http://10.0.2.2:3001 -e SMOKE_PASSWORD=<password> e2e
 ```
 
-`docs/library-compat.md` explains the pinned library versions (Expo SDK 51
-with react-native-tvos 0.74 so phone and TV share one core).
+`docs/library-compat.md` explains the pinned library versions (Expo SDK 54
+with react-native-tvos 0.81 on the old architecture, so phone and TV share one
+core).

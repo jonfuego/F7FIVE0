@@ -1,5 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import * as FileSystem from "expo-file-system";
+// SDK 54 moved the classic API to expo-file-system/legacy.
+import * as FileSystem from "expo-file-system/legacy";
 import * as Network from "expo-network";
 import React, {
   createContext,
@@ -212,7 +213,7 @@ export function DownloadProvider({ children }: { children: React.ReactNode }): R
           dispatch({ type: "fail", id, error: `http_${res.status}` });
           return;
         }
-        const info = await FileSystem.getInfoAsync(res.uri, { size: true });
+        const info = await FileSystem.getInfoAsync(res.uri);
         const bytes = info.exists && "size" in info ? info.size : 0;
         dispatch({ type: "complete", id, localPath: res.uri, bytes });
       } catch (e) {

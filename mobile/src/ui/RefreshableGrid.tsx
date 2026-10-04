@@ -12,7 +12,7 @@ interface RefreshableGridProps<T> {
   onRefresh: () => void;
   ListHeaderComponent?: React.ComponentProps<typeof FlatList>["ListHeaderComponent"];
   /** Ref to the underlying FlatList (used by the A-Z rail to scroll to a row). */
-  listRef?: React.Ref<FlatList<T>>;
+  listRef?: React.Ref<FlatList<T> | null>;
 }
 
 /** FlatList with pull-to-refresh baked in (usability bar: every list/grid has
