@@ -52,8 +52,15 @@ function Invoke-WingetRaw([string]$id, [string[]]$extra = @()) {
     }
     Info "winget install $id"
     $wargs = @("install", "--id", $id, "-e", "--silent", "--accept-package-agreements", "--accept-source-agreements", "--disable-interactivity") + $extra
-    & winget @wargs
-    $rc = $LASTEXITCODE
+    # Send winget's text to the console and log, never to the pipeline:
+    # anything left in the pipeline becomes part of this function's return
+    # value, and the caller then sees "Found Python ... 0" instead of 0.
+    # No 2>&1: under ErrorActionPreference Stop that turns stderr into errors.
+    & winget @wargs | ForEach-Object {
+        $line = "$_".Trim()
+        if ($line -and $line -notmatch '^[-\\|/ ]+$') { Info $line }
+    }
+    $rc = [int]$LASTEXITCODE
     Refresh-Path
     return $rc
 }

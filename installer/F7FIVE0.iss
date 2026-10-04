@@ -157,7 +157,10 @@ procedure TmdbLinkClick(Sender: TObject);
 var
   ErrorCode: Integer;
 begin
-  ShellExec('open', 'https://www.themoviedb.org/settings/api', '', '', SW_SHOWNORMAL, ewNoWait, ErrorCode);
+  // Setup runs elevated; open the page as the signed-in user so their
+  // default browser (and its sign-in) is used. ShellExec as admin can do nothing.
+  if not ShellExecAsOriginalUser('open', 'https://www.themoviedb.org/settings/api', '', '', SW_SHOWNORMAL, ewNoWait, ErrorCode) then
+    MsgBox('Could not open your browser. Go to https://www.themoviedb.org/settings/api to get a key.', mbInformation, MB_OK);
 end;
 
 procedure BrowseMediaClick(Sender: TObject);
