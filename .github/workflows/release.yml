@@ -75,8 +75,9 @@ jobs:
       - name: Build dist + Setup.exe
         shell: pwsh
         run: |
-          $require = if ("${{ github.ref_type }}" -eq "tag") { @("-RequireApk") } else { @() }
-          ./installer/build-dist.ps1 -Version "${{ steps.v.outputs.version }}" -Compile -ApkDir installer/apk @require
+          # Tag builds must bundle the matching APK; manual test builds may skip it.
+          $isTag = "${{ github.ref_type }}" -eq "tag"
+          ./installer/build-dist.ps1 -Version "${{ steps.v.outputs.version }}" -Compile -ApkDir installer/apk -RequireApk:$isTag
       - name: Zip
         shell: pwsh
         run: Compress-Archive -Path installer/dist/* -DestinationPath "installer/Output/F7FIVE0-${{ steps.v.outputs.version }}.zip"
