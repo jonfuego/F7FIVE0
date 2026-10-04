@@ -10,15 +10,21 @@
 //
 // Login does NOT use this shell. The middleware lets /login through
 // unauthenticated, and the login page renders its own centered card.
+//
+// Admins also get reminder banners here (components/AdminReminders.tsx).
 
 import type { ReactNode } from "react";
 import { MarqueeTop } from "./MarqueeTop";
+import { AdminReminders } from "./AdminReminders";
 
 export function AuthShell({ children }: { children: ReactNode }) {
   return (
     <div className="shell">
       <MarqueeTop />
-      <main className="flex-1">{children}</main>
+      <main className="flex-1">
+        <AdminReminders />
+        {children}
+      </main>
     </div>
   );
 }

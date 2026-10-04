@@ -5,7 +5,7 @@ the source most *arr installations pull from internally, so this
 provides a clean way to recover art for entities whose *arr metadata
 hasn't been refreshed.
 
-Requires `tmdb_api_key` in settings. Empty key => `[]` everywhere
+Takes the key from the caller (app/services/tmdb_key.py). Empty key => `[]` everywhere
 (callers see the source as silently unconfigured, the same way
 Lidarr-without-a-key already behaves).
 

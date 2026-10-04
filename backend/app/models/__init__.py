@@ -38,4 +38,7 @@ from app.models.audio_analysis import (  # noqa: F401
     TrackAudioAnalysis, TrackSimilarity,
 )
 
+# Small Admin-page settings (TMDB key, reminder state)
+from app.models.app_setting import AppSetting  # noqa: F401
+
 __all__ = ["Base"]

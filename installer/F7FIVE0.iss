@@ -257,7 +257,8 @@ begin
   OptionsPage := CreateInputQueryPage(NetPage.ID,
     'Optional extras', 'Both can be left blank',
     'TMDB API key: posters and descriptions for movies and shows. It is free: make a TMDB account, ' +
-    'then request a key under Settings > API (link below).' + #13#10 +
+    'then request a key under Settings > API (link below). No key yet? Skip it and add it later ' +
+    'in F7FIVE0 under Admin > Metadata.' + #13#10 +
     'Contact email: sent to MusicBrainz with music lookups, as their rules ask.');
   OptionsPage.Add('TMDB API key:', False);
   OptionsPage.Add('Contact email:', False);

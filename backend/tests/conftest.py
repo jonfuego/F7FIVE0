@@ -158,3 +158,12 @@ def client(db_session: Session):
         c.close()
     finally:
         app.dependency_overrides.clear()
+
+
+@pytest.fixture(autouse=True)
+def _reset_tmdb_key_cache():
+    """The saved TMDB key is cached per process; start each test clean."""
+    from app.services import tmdb_key
+    tmdb_key.reset_cache()
+    yield
+    tmdb_key.reset_cache()

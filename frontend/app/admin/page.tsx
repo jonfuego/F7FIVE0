@@ -11,6 +11,7 @@ import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from
 import { AuthShell } from "@/components/AuthShell";
 import { RemoteAccessSection } from "./RemoteAccessSection";
 import { LibraryFoldersSection } from "./LibraryFoldersSection";
+import { MetadataSection } from "./MetadataSection";
 import { apiGet, apiPatch, apiPost, apiDelete, ApiError } from "@/lib/client-api";
 import type {
   ActiveTranscode, AdminSession, AdminUser, AuthEvent, Me, ServerHealth,
@@ -64,6 +65,7 @@ export default function AdminPage() {
             <UsersSection me={me} />
             <RemoteAccessSection />
             <LibraryFoldersSection />
+            <MetadataSection />
             <LibrarySection />
             <HealthSection />
             <ActiveStreamsSection />

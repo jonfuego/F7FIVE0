@@ -51,6 +51,10 @@ INSTALL.md for the operator view.
   second copies details/art since `tmdb_id` is unique). An unreachable folder
   is skipped and its files keep their state; removing a folder in Admin marks
   its files missing.
+- TMDB key: always read it with `services/tmdb_key.get()` (Admin-saved key in
+  `app_settings` wins over `TMDB_API_KEY`; cached per process, refreshed on
+  save). Never read `settings.tmdb_api_key` directly. Admin reminder banners
+  come from `services/reminders.py`.
 - Scanner-imported art uses `source_kind` `local` or `tmdb`; admin-set art
   (`upload`, `url`, ...) is never overwritten.
 - Migrations go through Alembic. Keep revision ids stable: existing installs
