@@ -27,6 +27,13 @@ INSTALL.md for the operator view.
 - Windows host. PowerShell 5.1 compatible scripts, ASCII only (5.1 misreads
   UTF-8 without BOM). Under `$ErrorActionPreference = "Stop"`, never
   redirect native stderr (`2>`); flip to Continue and check `$LASTEXITCODE`.
+- Install folder ACL (`Set-InstallAcl` in `common.ps1`, run first by
+  `install.ps1`): owner Administrators, no inheritance, Administrators and
+  SYSTEM full, Users read/execute; `data\` and `logs\` drop Users and give
+  the `-ServiceUser` account modify; `.env` is Administrators/SYSTEM plus read
+  for the service account. Services run code from here, so never loosen it,
+  and any rewrite of `.env` re-applies `Set-PrivateAcl $EnvFile` with the
+  service account SID.
 - The stream gateway runs one uvicorn worker (in-process transcoder
   registry). It validates the HMAC signature before any DB lookup.
 - HLS playlists are rewritten so every URI carries the signed query.

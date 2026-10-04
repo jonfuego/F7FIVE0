@@ -65,9 +65,66 @@ function Invoke-Winget([string]$id, [string[]]$extra = @()) {
     }
 }
 
-function Set-PrivateAcl([string]$path) {
-    # Only Administrators and SYSTEM can read files that hold secrets.
-    & icacls $path /inheritance:r /grant:r "*S-1-5-32-544:F" "*S-1-5-18:F" | Out-Null
+function Set-PrivateAcl([string]$path, [string[]]$readers = @()) {
+    # Only Administrators and SYSTEM can read files that hold secrets, plus
+    # any account SIDs passed in $readers (read only).
+    $grants = @("*S-1-5-32-544:F", "*S-1-5-18:F")
+    foreach ($sid in $readers) { if ($sid) { $grants += "*${sid}:R" } }
+    & icacls $path /inheritance:r /grant:r @grants | Out-Null
+}
+
+# SID for a Windows account name, or $null when it can't be resolved.
+function Get-AccountSid([string]$account) {
+    if (-not $account) { return $null }
+    if ($account.StartsWith(".\")) { $account = "$env:COMPUTERNAME\" + $account.Substring(2) }
+    try { return (New-Object Security.Principal.NTAccount($account)).Translate([Security.Principal.SecurityIdentifier]).Value }
+    catch { return $null }
+}
+
+# SID of the account the F7FIVE0 services run as: $ServiceUser when the caller
+# set one, otherwise whatever F7FIVE0-API is registered with. $null for
+# LocalSystem (SYSTEM already has full control everywhere).
+function Get-ServiceAccountSid {
+    $account = $ServiceUser
+    if (-not $account) {
+        $svc = Get-CimInstance Win32_Service -Filter "Name='F7FIVE0-API'" -ErrorAction SilentlyContinue
+        if ($svc) { $account = $svc.StartName }
+    }
+    if (-not $account -or $account -match '^(LocalSystem|NT AUTHORITY\\)') { return $null }
+    return Get-AccountSid $account
+}
+
+# Locks the install folder. The services run code from it (as LocalSystem
+# unless -ServiceUser), and C:\ lets any signed-in user change new subfolders,
+# so: owner Administrators, no inherited rights, Administrators and SYSTEM
+# full control, Users read and run. data\ and logs\ drop Users and give the
+# service account (when there is one) modify. Code folders lose any explicit
+# entries so a folder made before setup can't keep extra rights. Files that
+# hold secrets (.env, data\remote-access) get their own ACLs afterwards.
+function Set-InstallAcl([string]$root, [string]$serviceSid) {
+    $admins = "*S-1-5-32-544"
+    & icacls $root /setowner $admins /T /C /Q | Out-Null
+    & icacls $root /reset /C /Q | Out-Null
+    & icacls $root /inheritance:r /grant:r "${admins}:(OI)(CI)F" "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-545:(OI)(CI)RX" /C /Q | Out-Null
+    if ($LASTEXITCODE -ne 0) { Fail "could not set permissions on $root (icacls $LASTEXITCODE)" }
+    foreach ($name in @("backend", "web", "runtime", "bin", "scripts", "installer", "android")) {
+        $p = Join-Path $root $name
+        if (Test-Path $p) { & icacls $p /reset /T /C /Q | Out-Null }
+    }
+    # Top-level files too (alembic.ini is read by a command run as admin);
+    # .env keeps its private ACL.
+    foreach ($f in Get-ChildItem $root -File -Force) {
+        if ($f.Name -ne ".env") { & icacls $f.FullName /reset /C /Q | Out-Null }
+    }
+    foreach ($name in @("data", "logs")) {
+        $p = Join-Path $root $name
+        if (-not (Test-Path $p)) { New-Item -ItemType Directory -Path $p | Out-Null }
+        $grants = @("${admins}:(OI)(CI)F", "*S-1-5-18:(OI)(CI)F")
+        if ($serviceSid) { $grants += "*${serviceSid}:(OI)(CI)M" }
+        & icacls $p /reset /C /Q | Out-Null
+        & icacls $p /inheritance:r /grant:r @grants /C /Q | Out-Null
+        if ($LASTEXITCODE -ne 0) { Fail "could not set permissions on $p (icacls $LASTEXITCODE)" }
+    }
 }
 
 function Get-EnvValue([string]$key) {

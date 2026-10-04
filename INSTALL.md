@@ -151,8 +151,19 @@ network shares. To use `\\nas\media` paths:
    ```
 
    It asks for that account's password and re-registers the services under
-   it. Your settings and data are untouched. (You can also change **Log On** for each
-   F7FIVE0 service in `services.msc`.)
+   it. Your settings and data are untouched. Use this rather than changing
+   **Log On** in `services.msc`: Setup also gives that account access to
+   `.env`, `data\`, and `logs\`, which a `services.msc` change does not.
+
+## Folder permissions
+
+The services run code from `C:\F7FIVE0`, so Setup locks it down: only
+Administrators and SYSTEM can change anything there, other accounts can read
+and run the program files, and `.env`, `data\`, and `logs\` are closed to
+everyone except Administrators, SYSTEM, and the `-ServiceUser` account. Run
+Setup (or `install.ps1`) from an elevated PowerShell to upgrade or repair.
+If you run F7FIVE0 straight from a git clone in the install folder, `git pull`
+needs an elevated prompt too.
 
 ## Already have PostgreSQL?
 
