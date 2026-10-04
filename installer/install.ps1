@@ -144,6 +144,20 @@ function AskYesNo([string]$prompt, [bool]$default) {
     return $a.ToUpper().StartsWith("Y")
 }
 
+# Media folders: one per library, or several separated by ";". The server
+# reads the same format from LIBRARY_ROOT_* (app/services/library_folders.py).
+function Split-Folders([string]$raw) {
+    $out = New-Object System.Collections.Generic.List[string]
+    foreach ($part in ($raw -split ';')) {
+        $p = $part.Trim().Trim('"').Trim()
+        if (-not $p) { continue }
+        if ($p.Length -gt 3) { $p = $p.TrimEnd('\') }
+        if (-not ($out | Where-Object { $_ -ieq $p })) { $out.Add($p) }
+    }
+    return ,$out.ToArray()
+}
+function Join-Folders([string]$raw) { return ((Split-Folders $raw) -join ';') }
+
 function Read-EnvPort([string]$key, [int]$fallback) {
     $m = Select-String -Path $EnvFile -Pattern "^$key=(\d+)" -ErrorAction SilentlyContinue
     if ($m) { return [int]$m.Matches[0].Groups[1].Value }
@@ -280,15 +294,22 @@ if (-not $IsUpgrade) {
 
     if (-not ($MoviesDir -or $TvDir -or $MusicDir -or $MusicVideosDir) -and -not $NonInteractive) {
         Info "Point F7FIVE0 at your media folders. Leave any blank to skip it."
-        $MoviesDir = Ask "Movies folder" ""
-        $TvDir = Ask "TV shows folder" ""
-        $MusicDir = Ask "Music folder" ""
-        $MusicVideosDir = Ask "Music videos folder" ""
+        Info "For more than one folder per library, separate them with ;  (D:\Movies; \\nas\media\Movies)"
+        $MoviesDir = Ask "Movies folder(s)" ""
+        $TvDir = Ask "TV shows folder(s)" ""
+        $MusicDir = Ask "Music folder(s)" ""
+        $MusicVideosDir = Ask "Music videos folder(s)" ""
     }
+    $MoviesDir = Join-Folders $MoviesDir
+    $TvDir = Join-Folders $TvDir
+    $MusicDir = Join-Folders $MusicDir
+    $MusicVideosDir = Join-Folders $MusicVideosDir
     if (-not $WebPort) { $WebPort = [int](Ask "Web port" "3001") }
     if (-not $OpenFirewall) { $OpenFirewall = if (AskYesNo "Allow phones, TVs, and other PCs on your home network to connect?" $true) { "1" } else { "0" } }
-    foreach ($d in @($MoviesDir, $TvDir, $MusicDir, $MusicVideosDir)) {
-        if ($d -and -not (Test-Path $d)) { Warn "Folder not found right now: $d (it will be scanned once it exists)." }
+    $allFolders = @()
+    foreach ($v in @($MoviesDir, $TvDir, $MusicDir, $MusicVideosDir)) { $allFolders += Split-Folders $v }
+    foreach ($d in $allFolders) {
+        if (-not (Test-Path -LiteralPath $d)) { Warn "Folder not found right now: $d (it will be scanned once it exists)." }
     }
 } else {
     if (-not $WebPort) { $WebPort = Read-EnvPort "WEB_PORT" 3001 }

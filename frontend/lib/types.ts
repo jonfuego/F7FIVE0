@@ -349,6 +349,28 @@ export type RemoteAccessStatus = {
   run: RemoteAccessRun;
 };
 
+// ---- Library folders (Admin > Library folders) -----------------------------
+export type LibraryFolderKind = "movies" | "tv" | "music" | "music_videos";
+
+export type LibraryFolder = {
+  path: string;
+  // The server (as the account its services run under) can open it.
+  reachable: boolean;
+};
+
+export type LibraryFoldersLibrary = {
+  kind: LibraryFolderKind;
+  label: string;
+  folders: LibraryFolder[];
+  arr_managed: boolean;
+};
+
+export type LibraryFolders = {
+  // "env": still read from LIBRARY_ROOT_* in .env; "admin": saved here.
+  source: "env" | "admin";
+  libraries: LibraryFoldersLibrary[];
+};
+
 // ---- Intro/credits markers -------------------------------------------------
 export type MediaMarker = {
   kind: "intro" | "credits";

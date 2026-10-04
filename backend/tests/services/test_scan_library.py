@@ -220,3 +220,137 @@ def test_scan_music_folder_names(db_session, libs, fake_probe, system_user):
     assert tracks["Disc Two"].disc_number == 2
     assert tracks["Opener"].duration_sec == 120
     assert db_session.get(ArtOverride, ("album", albums["Great Album"].id, "cover")) is not None
+
+
+# ---------------------------------------------------------------------------
+# Several folders per library
+# ---------------------------------------------------------------------------
+@pytest.fixture()
+def two_movie_roots(libs, tmp_path, monkeypatch):
+    a, b = libs["movies"], tmp_path / "movies-b"
+    b.mkdir()
+    monkeypatch.setattr(settings, "library_root_movies", f"{a}; {b}")
+    return a, b
+
+
+def test_movies_in_two_folders_show_twice(db_session, two_movie_roots, fake_probe, system_user):
+    a, b = two_movie_roots
+    _touch(a / "Heat (1995)" / "Heat (1995).mkv", 100)
+    _png(a / "Heat (1995)" / "poster.png")
+    _touch(b / "Heat (1995)" / "Heat (1995) 2160p.mkv", 200)
+    _touch(b / "Alien (1979)" / "Alien (1979).mkv")
+
+    stats = scan_library.scan_movies(db_session)
+    heats = db_session.scalars(select(Movie).where(Movie.title == "Heat")).all()
+    assert len(heats) == 2 and stats.movies == 3
+    first, second = sorted(heats, key=lambda m: m.created_at)
+    # Each entry owns one file.
+    for m in heats:
+        files = db_session.scalars(select(MediaFile).where(MediaFile.ref_id == m.id)).all()
+        assert len(files) == 1
+    # The duplicate copies the first entry's poster.
+    art = db_session.get(ArtOverride, ("movie", second.id, "poster"))
+    assert art is not None and art.source_ref.startswith("copy:")
+
+    # Rescan is stable: still two Heats, nothing re-probed.
+    fake_probe.clear()
+    stats = scan_library.scan_movies(db_session)
+    assert stats.movies == 0 and fake_probe == []
+    assert len(db_session.scalars(select(Movie).where(Movie.title == "Heat")).all()) == 2
+
+
+def test_duplicate_movie_copies_tmdb_details(db_session, two_movie_roots, fake_probe, system_user):
+    a, b = two_movie_roots
+    _touch(a / "Heat (1995)" / "Heat (1995).mkv")
+    scan_library.scan_movies(db_session)
+    first = db_session.scalar(select(Movie))
+    first.tmdb_id, first.overview, first.runtime_min = 949, "Cops and robbers.", 170
+    first.genres = ["Crime"]
+    db_session.flush()
+
+    _touch(b / "Heat (1995)" / "Heat (1995).mkv")
+    scan_library.scan_movies(db_session)
+    second = db_session.scalar(select(Movie).where(Movie.id != first.id))
+    assert second.tmdb_id is None
+    assert second.overview == "Cops and robbers." and second.runtime_min == 170 and second.genres == ["Crime"]
+
+
+def test_same_movie_twice_in_one_folder_stays_one_entry(db_session, two_movie_roots, fake_probe, system_user):
+    a, _b = two_movie_roots
+    _touch(a / "Heat (1995).mkv")
+    _touch(a / "Heat (1995) 1080p.mkv")
+    scan_library.scan_movies(db_session)
+    assert len(db_session.scalars(select(Movie)).all()) == 1
+
+
+def test_offline_folder_keeps_its_files(db_session, two_movie_roots, fake_probe, system_user, monkeypatch, tmp_path):
+    a, b = two_movie_roots
+    _touch(a / "Heat (1995).mkv")
+    _touch(b / "Alien (1979).mkv")
+    scan_library.scan_movies(db_session)
+    # Folder b goes away (NAS asleep): Alien's file is not marked missing.
+    import shutil
+    shutil.rmtree(b)
+    scan_library.scan_movies(db_session)
+    states = {mf.path.rsplit(os.sep, 1)[-1]: mf.scan_state for mf in db_session.scalars(select(MediaFile)).all()}
+    assert states["Alien (1979).mkv"] == ScanState.ready
+    # A file removed from a reachable folder still goes missing.
+    os.remove(a / "Heat (1995).mkv")
+    scan_library.scan_movies(db_session)
+    states = {mf.path.rsplit(os.sep, 1)[-1]: mf.scan_state for mf in db_session.scalars(select(MediaFile)).all()}
+    assert states["Heat (1995).mkv"] == ScanState.missing
+
+
+def test_tv_merges_across_folders(db_session, libs, tmp_path, fake_probe, system_user, monkeypatch):
+    a, b = libs["tv"], tmp_path / "tv-b"
+    monkeypatch.setattr(settings, "library_root_tv", f"{a};{b}")
+    _touch(a / "Some Show (2020)" / "Season 01" / "Some Show - S01E01.mkv")
+    _touch(b / "Some Show (2020)" / "Season 02" / "Some Show - S02E01.mkv")
+    _touch(b / "Some Show (2020)" / "Season 01" / "Some Show - S01E01.mkv")
+    scan_library.scan_tv(db_session)
+    assert len(db_session.scalars(select(Series)).all()) == 1
+    eps = db_session.scalars(select(Episode)).all()
+    assert sorted((e.season_number, e.episode_number) for e in eps) == [(1, 1), (2, 1)]
+    s1e1 = next(e for e in eps if e.season_number == 1)
+    files = db_session.scalars(select(MediaFile).where(MediaFile.ref_id == s1e1.id)).all()
+    assert len(files) == 2
+
+
+def test_music_merges_across_folders(db_session, libs, tmp_path, fake_probe, system_user, monkeypatch):
+    a, b = libs["music"], tmp_path / "music-b"
+    monkeypatch.setattr(settings, "library_root_music", f"{a};{b}")
+    _touch(a / "Some Artist" / "First (2001)" / "01 - One.flac")
+    _touch(b / "Some Artist" / "Second (2005)" / "01 - Two.flac")
+    scan_library.scan_music(db_session)
+    assert len(db_session.scalars(select(Artist)).all()) == 1
+    assert {al.title for al in db_session.scalars(select(Album)).all()} == {"First", "Second"}
+
+
+def test_folders_from_database_win_over_env(db_session, libs, tmp_path, fake_probe, system_user):
+    from app.services import library_folders
+    other = tmp_path / "db-movies"
+    _touch(other / "Alien (1979).mkv")
+    _touch(libs["movies"] / "Heat (1995).mkv")
+    library_folders.save(db_session, {"movies": [str(other)]})
+    scan_library.scan_movies(db_session)
+    assert [m.title for m in db_session.scalars(select(Movie)).all()] == ["Alien"]
+    # TV has no saved folders, so it is off even though .env sets one.
+    assert not scan_library.tv_enabled(db_session)
+
+
+def test_music_videos_two_folders_and_offline(db_session, tmp_path, fake_probe, system_user, monkeypatch):
+    from app.models.music import MusicVideo
+    from app.services import scan_music_videos
+    monkeypatch.setattr(settings, "path_rewrite_rules", "")
+    a, b = tmp_path / "mv-a", tmp_path / "mv-b"
+    _touch(a / "Band" / "Live (2010)" / "01 - Song.mkv")
+    _touch(b / "Band" / "Videos (2012)" / "01 - Other.mkv")
+    monkeypatch.setattr(settings, "library_root_music_videos", f"{a};{b}")
+    scan_music_videos.scan(db_session)
+    assert len(db_session.scalars(select(Artist)).all()) == 1
+    assert len(db_session.scalars(select(MusicVideo)).all()) == 2
+    import shutil
+    shutil.rmtree(b)
+    scan_music_videos.scan(db_session)
+    states = [mf.scan_state for mf in db_session.scalars(select(MediaFile).where(MediaFile.kind == MediaKind.music_video)).all()]
+    assert ScanState.missing not in states

@@ -160,15 +160,45 @@ begin
   ShellExec('open', 'https://www.themoviedb.org/settings/api', '', '', SW_SHOWNORMAL, ewNoWait, ErrorCode);
 end;
 
+// Each media box holds one folder or several separated by ";". "Add..."
+// appends the chosen folder instead of replacing what is there, so a library
+// can span drives or a NAS share. install.ps1 and the server read the list.
+function LastFolder(const List: String): String;
+var
+  P: Integer;
+begin
+  Result := Trim(List);
+  P := Pos(';', Result);
+  while P > 0 do
+  begin
+    Result := Trim(Copy(Result, P + 1, Length(Result)));
+    P := Pos(';', Result);
+  end;
+end;
+
+function HasFolder(const List, Dir: String): Boolean;
+begin
+  Result := Pos(';' + Lowercase(Dir) + ';', ';' + Lowercase(List) + ';') > 0;
+end;
+
 procedure BrowseMediaClick(Sender: TObject);
 var
   I: Integer;
-  Dir: String;
+  Dir, List, Norm: String;
 begin
   I := TNewButton(Sender).Tag;
-  Dir := MediaPage.Values[I];
-  if BrowseForFolder('Choose the folder F7FIVE0 should scan:', Dir, False) then
-    MediaPage.Values[I] := Dir;
+  List := Trim(MediaPage.Values[I]);
+  Norm := List;
+  StringChangeEx(Norm, '; ', ';', True);
+  Dir := LastFolder(List);
+  if BrowseForFolder('Choose a folder F7FIVE0 should scan:', Dir, False) then
+  begin
+    Dir := RemoveBackslashUnlessRoot(Dir);
+    if List = '' then
+      MediaPage.Values[I] := Dir
+    else if not HasFolder(Norm, Dir) then
+      MediaPage.Values[I] := List + '; ' + Dir;
+  end;
 end;
 
 procedure InitializeWizard;
@@ -179,6 +209,7 @@ begin
   MediaPage := CreateInputQueryPage(wpSelectDir,
     'Media folders', 'Where is your media?',
     'Pick the folders F7FIVE0 should scan. Leave any of them blank to skip it. ' +
+    'Click Add again to use more than one folder for a library (they are separated by ;). ' +
     'Network paths such as \\nas\media\Movies work too.' + #13#10#13#10 +
     'Already use Radarr, Sonarr, or Lidarr? You can connect them later in the settings file.');
   MediaPage.Add('Movies:', False);
@@ -189,7 +220,7 @@ begin
   begin
     Btn := TNewButton.Create(MediaPage);
     Btn.Parent := MediaPage.Surface;
-    Btn.Caption := 'Browse...';
+    Btn.Caption := 'Add...';
     Btn.Tag := I;
     Btn.Width := ScaleX(75);
     Btn.Height := MediaPage.Edits[I].Height + ScaleY(2);

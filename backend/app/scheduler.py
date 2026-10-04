@@ -15,7 +15,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from app.config import settings
 from app.db import db_session
-from app.services import scan_library, scan_music_videos, sync
+from app.services import library_folders, scan_library, scan_music_videos, sync
 
 
 log = logging.getLogger("f7five0.scheduler")
@@ -55,12 +55,14 @@ def _run_music_videos_scan() -> None:
 def _run_folder_scan() -> None:
     """Scan the libraries that have no *arr (movies / TV / music folders),
     then the music-videos folder when one is configured."""
+    has_music_videos = False
     try:
         with db_session() as db:
             scan_library.scan_all(db)
+            has_music_videos = bool(library_folders.folders(db, "music_videos"))
     except Exception:
         log.exception("folder scan raised")
-    if settings.library_root_music_videos:
+    if has_music_videos:
         _run_music_videos_scan()
 
 
@@ -92,19 +94,20 @@ def start() -> BackgroundScheduler:
         replace_existing=True,
         next_run_time=None,        # don't kick one off immediately on boot
     )
-    if scan_library.any_enabled() or settings.library_root_music_videos:
-        sched.add_job(
-            _run_folder_scan,
-            trigger=IntervalTrigger(minutes=max(5, settings.folder_scan_interval_minutes)),
-            id=JOB_FOLDER_SCAN,
-            name="library folder scan",
-            max_instances=1,
-            coalesce=True,
-            replace_existing=True,
-            # First pass shortly after boot so a fresh install fills up
-            # without waiting a full interval.
-            next_run_time=datetime.now(timezone.utc) + timedelta(seconds=30),
-        )
+    # Always registered: folders can be added from Admin > Library folders
+    # after start, and a pass with nothing configured does nothing.
+    sched.add_job(
+        _run_folder_scan,
+        trigger=IntervalTrigger(minutes=max(5, settings.folder_scan_interval_minutes)),
+        id=JOB_FOLDER_SCAN,
+        name="library folder scan",
+        max_instances=1,
+        coalesce=True,
+        replace_existing=True,
+        # First pass shortly after boot so a fresh install fills up
+        # without waiting a full interval.
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=30),
+    )
     sched.start()
     _scheduler = sched
     log.info("scheduler started (full_sync every 5 minutes)")
@@ -129,8 +132,15 @@ def trigger_full_sync_now() -> None:
         log.warning("trigger_full_sync_now called but scheduler not started")
         return
     _scheduler.add_job(_run_full_sync, id=f"{JOB_FULL_SYNC}_adhoc", replace_existing=True)
-    if scan_library.any_enabled():
-        _scheduler.add_job(_run_folder_scan, id=f"{JOB_FOLDER_SCAN}_adhoc", replace_existing=True)
+    _scheduler.add_job(_run_folder_scan, id=f"{JOB_FOLDER_SCAN}_adhoc", replace_existing=True)
+
+
+def trigger_folder_scan_now() -> None:
+    """Scan the library folders now (after Admin > Library folders changes)."""
+    if _scheduler is None:
+        log.warning("trigger_folder_scan_now called but scheduler not started")
+        return
+    _scheduler.add_job(_run_folder_scan, id=f"{JOB_FOLDER_SCAN}_adhoc", replace_existing=True)
 
 
 def trigger_music_videos_scan_now() -> None:

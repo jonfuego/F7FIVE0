@@ -23,6 +23,7 @@ from fastapi import HTTPException
 from app import scheduler
 from app.api.deps import evict_session_cache, get_db, require_admin
 from app.api.schemas import (
+    LibraryFolderOut, LibraryFoldersIn, LibraryFoldersLibraryOut, LibraryFoldersOut,
     ActiveTranscodeOut, AdminSessionOut, AuthEventOut, MatchApply,
     MatchCandidate, OverrideOut, OverrideUpdate, ServerHealthOut,
     SortOverrideOut, SortOverrideUpdate, WatchHistoryRowOut,
@@ -39,6 +40,7 @@ from app.services.arr.lidarr import LidarrClient
 from app.services.arr.radarr import RadarrClient
 from app.services.arr.sonarr import SonarrClient
 from app.config import settings
+from app.services import library_folders
 from app.services.metadata.runner import enrich_album, enrich_artist, enrich_movie
 
 log = logging.getLogger("f7five0.admin.override")
@@ -952,3 +954,58 @@ def refresh_metadata(
         pass
     db.refresh(row)
     return _override_out(kind, row)
+
+
+# ---------------------------------------------------------------------------
+# Library folders: one or more source folders per library
+# ---------------------------------------------------------------------------
+def _library_folders_out(db: Session) -> LibraryFoldersOut:
+    current = library_folders.all_folders(db)
+    return LibraryFoldersOut(
+        source=library_folders.source(db),
+        libraries=[
+            LibraryFoldersLibraryOut(
+                kind=kind,
+                label=library_folders.LABELS[kind],
+                folders=[
+                    LibraryFolderOut(path=st.path, reachable=st.reachable)
+                    for st in (library_folders.status(p) for p in current[kind])
+                ],
+                arr_managed=library_folders.arr_managed(kind),
+            )
+            for kind in library_folders.KINDS
+        ],
+    )
+
+
+@router.get("/library-folders", response_model=LibraryFoldersOut)
+def get_library_folders(
+    _admin: Annotated[User, Depends(require_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> LibraryFoldersOut:
+    """Each library's source folders, and whether the server can open them
+    (as the account the F7FIVE0 services run under)."""
+    return _library_folders_out(db)
+
+
+@router.put("/library-folders", response_model=LibraryFoldersOut)
+def put_library_folders(
+    body: LibraryFoldersIn,
+    _admin: Annotated[User, Depends(require_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> LibraryFoldersOut:
+    """Replace every library's folders, then start a folder scan. Folders the
+    server can't open are still saved (a NAS may be asleep); the response
+    flags them. Items from a removed folder leave the library (their files
+    are marked missing); nothing is deleted and adding it back restores them."""
+    unknown = set(body.folders) - set(library_folders.KINDS)
+    if unknown:
+        raise HTTPException(status_code=400, detail=f"unknown library: {', '.join(sorted(unknown))}")
+    try:
+        library_folders.save(db, body.folders)
+    except library_folders.FolderError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    db.commit()
+    log.info("library folders saved: %s", library_folders.all_folders(db))
+    scheduler.trigger_folder_scan_now()
+    return _library_folders_out(db)

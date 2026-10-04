@@ -35,10 +35,9 @@ from typing import Iterable, Iterator, Optional
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.config import settings
 from app.models.media_file import MediaFile, MediaKind, ScanState
 from app.models.music import Artist, MusicVideo, MusicVideoRelease
-from app.services import ffprobe
+from app.services import ffprobe, library_folders
 from app.services.path_map import translate as translate_path
 
 
@@ -247,25 +246,37 @@ def discover_artist(artist_dir: str) -> Iterator[DiscoveredRelease]:
 # Scan entry point (DB)
 # ---------------------------------------------------------------------------
 def scan(db: Session) -> ScanStats:
-    """Walk the music-videos root and reconcile DB state with disk."""
+    """Walk every music-videos folder and reconcile DB state with disk.
+    Artists and releases merge across folders. A folder that can't be
+    opened is skipped and its files are left as they are."""
     stats = ScanStats()
-    root = str(settings.library_root_music_videos)
-    if not root:
-        log.warning("library_root_music_videos is empty; skipping scan")
-        return stats
-    if not os.path.isdir(root):
-        log.warning("music videos root not found: %s", root)
+    roots = library_folders.folders(db, "music_videos")
+    if not roots:
+        log.warning("no music videos folder configured; skipping scan")
         return stats
 
     seen_paths: set[str] = set()
+    skipped: list[str] = []
+    for root in roots:
+        if not os.path.isdir(root):
+            log.warning("music videos folder not found, skipped this pass: %s", root)
+            skipped.append(root)
+            continue
+        try:
+            artist_entries = sorted(os.listdir(root))
+        except OSError:
+            log.exception("failed to list music videos folder %s", root)
+            stats.errors += 1
+            skipped.append(root)
+            continue
+        _scan_root(db, root, artist_entries, seen_paths, stats)
 
-    try:
-        artist_entries = sorted(os.listdir(root))
-    except OSError:
-        log.exception("failed to list music videos root %s", root)
-        stats.errors += 1
-        return stats
+    _mark_missing(db, seen_paths, stats, skip_under=skipped)
+    stats.log_summary()
+    return stats
 
+
+def _scan_root(db: Session, root: str, artist_entries: list[str], seen_paths: set[str], stats: ScanStats) -> None:
     for artist_dir in artist_entries:
         artist_path = os.path.join(root, artist_dir)
         if not os.path.isdir(artist_path):
@@ -283,10 +294,6 @@ def scan(db: Session) -> ScanStats:
                 stored_path = translate_path(v.abs_path) or v.abs_path
                 seen_paths.add(stored_path)
                 _upsert_media_file(db, mv, stored_path, stats)
-
-    _mark_missing(db, seen_paths, stats)
-    stats.log_summary()
-    return stats
 
 
 # ---------------------------------------------------------------------------
@@ -431,12 +438,19 @@ def _probe(db: Session, mf: MediaFile, stats: ScanStats) -> None:
 
 def _mark_missing(
     db: Session, seen_paths: Iterable[str], stats: ScanStats,
+    skip_under: Iterable[str] = (),
 ) -> None:
     seen = set(seen_paths)
+    skip = [
+        os.path.normcase((translate_path(r) or r).rstrip("\\/")) for r in skip_under
+    ]
     rows = db.scalars(
         select(MediaFile).where(MediaFile.kind == MediaKind.music_video)
     ).all()
     for mf in rows:
+        p = os.path.normcase(mf.path or "")
+        if any(p == s or p.startswith(s + "\\") or p.startswith(s + "/") for s in skip):
+            continue  # folder offline this pass: keep its files as they are
         if mf.path not in seen and mf.scan_state != ScanState.missing:
             mf.scan_state = ScanState.missing
             stats.files_missing += 1

@@ -932,3 +932,29 @@ class ClientErrorReport(BaseModel):
     client_version: Optional[str] = Field(default=None, max_length=32)
     fatal: bool = False
     context: Optional[str] = Field(default=None, max_length=1000)
+
+
+# ---- Library folders (Admin > Library folders) -----------------------------
+class LibraryFolderOut(BaseModel):
+    path: str
+    reachable: bool
+
+
+class LibraryFoldersLibraryOut(BaseModel):
+    kind: str
+    label: str
+    folders: list[LibraryFolderOut]
+    # Radarr / Sonarr / Lidarr owns this library (its API key is set), so the
+    # folder scanner leaves it alone even when folders are listed.
+    arr_managed: bool
+
+
+class LibraryFoldersOut(BaseModel):
+    # "env": read from LIBRARY_ROOT_* in .env (nothing saved here yet).
+    # "admin": saved from this page; .env values are no longer used.
+    source: str
+    libraries: list[LibraryFoldersLibraryOut]
+
+
+class LibraryFoldersIn(BaseModel):
+    folders: dict[str, list[str]]
