@@ -24,24 +24,24 @@ type CookieOpts = {
   maxAge?: number;
 };
 
-function isSecureRequest(): boolean {
+async function isSecureRequest(): Promise<boolean> {
   const mode = (process.env.COOKIE_SECURE ?? "auto").toLowerCase();
   if (mode === "true") return true;
   if (mode === "false") return false;
   if (!IS_PROD) return false;
   try {
-    const proto = (headers().get("x-forwarded-proto") ?? "").split(",")[0].trim();
+    const proto = ((await headers()).get("x-forwarded-proto") ?? "").split(",")[0].trim();
     return proto === "https";
   } catch {
     return IS_PROD;
   }
 }
 
-function baseOpts(): CookieOpts {
-  return { httpOnly: true, secure: isSecureRequest(), sameSite: "lax", path: "/" };
+async function baseOpts(): Promise<CookieOpts> {
+  return { httpOnly: true, secure: await isSecureRequest(), sameSite: "lax", path: "/" };
 }
 
-export function setSessionCookies(
+export async function setSessionCookies(
   res: NextResponse,
   args: {
     access: string;
@@ -49,21 +49,23 @@ export function setSessionCookies(
     refresh: string;
     refreshMaxAgeSeconds: number;
   },
-): void {
+): Promise<void> {
+  const opts = await baseOpts();
   res.cookies.set(ACCESS_COOKIE, args.access, {
-    ...baseOpts(),
+    ...opts,
     // Cap the access cookie TTL at the access JWT TTL. The refresh cookie
     // is what keeps the user logged in across access expirations.
     maxAge: Math.max(0, args.accessTtlSeconds),
   });
   res.cookies.set(REFRESH_COOKIE, args.refresh, {
-    ...baseOpts(),
+    ...opts,
     maxAge: Math.max(0, args.refreshMaxAgeSeconds),
   });
 }
 
-export function clearSessionCookies(res: NextResponse): void {
+export async function clearSessionCookies(res: NextResponse): Promise<void> {
   // maxAge 0 expires immediately on all browsers we care about.
-  res.cookies.set(ACCESS_COOKIE, "", { ...baseOpts(), maxAge: 0 });
-  res.cookies.set(REFRESH_COOKIE, "", { ...baseOpts(), maxAge: 0 });
+  const opts = await baseOpts();
+  res.cookies.set(ACCESS_COOKIE, "", { ...opts, maxAge: 0 });
+  res.cookies.set(REFRESH_COOKIE, "", { ...opts, maxAge: 0 });
 }

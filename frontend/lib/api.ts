@@ -25,7 +25,7 @@ export async function backend(path: string, init: BackendInit = {}): Promise<Res
     headers.set("content-type", "application/json");
   }
   if (init.authed) {
-    const jar = cookies();
+    const jar = await cookies();
     const access = jar.get(ACCESS_COOKIE)?.value;
     if (access) headers.set("authorization", `Bearer ${access}`);
   }

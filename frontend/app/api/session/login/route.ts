@@ -80,7 +80,7 @@ export async function POST(req: NextRequest) {
   const me = meRes.ok ? await safeJson(meRes) : null;
 
   const res = NextResponse.json({ user: me }, { status: 200 });
-  setSessionCookies(res, {
+  await setSessionCookies(res, {
     access: access_token,
     accessTtlSeconds: typeof expires_in_seconds === "number" ? expires_in_seconds : 900,
     refresh: refresh_token,

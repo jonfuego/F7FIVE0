@@ -6,10 +6,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { backend } from "@/lib/api";
 
-export async function PATCH(
-  req: NextRequest,
-  { params }: { params: { id: string } },
-): Promise<Response> {
+export async function PATCH(req: NextRequest, props: { params: Promise<{ id: string }> }): Promise<Response> {
+  const params = await props.params;
   let body: { name?: unknown };
   try {
     body = await req.json();
@@ -31,10 +29,8 @@ export async function PATCH(
   });
 }
 
-export async function DELETE(
-  _req: NextRequest,
-  { params }: { params: { id: string } },
-): Promise<Response> {
+export async function DELETE(_req: NextRequest, props: { params: Promise<{ id: string }> }): Promise<Response> {
+  const params = await props.params;
   const res = await backend(`/api/auth/passkeys/${encodeURIComponent(params.id)}`, {
     method: "DELETE",
     authed: true,

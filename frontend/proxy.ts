@@ -1,3 +1,5 @@
+// Next.js 16 "proxy" (formerly middleware). Runs on the Node.js runtime.
+//
 // Route guard.
 //
 // Presence check only. We trust that a cookie exists because the browser
@@ -103,7 +105,7 @@ const PUBLIC_FILES = new Set([
   "/icon.svg",
 ]);
 
-export function middleware(req: NextRequest) {
+export function proxy(req: NextRequest) {
   const { pathname, search } = req.nextUrl;
 
   const backend = backendFor(req);

@@ -10,18 +10,8 @@
 // element `<google-cast-launcher>` is not registered. Calls into these
 // APIs must be guarded with runtime presence checks.
 
-declare global {
-  interface Window {
-    /**
-     * Called by the Cast sender script once the framework has initialized.
-     * `ok` is true when the framework is ready; false on environments
-     * without Cast support (e.g., non-Chromium browsers).
-     */
-    __onGCastApiAvailable?: (ok: boolean) => void;
-    chrome?: typeof chrome;
-    cast?: typeof cast;
-  }
-
+// React 19 has no global JSX namespace; custom elements extend React's.
+declare module "react" {
   namespace JSX {
     interface IntrinsicElements {
       // Rendered as a web component once the Cast SDK registers it. The
@@ -34,6 +24,19 @@ declare global {
         "cast-icon-color"?: string;
       };
     }
+  }
+}
+
+declare global {
+  interface Window {
+    /**
+     * Called by the Cast sender script once the framework has initialized.
+     * `ok` is true when the framework is ready; false on environments
+     * without Cast support (e.g., non-Chromium browsers).
+     */
+    __onGCastApiAvailable?: (ok: boolean) => void;
+    chrome?: typeof chrome;
+    cast?: typeof cast;
   }
 
   // --- chrome.cast (legacy Cast API, still used for enums and MediaInfo) ---

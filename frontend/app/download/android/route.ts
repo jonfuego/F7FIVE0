@@ -5,7 +5,7 @@
 // backend/app/services/android_app.py). This route asks the API for a signed
 // one-hour link with the session's access token and redirects the browser to
 // it. The link (/api/client/android-app/download?...) is proxied straight to
-// the API by middleware.ts, so the file never passes through Next.
+// the API by proxy.ts, so the file never passes through Next.
 //
 // ?abi=armv7 picks the 32-bit build when a release has one.
 //
@@ -53,7 +53,7 @@ async function fetchInfo(path: string, access: string | undefined): Promise<Resp
 // One refresh attempt when the access cookie has expired. Returns the new
 // tokens (to set on the response) or null.
 async function refreshTokens(): Promise<Tokens | null> {
-  const refresh = cookies().get(REFRESH_COOKIE)?.value;
+  const refresh = (await cookies()).get(REFRESH_COOKIE)?.value;
   if (!refresh) return null;
   const res = await backend("/api/auth/refresh", {
     method: "POST",
@@ -69,7 +69,7 @@ async function refreshTokens(): Promise<Tokens | null> {
 
 async function lookup(req: NextRequest): Promise<{ info: AppInfo | null; status: number; tokens: Tokens | null }> {
   const path = infoPath(req);
-  let res = await fetchInfo(path, cookies().get(ACCESS_COOKIE)?.value);
+  let res = await fetchInfo(path, (await cookies()).get(ACCESS_COOKIE)?.value);
   let tokens: Tokens | null = null;
   if (res.status === 401) {
     tokens = await refreshTokens();
@@ -79,9 +79,9 @@ async function lookup(req: NextRequest): Promise<{ info: AppInfo | null; status:
   return { info: (await res.json()) as AppInfo, status: 200, tokens };
 }
 
-function withTokens(res: NextResponse, tokens: Tokens | null): NextResponse {
+async function withTokens(res: NextResponse, tokens: Tokens | null): Promise<NextResponse> {
   if (tokens) {
-    setSessionCookies(res, {
+    await setSessionCookies(res, {
       access: tokens.access_token,
       accessTtlSeconds: tokens.expires_in_seconds ?? 900,
       refresh: tokens.refresh_token,

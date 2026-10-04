@@ -87,7 +87,7 @@ def features() -> dict:
 def assetlinks() -> list[dict]:
     """No auth: Digital Asset Links statements for the Android apps allowed to
     use this server's passkeys and links. The web server serves this at
-    /.well-known/assetlinks.json (see frontend/middleware.ts). Empty list when
+    /.well-known/assetlinks.json (see frontend/proxy.ts). Empty list when
     passkeys are off or no app certificate is configured."""
     if not settings.passkeys_enabled:
         return []
