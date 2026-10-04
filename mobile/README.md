@@ -20,9 +20,11 @@ cd android
 
 Android TV build: set `$env:EXPO_TV = "1"` before `expo prebuild`.
 
-To offer the APK to your users, copy it into your server's
-`C:\F7FIVE0\data\downloads\` folder (any name ending in `.apk`; the newest
-wins). Everyone then sees **Download for Android** on their Account page.
+Official releases put the matching APK on the server for you (see Official
+releases below). To offer your own build instead, copy it into the server's
+`C:\F7FIVE0\data\downloads\` folder as `F7FIVE0-<version>.apk` (the newest
+version wins). Everyone then sees **Download for Android** on their Account
+page, and each download is stamped with the server's addresses.
 
 ## Signing
 
