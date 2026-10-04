@@ -75,7 +75,13 @@ def test_rp_id_from_https_public_url(cfg):
 def test_public_url_port_kept_in_origin(cfg):
     cfg(public_url="https://box.example.ts.net:8443")
     assert settings.webauthn_rp_id_effective == "box.example.ts.net"
-    assert settings.webauthn_origins_list == ["https://box.example.ts.net:8443"]
+    # No cert configured: the official release cert is trusted by default.
+    from app.config import OFFICIAL_ANDROID_CERT_SHA256
+
+    assert settings.webauthn_origins_list == [
+        "https://box.example.ts.net:8443",
+        apk_key_hash_origin(OFFICIAL_ANDROID_CERT_SHA256),
+    ]
 
 
 @pytest.mark.parametrize("url", ["", "http://192.168.1.20:3001", "http://media.example.com"])
@@ -156,3 +162,13 @@ def test_blank_cert_falls_back_to_official(cfg, monkeypatch):
     assert settings.webauthn_android_apps == [("com.f7five0.app", [CERT_COLON])]
     monkeypatch.setattr(config_module, "OFFICIAL_ANDROID_CERT_SHA256", "")
     assert settings.webauthn_android_apps == []
+
+
+def test_official_release_cert_matches_release_apk_output():
+    """The constant must produce the origin release-apk.ps1 printed for the
+    F7FIVE0 release key (2026-10-04)."""
+    from app.config import OFFICIAL_ANDROID_CERT_SHA256, apk_key_hash_origin
+
+    assert apk_key_hash_origin(OFFICIAL_ANDROID_CERT_SHA256) == (
+        "android:apk-key-hash:iNAcItFI76t59C4Voj5if1bZ5Rxk3vyhjkqXuSeFoPc"
+    )

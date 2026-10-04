@@ -20,10 +20,14 @@ _DATA_ROOT = _REPO_ROOT / "data"
 # (MusicBrainz requires one) when no operator email is configured.
 PROJECT_URL = "https://github.com/F7FIVE0/F7FIVE0"
 
-# SHA-256 fingerprint of the certificate that signs official F7FIVE0 APKs.
-# scripts/release-apk.ps1 prints it ("Release cert SHA-256"). Blank until the
-# release key exists; until then set WEBAUTHN_ANDROID_CERT_SHA256 in .env.
-OFFICIAL_ANDROID_CERT_SHA256 = ""
+# SHA-256 fingerprint of the certificate that signs official F7FIVE0 APKs
+# (release key made 2026-10-04; scripts/release-apk.ps1 prints it as "Release
+# cert SHA-256"). Passkeys trust the official app on every server by default.
+# A self-signed build adds its own cert with WEBAUTHN_ANDROID_CERT_SHA256.
+OFFICIAL_ANDROID_CERT_SHA256 = (
+    "88:D0:1C:22:D1:48:EF:AB:79:F4:2E:15:A2:3E:62:7F:"
+    "56:D9:E5:1C:64:DE:FC:A1:8E:4A:97:B9:27:85:A0:F7"
+)
 
 
 class Settings(BaseSettings):
