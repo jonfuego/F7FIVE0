@@ -1,12 +1,17 @@
 name: Release
 
-# Push a tag like v1.0.0 to build F7FIVE0-Setup-1.0.0.exe and the matching
-# zip, and attach both to a GitHub release.
+# Release order (the server and its Android app ship as one version):
+#   1. scripts\release-apk.ps1 -Version 1.0.0 (locally). Builds and signs the
+#      phone APK and uploads it to a DRAFT release for v1.0.0.
+#   2. git push origin v1.0.0. This workflow downloads the APK from the draft,
+#      checks its .sha256, bundles it into F7FIVE0-Setup-1.0.0.exe and the
+#      zip, attaches those, and publishes the release. No APK = no release.
 #
 # The Android APK is NOT built or signed here. The release key never goes to
-# GitHub. After this workflow finishes, the maintainer runs
-# scripts\release-apk.ps1 locally, which signs, verifies, and attaches the APK
-# to the same release. Do not add signing secrets to this repo.
+# GitHub. Do not add signing secrets to this repo.
+#
+# Manual runs (test builds) take an optional release tag to borrow APKs from;
+# without one the build has no Android app.
 on:
   push:
     tags: ["v*"]
@@ -16,6 +21,10 @@ on:
         description: "Version to stamp (no leading v)"
         required: true
         default: "0.0.0-test"
+      apk_from:
+        description: "Release tag to take the phone APK(s) from (optional)"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -40,9 +49,34 @@ jobs:
         shell: pwsh
         run: |
           if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
+      - name: Android APK from the release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APK_FROM: ${{ inputs.apk_from }}
+        run: |
+          $dir = "installer/apk"
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          if ("${{ github.ref_type }}" -eq "tag") {
+            $tag = "${{ github.ref_name }}"
+            $v = "${{ steps.v.outputs.version }}"
+            gh release download $tag --dir $dir --pattern "F7FIVE0-$v.apk" --pattern "F7FIVE0-$v.apk.sha256" --pattern "F7FIVE0-$v-armv7.apk" --pattern "F7FIVE0-$v-armv7.apk.sha256"
+            if ($LASTEXITCODE -ne 0 -or -not (Test-Path "$dir/F7FIVE0-$v.apk")) {
+              Write-Error "No F7FIVE0-$v.apk on release $tag. Run scripts\release-apk.ps1 -Version $v before pushing the tag."
+              exit 1
+            }
+          } elseif ($env:APK_FROM) {
+            gh release download $env:APK_FROM --dir $dir --pattern "F7FIVE0-[0-9]*.apk" --pattern "F7FIVE0-[0-9]*.apk.sha256"
+            if ($LASTEXITCODE -ne 0) { Write-Error "Could not download APKs from $env:APK_FROM"; exit 1 }
+          } else {
+            Write-Host "::warning::No apk_from given; this build has no Android app."
+          }
+          Get-ChildItem $dir | Format-Table Name, Length
       - name: Build dist + Setup.exe
         shell: pwsh
-        run: ./installer/build-dist.ps1 -Version "${{ steps.v.outputs.version }}" -Compile
+        run: |
+          $require = if ("${{ github.ref_type }}" -eq "tag") { @("-RequireApk") } else { @() }
+          ./installer/build-dist.ps1 -Version "${{ steps.v.outputs.version }}" -Compile -ApkDir installer/apk @require
       - name: Zip
         shell: pwsh
         run: Compress-Archive -Path installer/dist/* -DestinationPath "installer/Output/F7FIVE0-${{ steps.v.outputs.version }}.zip"
@@ -50,8 +84,16 @@ jobs:
         with:
           name: F7FIVE0-${{ steps.v.outputs.version }}
           path: installer/Output/*
-      - uses: softprops/action-gh-release@v2
+      - name: Attach and publish
         if: github.ref_type == 'tag'
-        with:
-          files: installer/Output/*
-          generate_release_notes: true
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          gh release upload $tag (Get-ChildItem installer/Output -File).FullName --clobber
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          gh api "repos/${{ github.repository }}/releases/generate-notes" -f tag_name=$tag --jq .body > notes.md
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          gh release edit $tag --draft=false --notes-file notes.md
+          if ($LASTEXITCODE -ne 0) { exit 1 }

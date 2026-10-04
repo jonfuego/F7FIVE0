@@ -191,13 +191,24 @@ Restart-Service F7FIVE0-API, F7FIVE0-Stream, F7FIVE0-Web
 
 ## The Android app
 
-The app works with any F7FIVE0 server: on first launch, enter the same
-address you use in a browser (for example `192.168.1.20:3001` or
-`media.yourdomain.com`).
+Setup includes the phone app that matches your server's version and puts it
+in `C:\F7FIVE0\data\downloads`. Signed-in people see **Download for Android**
+on their Account page (and in the gear menu).
 
-To offer the app to your users, put an APK in `C:\F7FIVE0\data\downloads`.
-Everyone then sees a **Download for Android** button on their Account page.
-See [mobile/README.md](mobile/README.md) for building the APK.
+Each download carries your server's addresses: the remote address from
+Admin > Remote access, the address the person downloaded from, and your home
+network address. On first launch the app fills in whichever one answers, so
+people only type their username and password. If your PC has several
+network adapters and the home address comes out wrong, set `HOME_URL` in
+`.env` (for example `HOME_URL=http://192.168.1.20:3001`).
+
+Upgrading the server also upgrades the app it hands out. After sign-in the
+app offers **Update** when your server has a newer version; Account shows it
+too. Installing the new download updates the app in place.
+
+Releases that include a 32-bit build show a second link for older phones and
+TV boxes. The app also works with any F7FIVE0 server when installed from
+GitHub: enter the same address you use in a browser.
 
 ## Ports
 

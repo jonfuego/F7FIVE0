@@ -510,6 +510,58 @@ foreach ($d in @("art", "metadata-cache", "transcode-cache", "downloads")) {
 }
 Ok "files in place"
 
+# Android app. Releases bundle the phone APK that matches this version in
+# android\ (installer\build-dist.ps1). Copy the newest one per ABI into
+# data\downloads, where the web app stamps it with this server's addresses on
+# every download, and drop the phone APKs it replaces so the server and the
+# app it hands out stay on the same version. TV builds are left alone. Never
+# fatal: without an APK the server simply does not offer the app.
+$AndroidAppVersion = ""
+$apkSrc = Join-Path $SourceDir "android"
+$apkDest = Join-Path $DataDir "downloads"
+$apkPattern = '^F7FIVE0-(\d+\.\d+\.\d+)(-armv7)?\.apk$'
+$bundled = @{}
+if (Test-Path $apkSrc) {
+    foreach ($f in Get-ChildItem $apkSrc -Filter "F7FIVE0-*.apk" -File) {
+        if ($f.Name -notmatch $apkPattern) { continue }
+        $ver = [version]$matches[1]
+        $abiKey = if ($matches[2]) { "armv7" } else { "arm64" }
+        if (-not $bundled.ContainsKey($abiKey) -or $ver -gt $bundled[$abiKey].Version) {
+            $bundled[$abiKey] = @{ File = $f; Version = $ver }
+        }
+    }
+}
+if ($bundled.Count -eq 0) {
+    Info "no Android app in this package; the server will not offer one"
+} else {
+    $keep = @()
+    foreach ($abiKey in @($bundled.Keys)) {
+        $f = $bundled[$abiKey].File
+        $shaFile = "$($f.FullName).sha256"
+        try {
+            if (-not (Test-Path $shaFile)) { throw "no .sha256 file" }
+            $want = ((Get-Content $shaFile -Raw).Trim() -split '\s+')[0].ToLowerInvariant()
+            $got = (Get-FileHash $f.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($want -ne $got) { throw "checksum mismatch" }
+            $target = Join-Path $apkDest $f.Name
+            if ($f.FullName -ne $target) { Copy-Item $f.FullName $target -Force }
+            $keep += $f.Name
+            if ($abiKey -eq "arm64") { $AndroidAppVersion = "$($bundled[$abiKey].Version)" }
+        } catch {
+            Warn "Android app $($f.Name) not published: $($_.Exception.Message)"
+        }
+    }
+    if ($keep.Count) {
+        foreach ($old in Get-ChildItem $apkDest -Filter "F7FIVE0-*.apk" -File) {
+            if ($old.Name -match $apkPattern -and $keep -notcontains $old.Name) {
+                Remove-Item $old.FullName -Force -ErrorAction SilentlyContinue
+                Info "removed old Android app $($old.Name)"
+            }
+        }
+        Ok "Android app ready: $($keep -join ', ')"
+    }
+}
+
 # ---------------------------------------------------------------------------
 Step "Database"
 # ---------------------------------------------------------------------------
@@ -797,6 +849,9 @@ if ($PublicUrl) {
     $summary.Add("From anywhere:  $PublicUrl")
 } else {
     $summary.Add("Away from home: sign in and go to Admin > Remote access.")
+}
+if ($AndroidAppVersion) {
+    $summary.Add("Android app $($AndroidAppVersion):  sign in on your phone's browser, then Account > Download for Android.")
 }
 if (-not $IsUpgrade) {
     $summary.Add("")

@@ -57,19 +57,40 @@ reinstall.
 ## Official releases
 
 Official F7FIVE0 APKs are signed on the maintainer's machine, never in CI.
-The release key does not live on GitHub. After pushing a `v*` tag and letting
-the Release workflow publish Setup.exe and the zip, run from the repo root:
+The release key does not live on GitHub. The server and the phone app ship
+as one version: Setup.exe carries the matching APK and copies it onto the
+server. Bump `version` and `versionCode` in `app.config.ts` to the release
+version, then from the repo root:
 
 ```powershell
-.\scripts\release-apk.ps1 -Version 1.0.0
+.\scripts\release-apk.ps1 -Version 1.0.0                    # 64-bit, required
+.\scripts\release-apk.ps1 -Version 1.0.0 -Abi armeabi-v7a   # 32-bit, optional
+git tag v1.0.0
+git push origin v1.0.0
 ```
 
-It refuses to build without the keystore properties file, builds the
-release APK, checks the APK's signer against the keystore certificate (and
-rejects the debug key), stages `mobile\dist\F7FIVE0-<version>.apk` plus a
-`.sha256`, prints the certificate SHA-256 and the passkey app origin, then
-attaches both files to the GitHub release with `gh`. `-NoUpload` stops
-after staging; `-Tv` builds the Android TV variant.
+`release-apk.ps1` refuses to build without the keystore properties file,
+builds a release APK for one ABI (`arm64-v8a` unless `-Abi` says otherwise),
+checks the APK's signer against the keystore certificate (and rejects the
+debug key) and that it carries only that ABI's native code, stages
+`mobile\dist\F7FIVE0-<version>.apk` (or `-armv7.apk`) plus a `.sha256`,
+prints the certificate SHA-256 and the passkey app origin, then uploads both
+files to a draft GitHub release for the tag (created if needed). Pushing the
+tag runs the Release workflow, which downloads the APK(s) from the draft,
+checks the `.sha256`, bundles them into Setup.exe and the zip, and publishes
+the release. No APK on the draft means no release. `-NoUpload` stops after
+staging; `-Tv` builds the Android TV variant (every ABI unless `-Abi` is
+given), which is not bundled.
+
+## Server-stamped downloads
+
+A server stamps every APK it hands out with its addresses: one extra entry in
+the APK Signing Block, which the signature does not cover, so the APK stays
+validly signed and installs over the official app
+(`backend/app/services/apk_stamp.py`). On first launch the local module
+`modules/f7five0-stamp` reads the entry back from the installed APK, and
+`src/state/config.ts` uses the first address that answers. Copies built
+locally or taken from GitHub have no stamp and ask for the address.
 
 If you build the app yourself, it is signed with your own key, so it
 installs as a separate app from the official one and cannot update it.

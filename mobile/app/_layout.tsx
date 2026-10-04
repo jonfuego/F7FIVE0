@@ -14,11 +14,18 @@ import { DownloadProvider } from "@/download/DownloadProvider";
 import { AndroidAutoBridge } from "@/player/AndroidAutoBridge";
 import { PlayerProvider } from "@/player/PlayerProvider";
 import { AuthProvider, useApi, useAuth } from "@/state/auth";
-import { APP_VERSION, clientPlatform, getApiBase, loadServerUrl } from "@/state/config";
+import {
+  APP_VERSION,
+  clientPlatform,
+  fillServerFromStamp,
+  getApiBase,
+  loadServerUrl,
+} from "@/state/config";
 import { useAppFonts } from "@/state/fonts";
 import { queryClient } from "@/state/query";
 import { colors } from "@/state/theme";
 import { ErrorBoundary } from "@/ui/ErrorBoundary";
+import { AppUpdatePrompt } from "@/ui/AppUpdate";
 import { UpdateRequired } from "@/ui/UpdateRequired";
 import { isUpdateRequiredForPlatform } from "@/lib/version";
 
@@ -58,11 +65,15 @@ function useMinVersionGate(serverReady: boolean): "checking" | "ok" | "update" {
   return state;
 }
 
-/** Load the saved server address before anything talks to the network. */
+/** Load the saved server address before anything talks to the network. On
+ * first launch of a copy downloaded from a server, fill it from the stamp. */
 function useServerReady(): boolean {
   const [ready, setReady] = useState(false);
   useEffect(() => {
-    loadServerUrl().finally(() => setReady(true));
+    loadServerUrl()
+      .then(() => fillServerFromStamp())
+      .catch(() => undefined)
+      .finally(() => setReady(true));
   }, []);
   return ready;
 }
@@ -112,6 +123,7 @@ function GatedApp(): React.ReactElement {
       }
     >
       <AuthGate />
+      <AppUpdatePrompt />
     </ErrorBoundary>
   );
 }

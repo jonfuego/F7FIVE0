@@ -304,6 +304,36 @@ def verify_media_url_params(media_file_id: uuid.UUID, action: str, extra: str,
     return hmac.compare_digest(sig, expected)
 
 
+# ---------------------------------------------------------------------------
+# Android app download links
+# ---------------------------------------------------------------------------
+# The app's "Update from your server" button and the web download hand the
+# APK request to a browser, which has no bearer. The link is bound to the ABI
+# and expires after an hour.
+APP_DOWNLOAD_TTL_SECONDS = 3600
+
+
+def _app_download_sig(abi: str, uid: str, exp: int) -> str:
+    payload = f"android-app:{abi}:{uid}:{exp}"
+    return hmac.new(
+        settings.stream_hmac_secret.encode("utf-8"),
+        payload.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def sign_app_download_params(abi: str, user_id: uuid.UUID) -> dict:
+    exp = int(datetime.now(timezone.utc).timestamp()) + APP_DOWNLOAD_TTL_SECONDS
+    uid = str(user_id)
+    return {"abi": abi, "uid": uid, "exp": exp, "sig": _app_download_sig(abi, uid, exp)}
+
+
+def verify_app_download_params(abi: str, uid: str, exp: int, sig: str) -> bool:
+    if exp < int(datetime.now(timezone.utc).timestamp()):
+        return False
+    return hmac.compare_digest(sig, _app_download_sig(abi, uid, exp))
+
+
 def build_signed_subtitle_url(base: str, media_file_id: uuid.UUID,
                               stream_index: int, user_id: uuid.UUID,
                               ttl_hours: Optional[int] = None) -> str:

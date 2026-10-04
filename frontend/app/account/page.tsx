@@ -587,7 +587,9 @@ function AnywhereCard() {
 // Android app download. HEAD /download/android tells us whether an APK is
 // published (and its name/size) so the button only shows when it will work.
 function AndroidAppCard() {
-  const [apk, setApk] = useState<{ name: string; size: number } | null | undefined>(undefined);
+  const [apk, setApk] = useState<
+    { name: string; size: number; version: string; armv7: boolean } | null | undefined
+  >(undefined);
 
   useEffect(() => {
     let cancelled = false;
@@ -598,6 +600,8 @@ function AndroidAppCard() {
         setApk({
           name: res.headers.get("x-apk-name") ?? "F7FIVE0.apk",
           size: Number(res.headers.get("content-length") ?? 0),
+          version: res.headers.get("x-apk-version") ?? "",
+          armv7: (res.headers.get("x-apk-abis") ?? "").split(",").includes("armv7"),
         });
       })
       .catch(() => !cancelled && setApk(null));
@@ -621,21 +625,29 @@ function AndroidAppCard() {
         <>
           <a
             href="/download/android"
-            download={apk.name}
             className="mt-4 inline-flex items-center rounded-md bg-hive px-4 py-2 text-sm font-semibold text-on-hive hover:bg-hive-hover"
           >
             Download for Android
           </a>
           <p className="mt-2 text-xs text-neutral-500">
-            {apk.name}
+            {apk.version ? `Version ${apk.version}` : apk.name}
             {apk.size > 0 ? ` · ${(apk.size / (1024 * 1024)).toFixed(0)} MB` : ""}
           </p>
           <p className="mt-3 text-xs text-neutral-500">
             Open the downloaded file on your phone. If Android asks, allow installs from your
-            browser, then tap Install. When the app asks for a server, enter the address
-            above, then sign in with your
-            F7FIVE0 username and password.
+            browser, then tap Install. The app opens with this server already filled in; sign
+            in with your F7FIVE0 username and password. Already have the app? Installing this
+            file updates it in place.
           </p>
+          {apk.armv7 ? (
+            <p className="mt-2 text-xs text-neutral-500">
+              Older 32-bit phone or TV box?{" "}
+              <a href="/download/android?abi=armv7" className="underline hover:text-neutral-300">
+                Get the 32-bit build
+              </a>
+              .
+            </p>
+          ) : null}
         </>
       )}
     </section>

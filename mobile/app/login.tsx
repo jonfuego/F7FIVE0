@@ -14,10 +14,10 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { passkeysAvailable, serverHasPasskeys } from "@/auth/passkey";
 import { useAuth } from "@/state/auth";
-import { getApiBase, normalizeServerUrl, saveServerUrl } from "@/state/config";
+import { getApiBase, normalizeServerUrl, saveServerUrl, serverFilledFromStamp } from "@/state/config";
 import type { LoginError } from "@/state/auth";
 import { colors, MIN_TOUCH, radius, spacing, typography } from "@/state/theme";
-import { Artwork } from "@/ui/Artwork";
+import { HiveWordmark } from "@/ui/HiveWordmark";
 import { IconButton } from "@/ui/IconButton";
 
 function messageFor(err: string): string {
@@ -30,6 +30,8 @@ function messageFor(err: string): string {
 export default function LoginScreen(): React.ReactElement {
   const { signIn, signInWithPasskey } = useAuth();
   const [server, setServer] = useState(getApiBase());
+  // Filled in from the server this copy was downloaded from (APK stamp).
+  const [prefilled] = useState(() => serverFilledFromStamp() && getApiBase() !== "");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -112,8 +114,9 @@ export default function LoginScreen(): React.ReactElement {
         style={styles.flex}
       >
         <View style={styles.center}>
-          <Artwork path={null} size={72} rounded />
-          <Text style={styles.brand}>F7FIVE0</Text>
+          <View style={styles.logo}>
+            <HiveWordmark height={40} />
+          </View>
           <Text style={styles.subtitle}>Sign in to your library</Text>
 
           <TextInput
@@ -129,6 +132,9 @@ export default function LoginScreen(): React.ReactElement {
             onSubmitEditing={() => usernameRef.current?.focus()}
             accessibilityLabel="Server"
           />
+          {prefilled && normalizeServerUrl(server) === getApiBase() ? (
+            <Text style={styles.hint}>Filled in from the server you downloaded the app from.</Text>
+          ) : null}
 
           {showPasskey ? (
             <>
@@ -207,7 +213,7 @@ export default function LoginScreen(): React.ReactElement {
             style={({ pressed }) => [styles.button, pressed && styles.buttonPressed, busy && styles.buttonBusy]}
           >
             {busy ? (
-              <ActivityIndicator color="#1a1206" />
+              <ActivityIndicator color={colors.onHive} />
             ) : (
               <Text style={styles.buttonText}>Sign in</Text>
             )}
@@ -222,8 +228,9 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },
   flex: { flex: 1 },
   center: { flex: 1, justifyContent: "center", padding: spacing.xl, gap: spacing.md },
-  brand: { ...typography.title, textAlign: "center", marginTop: spacing.md },
+  logo: { alignItems: "center", marginBottom: spacing.sm },
   subtitle: { ...typography.body, color: colors.textMuted, textAlign: "center", marginBottom: spacing.lg },
+  hint: { ...typography.caption, color: colors.textFaint, marginTop: -spacing.xs, paddingHorizontal: spacing.xs },
   input: {
     minHeight: MIN_TOUCH + 6,
     backgroundColor: colors.surface,
@@ -261,7 +268,8 @@ const styles = StyleSheet.create({
   },
   buttonPressed: { backgroundColor: colors.accentPressed },
   buttonBusy: { opacity: 0.8 },
-  buttonText: { color: "#1a1206", fontWeight: "700", fontSize: 16 },
+  // White on hive red (design system on-hive); the old dark label was unreadable.
+  buttonText: { color: colors.onHive, fontWeight: "700", fontSize: 16 },
   passkeyButton: {
     minHeight: MIN_TOUCH + 4,
     borderRadius: radius.pill,

@@ -86,6 +86,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // compiler can't read. Both builds need it (passkey is autolinked in both).
     "./plugins/withKotlinStdlibPin.js",
     "./plugins/withAndroidReleaseSigning.js",
+    // Official builds ship one ABI (F7FIVE0_ABIS, set by release-apk.ps1).
+    "./plugins/withAbiFilter.js",
     // Android Auto media support (crit 44): automotive_app_desc + car metadata.
     "./plugins/withAndroidAuto.js",
     // Chromecast (phone only). Wires the react-native-google-cast options

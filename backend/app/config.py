@@ -187,6 +187,14 @@ class Settings(BaseSettings):
     # Tunnel), written by setup. Shown on the Account page as a QR code.
     public_url: str = ""
 
+    # Address on the home network, stamped into Android app downloads next to
+    # PUBLIC_URL. Blank: http://<this machine's LAN IP>:<WEB_PORT>.
+    home_url: str = ""
+
+    # Folder setup copies the official Android APK into. The download is
+    # stamped with this server's addresses. Blank: <install folder>/data/downloads.
+    f7five0_downloads_dir: str = ""
+
     # Ports
     api_port: int = 8001
     stream_port: int = 8002

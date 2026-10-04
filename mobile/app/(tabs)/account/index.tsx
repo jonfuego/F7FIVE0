@@ -22,6 +22,7 @@ import { getApiBase } from "@/state/config";
 import { colors, fonts, MIN_TOUCH, radius, spacing, typography } from "@/state/theme";
 import { Icon } from "@/ui/Icon";
 import { IconButton } from "@/ui/IconButton";
+import { AppUpdateCard } from "@/ui/AppUpdate";
 import { QueryState } from "@/ui/QueryState";
 import { Screen } from "@/ui/Screen";
 
@@ -162,6 +163,7 @@ export default function AccountScreen(): React.ReactElement {
         >
           Server: {getApiBase()} (sign out to switch servers)
         </Text>
+        <AppUpdateCard />
 
         <Text style={styles.section}>Profile</Text>
         <TextInput

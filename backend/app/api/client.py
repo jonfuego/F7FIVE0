@@ -8,6 +8,10 @@
   passkeys) and the public address.
 - GET  /api/client/assetlinks.json : no auth. Digital Asset Links for the
   Android app(s), served by the web server at /.well-known/assetlinks.json.
+- GET  /api/client/android-app : auth required. The Android app this
+  server hands out (version, size) and a signed one-hour download link.
+- GET/HEAD /api/client/android-app/download : bearer or signed link. The APK,
+  stamped with this server's addresses so the app fills in the server.
 - POST /api/client/errors : auth required. Phase 4 crash reporting with no
   third-party service. Writes one structured line to the API log; the payload
   is hard-capped at 8 KB.
@@ -22,12 +26,19 @@ import json
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from typing import Optional
+from urllib.parse import urlencode
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi.responses import StreamingResponse
 
 from app.api.deps import current_user
+from app.api.media_files import content_disposition, optional_current_user
 from app.api.schemas import ClientErrorReport, MinClientVersionOut
 from app.config import settings
 from app.models.user import User
+from app.services import android_app, apk_stamp
+from app.services import security as security_service
 
 
 router = APIRouter()
@@ -94,6 +105,95 @@ def assetlinks() -> list[dict]:
         }
         for package, certs in settings.webauthn_android_apps
     ]
+
+
+def _request_origin(request: Request) -> str:
+    from app.api.stream import _base_url
+
+    return _base_url(request)
+
+
+def _pick_apk(abi: str) -> android_app.Apk:
+    if abi not in android_app.ABIS:
+        raise HTTPException(status_code=422, detail="invalid_abi")
+    apk = android_app.find_apks().get(abi)
+    if apk is None:
+        raise HTTPException(status_code=404, detail="android_app_not_available")
+    return apk
+
+
+@router.get("/android-app")
+def android_app_info(
+    request: Request,
+    user: Annotated[User, Depends(current_user)],
+    abi: str = Query("arm64"),
+) -> dict:
+    """The phone app this server offers. `available` is false when setup
+    found no APK to publish. `url` is a signed link a browser can open."""
+    if abi not in android_app.ABIS:
+        raise HTTPException(status_code=422, detail="invalid_abi")
+    apks = android_app.find_apks()
+    apk = apks.get(abi)
+    if apk is None:
+        return {"available": False, "abis": sorted(apks)}
+    origin = _request_origin(request)
+    try:
+        size = android_app.plan(apk, origin).length
+    except (OSError, apk_stamp.ApkStampError) as exc:
+        log.warning("android_app_unusable %s: %s", apk.name, exc)
+        return {"available": False, "abis": sorted(apks)}
+    path = "/api/client/android-app/download?" + urlencode(
+        security_service.sign_app_download_params(abi, user.id)
+    )
+    return {
+        "available": True,
+        "version": apk.version,
+        "abi": abi,
+        "abis": sorted(apks),
+        "file_name": apk.name,
+        "size_bytes": size,
+        "path": path,
+        "url": origin.rstrip("/") + path,
+    }
+
+
+@router.api_route("/android-app/download", methods=["GET", "HEAD"])
+def android_app_download(
+    request: Request,
+    user: Annotated[Optional[User], Depends(optional_current_user)],
+    abi: str = Query("arm64"),
+    uid: Optional[str] = None,
+    exp: Optional[int] = None,
+    sig: Optional[str] = None,
+) -> Response:
+    """The APK, stamped with this server's addresses. Bearer or a signed link
+    from /android-app. Not range-aware: every response is a fresh stamp."""
+    if user is None and not (
+        uid is not None and exp is not None and sig is not None
+        and security_service.verify_app_download_params(abi, uid, exp, sig)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="download_auth_required",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    apk = _pick_apk(abi)
+    try:
+        plan = android_app.plan(apk, _request_origin(request))
+    except (OSError, apk_stamp.ApkStampError) as exc:
+        log.warning("android_app_unusable %s: %s", apk.name, exc)
+        raise HTTPException(status_code=404, detail="android_app_not_available")
+    headers = {
+        "Content-Length": str(plan.length),
+        "Content-Disposition": content_disposition(apk.name),
+        "Cache-Control": "private, no-store",
+        "X-Apk-Name": apk.name,
+        "X-Apk-Version": apk.version,
+    }
+    media_type = "application/vnd.android.package-archive"
+    if request.method == "HEAD":
+        return Response(status_code=200, headers=headers, media_type=media_type)
+    return StreamingResponse(plan.iter_bytes(), headers=headers, media_type=media_type)
 
 
 @router.post("/errors", status_code=status.HTTP_204_NO_CONTENT)

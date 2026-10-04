@@ -24,6 +24,8 @@ export function GearMenu() {
   const [me, setMe] = useState<Me | null>(null);
   const [open, setOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  // Only offer the Android app when this server has one to hand out.
+  const [hasApp, setHasApp] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -31,6 +33,13 @@ export function GearMenu() {
     (async () => {
       const profile = await loadMeWithRefresh();
       if (!cancelled) setMe(profile);
+      if (!profile) return;
+      try {
+        const res = await fetch("/download/android", { method: "HEAD", cache: "no-store" });
+        if (!cancelled) setHasApp(res.ok);
+      } catch {
+        // Leave the link hidden.
+      }
     })();
     return () => {
       cancelled = true;
@@ -94,14 +103,16 @@ export function GearMenu() {
           >
             Account
           </Link>
-          <a
-            href="/download/android"
-            className="gear-item"
-            role="menuitem"
-            onClick={() => setOpen(false)}
-          >
-            Get the Android app
-          </a>
+          {hasApp ? (
+            <a
+              href="/download/android"
+              className="gear-item"
+              role="menuitem"
+              onClick={() => setOpen(false)}
+            >
+              Get the Android app
+            </a>
+          ) : null}
           {isAdmin ? (
             <Link
               href="/admin"

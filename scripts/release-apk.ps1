@@ -8,19 +8,34 @@
 #      Missing file = hard stop. Without it Gradle silently falls back to the
 #      debug key, and a debug-signed APK must never ship.
 #   2. Check -Version matches `version` in mobile\app.config.ts.
-#   3. npm ci, expo prebuild --clean, gradlew assembleRelease.
+#   3. npm ci, expo prebuild --clean, gradlew assembleRelease, for one ABI
+#      (64-bit arm64-v8a unless -Abi says otherwise).
 #   4. apksigner verify, then compare the APK's signer SHA-256 with the
-#      keystore's certificate SHA-256 (keytool). Mismatch = hard stop.
-#   5. Copy to mobile\dist\F7FIVE0-<version>.apk (or F7FIVE0-TV-<version>.apk)
-#      and write a matching .sha256 file. mobile\dist\ is gitignored.
+#      keystore's certificate SHA-256 (keytool). Mismatch = hard stop. Check
+#      the APK carries native code for the requested ABI only.
+#   5. Copy to mobile\dist\ and write a matching .sha256 file
+#      (mobile\dist\ is gitignored):
+#        F7FIVE0-<version>.apk          phone, arm64-v8a
+#        F7FIVE0-<version>-armv7.apk    phone, armeabi-v7a (-Abi armeabi-v7a)
+#        F7FIVE0-TV-<version>.apk       Android TV (-Tv)
 #   6. Print the cert SHA-256 and the android:apk-key-hash origin (for the
 #      passkey WEBAUTHN settings).
-#   7. gh release upload to tag v<version>. The tag push builds the release
-#      (Setup.exe + zip) in CI first; this adds the APK to it.
+#   7. Upload to the GitHub release for tag v<version>, creating it as a DRAFT
+#      when it does not exist yet. Then push the tag: the Release workflow
+#      pulls the phone APK(s) from the draft into Setup.exe, attaches Setup.exe
+#      and the zip, and publishes the release. Setup copies the APK onto the
+#      server, so the server and its app are always the same version.
+#
+# Release order:
+#   .\scripts\release-apk.ps1 -Version 1.2.0                     (64-bit, required)
+#   .\scripts\release-apk.ps1 -Version 1.2.0 -Abi armeabi-v7a    (optional 32-bit)
+#   git tag v1.2.0; git push origin v1.2.0
 #
 # Flags:
 #   -Version <x.y.z>  Required. Must match mobile\app.config.ts.
 #   -Tag <tag>        Release tag. Default v<Version>.
+#   -Abi <abi>        arm64-v8a (default) or armeabi-v7a. -Tv without -Abi
+#                     keeps every ABI (TV boxes are often 32-bit).
 #   -Tv               Build the Android TV variant (EXPO_TV=1).
 #   -SkipBuild        Reuse the APK already in mobile\android\app\build\...
 #   -NoUpload         Build, verify, and stage in mobile\dist\ only.
@@ -36,6 +51,7 @@
 param(
     [Parameter(Mandatory = $true)][string]$Version,
     [string]$Tag = "",
+    [ValidateSet("arm64-v8a", "armeabi-v7a")][string]$Abi = "arm64-v8a",
     [switch]$Tv,
     [switch]$SkipBuild,
     [switch]$NoUpload,
@@ -62,6 +78,8 @@ function Step([string]$msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $Mobile = Join-Path $RepoRoot "mobile"
 if (-not $Tag) { $Tag = "v$Version" }
+# TV builds keep every ABI unless one is asked for.
+$abiList = if ($Tv -and -not $PSBoundParameters.ContainsKey("Abi")) { "" } else { $Abi }
 
 # 1. Keystore properties -----------------------------------------------------
 Step "Keystore"
@@ -120,10 +138,13 @@ $built = Join-Path $Mobile "android\app\build\outputs\apk\release\app-release.ap
 if (-not $SkipBuild) {
     $oldTv = $env:EXPO_TV
     $oldProps = $env:F7FIVE0_KEYSTORE_PROPERTIES
+    $oldAbis = $env:F7FIVE0_ABIS
     $startLoc = Get-Location
     try {
         if ($Tv) { $env:EXPO_TV = "1" } else { Remove-Item Env:EXPO_TV -ErrorAction SilentlyContinue }
         $env:F7FIVE0_KEYSTORE_PROPERTIES = $propsPath
+        # plugins\withAbiFilter.js reads this during prebuild.
+        if ($abiList) { $env:F7FIVE0_ABIS = $abiList } else { Remove-Item Env:F7FIVE0_ABIS -ErrorAction SilentlyContinue }
         Set-Location $Mobile
         Step "npm ci"
         & npm ci
@@ -132,13 +153,16 @@ if (-not $SkipBuild) {
         & npx expo prebuild -p android --clean
         if ($LASTEXITCODE -ne 0) { Fail "expo prebuild failed" }
         Set-Location (Join-Path $Mobile "android")
-        Step "gradlew assembleRelease"
-        & .\gradlew.bat assembleRelease
+        Step "gradlew assembleRelease ($(if ($abiList) { $abiList } else { 'all ABIs' }))"
+        $gradleArgs = @("assembleRelease")
+        if ($abiList) { $gradleArgs += "-PreactNativeArchitectures=$abiList" }
+        & .\gradlew.bat @gradleArgs
         if ($LASTEXITCODE -ne 0) { Fail "gradle build failed" }
     } finally {
         Set-Location $startLoc
         if ($null -ne $oldTv) { $env:EXPO_TV = $oldTv } else { Remove-Item Env:EXPO_TV -ErrorAction SilentlyContinue }
         if ($null -ne $oldProps) { $env:F7FIVE0_KEYSTORE_PROPERTIES = $oldProps } else { Remove-Item Env:F7FIVE0_KEYSTORE_PROPERTIES -ErrorAction SilentlyContinue }
+        if ($null -ne $oldAbis) { $env:F7FIVE0_ABIS = $oldAbis } else { Remove-Item Env:F7FIVE0_ABIS -ErrorAction SilentlyContinue }
     }
 }
 if (-not (Test-Path -LiteralPath $built)) { Fail "APK not found at $built" }
@@ -165,10 +189,28 @@ $apkHex = $am.Groups[1].Value.ToLowerInvariant()
 if ($apkHex -ne $keyHex) { Fail "APK signer $apkHex does not match keystore cert $keyHex" }
 Write-Host "    signer matches keystore" -ForegroundColor Green
 
+# Native code: only the requested ABI (a stale -SkipBuild APK or a prebuild
+# that missed the ABI filter would ship the wrong or every ABI).
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$zip = [System.IO.Compression.ZipFile]::OpenRead($built)
+try {
+    $found = @($zip.Entries | ForEach-Object {
+        if ($_.FullName -match '^lib/([^/]+)/') { $matches[1] }
+    } | Sort-Object -Unique)
+} finally { $zip.Dispose() }
+if ($abiList) {
+    $extra = @($found | Where-Object { $_ -ne $abiList })
+    if ($extra.Count -or ($found -notcontains $abiList)) {
+        Fail "APK native code is [$($found -join ', ')], expected only $abiList. Rebuild without -SkipBuild."
+    }
+}
+Write-Host "    native code: $(if ($found.Count) { $found -join ', ' } else { 'none' })"
+
 # 5. Stage ----------------------------------------------------------------------
 $dist = Join-Path $Mobile "dist"
 New-Item -ItemType Directory -Force -Path $dist | Out-Null
-$name = if ($Tv) { "F7FIVE0-TV-$Version.apk" } else { "F7FIVE0-$Version.apk" }
+$suffix = if ($abiList -eq "armeabi-v7a") { "-armv7" } else { "" }
+$name = if ($Tv) { "F7FIVE0-TV-$Version$suffix.apk" } else { "F7FIVE0-$Version$suffix.apk" }
 $out = Join-Path $dist $name
 Copy-Item -LiteralPath $built -Destination $out -Force
 $sha = (Get-FileHash -LiteralPath $out -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -195,10 +237,23 @@ if ($NoUpload) {
 Step "Upload to release $Tag"
 Invoke-Native { & gh release view $Tag *> $null }
 if ($LASTEXITCODE -ne 0) {
-    Fail "Release $Tag not found. Push the tag first (git push origin $Tag) and wait for the Release workflow to finish."
+    # No release yet: create a draft for the tag at this commit. The Release
+    # workflow fills it in and publishes it when the tag is pushed.
+    $commit = (Invoke-Native { & git -C $RepoRoot rev-parse HEAD 2>&1 | Out-String }).Trim()
+    if ($LASTEXITCODE -ne 0 -or $commit -notmatch '^[0-9a-f]{40}$') { Fail "git rev-parse HEAD failed: $commit" }
+    Invoke-Native { & gh release create $Tag --draft --target $commit --title "F7FIVE0 $Version" --notes "Draft. Published by the Release workflow when $Tag is pushed." }
+    if ($LASTEXITCODE -ne 0) { Fail "gh release create $Tag --draft failed" }
+    Write-Host "    created draft release $Tag at $($commit.Substring(0, 12))"
 }
 $ghArgs = @("release", "upload", $Tag, $out, $shaFile)
 if ($Clobber) { $ghArgs += "--clobber" }
 Invoke-Native { & gh @ghArgs }
 if ($LASTEXITCODE -ne 0) { Fail "gh release upload failed (use -Clobber to replace an existing asset)" }
 Write-Host "Done: $name attached to $Tag" -ForegroundColor Green
+if (-not $Tv) {
+    Write-Host ""
+    Write-Host "Next (once every APK for $Tag is uploaded):"
+    Write-Host "  git tag $Tag"
+    Write-Host "  git push origin $Tag"
+    Write-Host "The Release workflow bundles the APK into Setup.exe and publishes the release."
+}

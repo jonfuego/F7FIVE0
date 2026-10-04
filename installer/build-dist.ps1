@@ -9,6 +9,8 @@
     backend\     FastAPI source + requirements.txt (no venv, no tests)
     web\         Next.js standalone bundle, ready for `node server.js`
     installer\   install.ps1 / uninstall.ps1 / remote-access.ps1 / common.ps1
+    android\     F7FIVE0-<version>.apk (+ -armv7) and .sha256 files, when
+                 -ApkDir is given. install.ps1 copies them into data\downloads.
     alembic.ini  .env.example  LICENSE  README.md  INSTALL.md  VERSION
 
   Then, if Inno Setup is installed (or -Compile is passed), compiles
@@ -21,7 +23,12 @@
 param(
     [string] $Version = "0.0.0-dev",
     [switch] $Compile,
-    [switch] $SkipWebBuild
+    [switch] $SkipWebBuild,
+    # Folder holding the signed phone APK(s) from scripts\release-apk.ps1 and
+    # their .sha256 files. Release builds pass it (the workflow downloads them
+    # from the draft release); -RequireApk makes a missing APK fatal.
+    [string] $ApkDir = "",
+    [switch] $RequireApk
 )
 $ErrorActionPreference = "Stop"
 $Repo = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
@@ -66,6 +73,32 @@ foreach ($f in @("alembic.ini", ".env.example", "LICENSE", "README.md", "INSTALL
     if (Test-Path $s) { Copy-Item $s (Join-Path $Dist $f) }
 }
 Set-Content -Path (Join-Path $Dist "VERSION") -Value $Version -NoNewline -Encoding ASCII
+
+# Android app. Phone builds only (F7FIVE0-<x.y.z>.apk and -armv7); TV builds
+# are a separate download. Every APK needs a matching .sha256 file.
+$apkCount = 0
+if ($ApkDir) {
+    if (-not (Test-Path $ApkDir)) { throw "APK folder not found: $ApkDir" }
+    $androidOut = Join-Path $Dist "android"
+    New-Item -ItemType Directory -Path $androidOut | Out-Null
+    foreach ($apk in Get-ChildItem $ApkDir -Filter "F7FIVE0-*.apk" -File) {
+        if ($apk.Name -notmatch '^F7FIVE0-\d+\.\d+\.\d+(-armv7)?\.apk$') { continue }
+        $shaFile = "$($apk.FullName).sha256"
+        if (-not (Test-Path $shaFile)) { throw "missing $($apk.Name).sha256" }
+        $want = ((Get-Content $shaFile -Raw).Trim() -split '\s+')[0].ToLowerInvariant()
+        $got = (Get-FileHash $apk.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($want -ne $got) { throw "$($apk.Name) checksum mismatch (file $got, .sha256 $want)" }
+        Copy-Item $apk.FullName (Join-Path $androidOut $apk.Name)
+        Copy-Item $shaFile (Join-Path $androidOut "$($apk.Name).sha256")
+        Write-Host "android: $($apk.Name) ($([math]::Round($apk.Length / 1MB)) MB, checksum ok)"
+        $apkCount++
+    }
+}
+$hasPhone = $apkCount -gt 0 -and (Get-ChildItem (Join-Path $Dist "android") -Filter "F7FIVE0-*.apk" | Where-Object { $_.Name -notmatch '-armv7\.apk$' })
+if ($RequireApk -and -not (Test-Path (Join-Path $Dist "android\F7FIVE0-$Version.apk"))) {
+    throw "No F7FIVE0-$Version.apk to bundle. The server and app ship as one version: run scripts\release-apk.ps1 -Version $Version first."
+}
+if (-not $hasPhone) { Write-Host "android: no APK bundled; the server will not offer the Android app." }
 Write-Host "dist ready: $Dist"
 
 $iscc = @(

@@ -1,67 +1,133 @@
-// Android app download for signed-in users.
+// Android app download for signed-in browsers.
 //
-// Serves the newest *.apk from F7FIVE0_DOWNLOADS_DIR (default
-// C:\F7FIVE0\downloads). That folder sits outside C:\F7FIVE0\web because
-// publish.ps1 mirrors the web target with /MIR and would wipe anything else
-// there. The middleware already requires a session cookie for this path, so
-// the download is only offered to people who can sign in to F7FIVE0.
+// The APK lives with the API, which stamps every download with this server's
+// addresses so the app fills in the server on first launch (see
+// backend/app/services/android_app.py). This route asks the API for a signed
+// one-hour link with the session's access token and redirects the browser to
+// it. The link (/api/client/android-app/download?...) is proxied straight to
+// the API by middleware.ts, so the file never passes through Next.
 //
-// HEAD returns the same headers without the body; the Account page uses it
-// to show the version and size, or hide the button when no APK is published.
+// ?abi=armv7 picks the 32-bit build when a release has one.
+//
+// HEAD answers with the file name, version and size (or 404 when no APK is
+// published) without a redirect. The Account page and gear menu use it to
+// show or hide the download.
 
-import { createReadStream } from "node:fs";
-import { readdir, stat } from "node:fs/promises";
-import path from "node:path";
-import { Readable } from "node:stream";
+import { NextRequest, NextResponse } from "next/server";
+import { cookies } from "next/headers";
+import { backend } from "@/lib/api";
+import { setSessionCookies } from "@/lib/cookies";
+import { ACCESS_COOKIE, REFRESH_COOKIE } from "@/lib/server-env";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const DOWNLOADS_DIR = process.env.F7FIVE0_DOWNLOADS_DIR ?? "C:\\F7FIVE0\\downloads";
+type AppInfo = {
+  available: boolean;
+  version?: string;
+  file_name?: string;
+  size_bytes?: number;
+  path?: string;
+  abis?: string[];
+};
 
-async function newestApk(): Promise<{ file: string; name: string; size: number; mtime: Date } | null> {
-  let names: string[];
-  try {
-    names = await readdir(DOWNLOADS_DIR);
-  } catch {
-    return null;
-  }
-  let best: { file: string; name: string; size: number; mtime: Date } | null = null;
-  for (const name of names) {
-    if (!name.toLowerCase().endsWith(".apk")) continue;
-    const file = path.join(DOWNLOADS_DIR, name);
-    const st = await stat(file).catch(() => null);
-    if (!st || !st.isFile()) continue;
-    if (!best || st.mtime > best.mtime) best = { file, name, size: st.size, mtime: st.mtime };
-  }
-  return best;
+type Tokens = {
+  access_token: string;
+  refresh_token: string;
+  expires_in_seconds?: number;
+  refresh_expires_in_seconds?: number;
+};
+
+function infoPath(req: NextRequest): string {
+  const abi = req.nextUrl.searchParams.get("abi") === "armv7" ? "armv7" : "arm64";
+  return `/api/client/android-app?abi=${abi}`;
 }
 
-function headersFor(apk: { name: string; size: number; mtime: Date }): Headers {
-  return new Headers({
-    "content-type": "application/vnd.android.package-archive",
-    "content-length": String(apk.size),
-    "content-disposition": `attachment; filename="${apk.name.replace(/"/g, "")}"`,
-    "last-modified": apk.mtime.toUTCString(),
-    "x-apk-name": apk.name,
-    "cache-control": "private, no-store",
+async function fetchInfo(path: string, access: string | undefined): Promise<Response> {
+  return backend(path, {
+    method: "GET",
+    headers: access ? { authorization: `Bearer ${access}` } : undefined,
   });
 }
 
-export async function HEAD(): Promise<Response> {
-  const apk = await newestApk();
-  if (!apk) return new Response(null, { status: 404 });
-  return new Response(null, { status: 200, headers: headersFor(apk) });
+// One refresh attempt when the access cookie has expired. Returns the new
+// tokens (to set on the response) or null.
+async function refreshTokens(): Promise<Tokens | null> {
+  const refresh = cookies().get(REFRESH_COOKIE)?.value;
+  if (!refresh) return null;
+  const res = await backend("/api/auth/refresh", {
+    method: "POST",
+    body: { refresh_token: refresh },
+  });
+  if (!res.ok) return null;
+  const body = (await res.json().catch(() => null)) as Partial<Tokens> | null;
+  if (!body || typeof body.access_token !== "string" || typeof body.refresh_token !== "string") {
+    return null;
+  }
+  return body as Tokens;
 }
 
-export async function GET(): Promise<Response> {
-  const apk = await newestApk();
-  if (!apk) {
-    return new Response("The Android app has not been published yet.", {
-      status: 404,
-      headers: { "content-type": "text/plain; charset=utf-8" },
+async function lookup(req: NextRequest): Promise<{ info: AppInfo | null; status: number; tokens: Tokens | null }> {
+  const path = infoPath(req);
+  let res = await fetchInfo(path, cookies().get(ACCESS_COOKIE)?.value);
+  let tokens: Tokens | null = null;
+  if (res.status === 401) {
+    tokens = await refreshTokens();
+    if (tokens) res = await fetchInfo(path, tokens.access_token);
+  }
+  if (!res.ok) return { info: null, status: res.status, tokens };
+  return { info: (await res.json()) as AppInfo, status: 200, tokens };
+}
+
+function withTokens(res: NextResponse, tokens: Tokens | null): NextResponse {
+  if (tokens) {
+    setSessionCookies(res, {
+      access: tokens.access_token,
+      accessTtlSeconds: tokens.expires_in_seconds ?? 900,
+      refresh: tokens.refresh_token,
+      refreshMaxAgeSeconds: tokens.refresh_expires_in_seconds ?? 60 * 60 * 24 * 29,
     });
   }
-  const body = Readable.toWeb(createReadStream(apk.file)) as unknown as ReadableStream;
-  return new Response(body, { status: 200, headers: headersFor(apk) });
+  return res;
+}
+
+function notPublished(): NextResponse {
+  return new NextResponse("The Android app has not been published on this server yet.", {
+    status: 404,
+    headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" },
+  });
+}
+
+export async function HEAD(req: NextRequest): Promise<Response> {
+  const { info, status, tokens } = await lookup(req);
+  if (status === 401) return new NextResponse(null, { status: 401 });
+  if (!info?.available) return withTokens(new NextResponse(null, { status: 404 }), tokens);
+  const headers = new Headers({
+    "content-type": "application/vnd.android.package-archive",
+    "cache-control": "private, no-store",
+    "x-apk-name": info.file_name ?? "F7FIVE0.apk",
+    "x-apk-version": info.version ?? "",
+    "x-apk-abis": (info.abis ?? []).join(","),
+  });
+  if (info.size_bytes) headers.set("content-length", String(info.size_bytes));
+  return withTokens(new NextResponse(null, { status: 200, headers }), tokens);
+}
+
+export async function GET(req: NextRequest): Promise<Response> {
+  const { info, status, tokens } = await lookup(req);
+  if (status === 401) {
+    // Session gone: sign in, then come straight back here.
+    const host = req.headers.get("host") ?? req.nextUrl.host;
+    const proto = req.headers.get("x-forwarded-proto") ?? req.nextUrl.protocol.replace(":", "");
+    const login = new URL(`${proto}://${host}/login`);
+    login.searchParams.set("next", req.nextUrl.pathname + req.nextUrl.search);
+    return NextResponse.redirect(login);
+  }
+  if (!info?.available || !info.path) return withTokens(notPublished(), tokens);
+  // Relative Location: the browser stays on whatever address it used, which
+  // is also the address the API stamps as "where this was downloaded from".
+  return withTokens(
+    new NextResponse(null, { status: 302, headers: { location: info.path, "cache-control": "no-store" } }),
+    tokens,
+  );
 }

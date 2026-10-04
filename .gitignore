@@ -58,3 +58,6 @@ _personal-removed/
 
 # Installer build output
 installer/Output/
+
+# Phone APKs CI downloads from the draft release
+installer/apk/
