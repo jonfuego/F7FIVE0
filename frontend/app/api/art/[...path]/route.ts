@@ -12,14 +12,14 @@ import { API_ORIGIN, ACCESS_COOKIE } from "@/lib/server-env";
 
 export const dynamic = "force-dynamic";
 
-type RouteContext = { params: { path: string[] } };
+type RouteContext = { params: Promise<{ path: string[] }> };
 
 export async function GET(req: NextRequest, ctx: RouteContext) {
-  const suffix = ctx.params.path.join("/");
+  const suffix = (await ctx.params).path.join("/");
   const search = req.nextUrl.search;
   const url = `${API_ORIGIN}/api/art/${suffix}${search}`;
 
-  const jar = cookies();
+  const jar = await cookies();
   const access = jar.get(ACCESS_COOKIE)?.value;
 
   const res = await fetch(url, {

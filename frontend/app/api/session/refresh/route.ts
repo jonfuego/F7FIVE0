@@ -15,10 +15,10 @@ import { REFRESH_COOKIE } from "@/lib/server-env";
 import { clearSessionCookies, setSessionCookies } from "@/lib/cookies";
 
 export async function POST() {
-  const refresh = cookies().get(REFRESH_COOKIE)?.value;
+  const refresh = (await cookies()).get(REFRESH_COOKIE)?.value;
   if (!refresh) {
     const res = NextResponse.json({ detail: "no_refresh_cookie" }, { status: 401 });
-    clearSessionCookies(res);
+    await clearSessionCookies(res);
     return res;
   }
 
@@ -32,7 +32,7 @@ export async function POST() {
     const res = NextResponse.json(payload ?? { detail: "refresh_failed" }, {
       status: backendRes.status,
     });
-    clearSessionCookies(res);
+    await clearSessionCookies(res);
     return res;
   }
 
@@ -49,12 +49,12 @@ export async function POST() {
   };
   if (typeof access_token !== "string" || typeof refresh_token !== "string") {
     const res = NextResponse.json({ detail: "malformed_token_response" }, { status: 502 });
-    clearSessionCookies(res);
+    await clearSessionCookies(res);
     return res;
   }
 
   const res = NextResponse.json({ ok: true }, { status: 200 });
-  setSessionCookies(res, {
+  await setSessionCookies(res, {
     access: access_token,
     accessTtlSeconds: typeof expires_in_seconds === "number" ? expires_in_seconds : 900,
     refresh: refresh_token,

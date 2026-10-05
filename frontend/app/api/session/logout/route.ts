@@ -13,7 +13,7 @@ import { ACCESS_COOKIE, REFRESH_COOKIE } from "@/lib/server-env";
 import { clearSessionCookies } from "@/lib/cookies";
 
 export async function POST() {
-  const jar = cookies();
+  const jar = await cookies();
   const access = jar.get(ACCESS_COOKIE)?.value;
   const refresh = jar.get(REFRESH_COOKIE)?.value;
 
@@ -30,6 +30,6 @@ export async function POST() {
   }
 
   const res = NextResponse.json({ ok: true }, { status: 200 });
-  clearSessionCookies(res);
+  await clearSessionCookies(res);
   return res;
 }

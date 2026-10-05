@@ -19,7 +19,7 @@ import { backend } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
 
-type RouteContext = { params: { path: string[] } };
+type RouteContext = { params: Promise<{ path: string[] }> };
 
 function backendPath(suffix: string): string {
   if (suffix === "library/sync" || suffix === "library/sync/") {
@@ -52,7 +52,7 @@ async function forward(
   ctx: RouteContext,
   method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE",
 ): Promise<NextResponse> {
-  const suffix = ctx.params.path.join("/");
+  const suffix = (await ctx.params).path.join("/");
   const search = req.nextUrl.search;
   const path = `${backendPath(suffix)}${search}`;
 

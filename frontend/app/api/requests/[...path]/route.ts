@@ -14,14 +14,14 @@ import { backend } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
 
-type RouteContext = { params: { path: string[] } };
+type RouteContext = { params: Promise<{ path: string[] }> };
 
 async function forward(
   req: NextRequest,
   ctx: RouteContext,
   method: "GET" | "POST" | "PUT" | "DELETE",
 ): Promise<NextResponse> {
-  const suffix = ctx.params.path.join("/");
+  const suffix = (await ctx.params).path.join("/");
   const search = req.nextUrl.search;
   const path = `/api/requests/${suffix}${search}`;
 
