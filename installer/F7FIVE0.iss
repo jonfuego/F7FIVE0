@@ -159,8 +159,9 @@ var
 begin
   // Setup runs elevated; open the page as the signed-in user so their
   // default browser (and its sign-in) is used. ShellExec as admin can do nothing.
-  if not ShellExecAsOriginalUser('open', 'https://www.themoviedb.org/settings/api', '', '', SW_SHOWNORMAL, ewNoWait, ErrorCode) then
-    MsgBox('Could not open your browser. Go to https://www.themoviedb.org/settings/api to get a key.', mbInformation, MB_OK);
+  // The sign-up page works signed out; Settings > API needs a TMDB account first.
+  if not ShellExecAsOriginalUser('open', 'https://www.themoviedb.org/signup', '', '', SW_SHOWNORMAL, ewNoWait, ErrorCode) then
+    MsgBox('Could not open your browser. Go to https://www.themoviedb.org/signup to make a free TMDB account, then open Settings > API to get a key.', mbInformation, MB_OK);
 end;
 
 // Each media box holds one folder or several separated by ";". "Add..."

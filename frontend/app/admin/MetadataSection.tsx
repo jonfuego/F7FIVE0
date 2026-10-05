@@ -10,7 +10,8 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 import { apiDelete, apiGet, apiPost, apiPut, ApiError } from "@/lib/client-api";
 import type { MetadataSettings, TmdbKeyCheck } from "@/lib/types";
 
-const TMDB_API_PAGE = "https://www.themoviedb.org/settings/api";
+// Sign-up works signed out; Settings > API 401s until you have a TMDB account.
+const TMDB_API_PAGE = "https://www.themoviedb.org/signup";
 
 export function MetadataSection() {
   const [data, setData] = useState<MetadataSettings | null>(null);
@@ -137,11 +138,11 @@ export function MetadataSection() {
             <>
               <ol className="list-decimal space-y-1 pl-5 text-xs text-neutral-400">
                 <li>
-                  Sign in or make a free account at{" "}
+                  Make a free account at{" "}
                   <a href={TMDB_API_PAGE} target="_blank" rel="noreferrer" className="underline hover:text-white">
-                    themoviedb.org &rsaquo; Settings &rsaquo; API
+                    themoviedb.org
                   </a>
-                  .
+                  , then open Settings &rsaquo; API.
                 </li>
                 <li>Request an API key (choose Developer; any short description works).</li>
                 <li>
