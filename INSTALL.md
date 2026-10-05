@@ -18,7 +18,8 @@
    Windows may warn that the app is from an unknown publisher; choose
    **More info > Run anyway**.
 2. Pick an install folder (default `C:\F7FIVE0`).
-3. Point it at your media folders. Leave any you don't have blank.
+3. Point it at your media folders. Leave any you don't have blank. A library
+   can use more than one folder: click **Add...** again for each one.
 4. Create your admin account.
 5. Choose whether other devices on your home network can connect.
 6. Optional extras: a TMDB API key (there's a link to get a free one) and a
@@ -133,6 +134,28 @@ cd C:\F7FIVE0
 .\installer\remote-access.ps1 -Method token -PublicHost music.yourdomain.com -TunnelToken <token>
 .\installer\remote-access.ps1 -Method off
 ```
+
+## Library folders
+
+Each library (Movies, TV shows, Music, Music videos) can use one folder or
+several, for example movies split across two drives plus a NAS share. Change
+them any time in **Admin > Library folders**: add or remove folders, see
+which ones the server can open, and save. A scan starts right away.
+
+- TV shows and music merge across folders: a show with seasons on two drives
+  is one show, an artist in two folders is one artist.
+- Movies don't merge: the same movie in two folders shows up twice (for
+  example a 4K copy and a 1080p copy), each with its own file.
+- A folder that's offline (a NAS asleep, a drive unplugged) is skipped; its
+  movies and episodes stay in the library until it's back.
+- Removing a folder takes its items out of the library. Nothing is deleted
+  from the disk, watch history is kept, and adding the folder back restores
+  them.
+
+Setup writes the folders to `LIBRARY_ROOT_MOVIES`, `LIBRARY_ROOT_TV`,
+`LIBRARY_ROOT_MUSIC`, and `LIBRARY_ROOT_MUSIC_VIDEOS` in `.env`, separated by
+`;`. Once you save from the Admin page, the server uses the saved list and
+ignores those keys.
 
 ## Media on a NAS or network drive
 
@@ -291,7 +314,7 @@ them from Settings > Apps if you don't need them.
 |---|---|
 | Browser can't reach localhost:3001 | `Get-Service F7FIVE0-*` should show three Running services. Check `C:\F7FIVE0\logs\F7FIVE0-Web.err.log`. |
 | Sign-in page loads but sign-in fails | Check `F7FIVE0-API.err.log`. The API needs PostgreSQL running (`Get-Service postgresql*`). |
-| Library stays empty | Check the folder paths in `.env`, then `F7FIVE0-API.err.log` for "folder scan". Scans run 30 seconds after start and every 30 minutes. Admins can also trigger a sync from the Admin page. |
+| Library stays empty | Check **Admin > Library folders** (each folder shows whether the server can open it), then `F7FIVE0-API.err.log` for "folder scan". Scans run 30 seconds after start and every 30 minutes. Admins can also trigger a sync from the Admin page. |
 | Network share shows nothing | See "Media on a NAS" above. SYSTEM can't read shares. |
 | Admin > Remote access says the helper isn't installed | Run Setup again (it registers the `F7FIVE0-RemoteAccess` task), or use `installer\remote-access.ps1` from an elevated PowerShell. |
 | Remote access run failed | Open **Details** on the page, or `C:\F7FIVE0\data\remote-access\run.log`. |

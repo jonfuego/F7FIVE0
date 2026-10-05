@@ -1,8 +1,9 @@
 r"""Folder scanner for movies, TV, and music.
 
-This is the no-*arr path. When a library has a LIBRARY_ROOT_* folder set and
-the matching *arr API key is blank, F7FIVE0 builds that library straight from
-the files on disk. When the *arr key is set, the *arr sync owns the library
+This is the no-*arr path. When a library has one or more source folders
+(app/services/library_folders.py: Admin > Library folders, or LIBRARY_ROOT_*
+in .env) and the matching *arr API key is blank, F7FIVE0 builds that library
+straight from the files on disk. When the *arr key is set, the *arr sync owns the library
 and this scanner leaves it alone, so the two never fight over the same rows.
 
 Folder conventions (the same ones Plex, Jellyfin, and the *arr apps use):
@@ -30,7 +31,13 @@ Admin-picked art is never overwritten.
 
 Rescans are incremental: a file already `ready` with the same size is not
 re-probed. Files that disappear are flipped to `missing`, never deleted, so
-watch history survives a drive that is briefly offline.
+watch history survives a drive that is briefly offline. A folder that can't
+be opened at all is skipped for that pass and its files are left as they are.
+
+Several folders per library: TV and music merge across folders (one show,
+one artist, one album). Movies do not: the same movie found in two folders
+shows as two entries (decision 2026-10-03). The second entry can't share the
+TMDB id (unique), so it copies the details and art of the first.
 """
 from __future__ import annotations
 
@@ -54,7 +61,7 @@ from app.models.media_file import MediaFile, MediaKind, ScanState
 from app.models.movie import Movie
 from app.models.music import Album, Artist, Track
 from app.models.tv import Episode, Season, Series
-from app.services import ffprobe
+from app.services import ffprobe, library_folders
 from app.services.path_map import translate as translate_path
 
 
@@ -127,20 +134,20 @@ class FolderScanStats:
 # ---------------------------------------------------------------------------
 # Which libraries does this scanner own?
 # ---------------------------------------------------------------------------
-def movies_enabled() -> bool:
-    return bool(settings.library_root_movies) and not settings.radarr_api_key
+def movies_enabled(db: Optional[Session] = None) -> bool:
+    return bool(library_folders.folders(db, "movies")) and not settings.radarr_api_key
 
 
-def tv_enabled() -> bool:
-    return bool(settings.library_root_tv) and not settings.sonarr_api_key
+def tv_enabled(db: Optional[Session] = None) -> bool:
+    return bool(library_folders.folders(db, "tv")) and not settings.sonarr_api_key
 
 
-def music_enabled() -> bool:
-    return bool(settings.library_root_music) and not settings.lidarr_api_key
+def music_enabled(db: Optional[Session] = None) -> bool:
+    return bool(library_folders.folders(db, "music")) and not settings.lidarr_api_key
 
 
-def any_enabled() -> bool:
-    return movies_enabled() or tv_enabled() or music_enabled()
+def any_enabled(db: Optional[Session] = None) -> bool:
+    return movies_enabled(db) or tv_enabled(db) or music_enabled(db)
 
 
 def scan_all(db: Session) -> FolderScanStats:
@@ -152,7 +159,7 @@ def scan_all(db: Session) -> FolderScanStats:
         ("tv", tv_enabled, scan_tv),
         ("music", music_enabled, scan_music),
     ):
-        if not enabled():
+        if not enabled(db):
             continue
         try:
             with db.begin_nested():
@@ -364,6 +371,33 @@ def _store_path(path: str) -> str:
     return translate_path(path) or path
 
 
+def _reachable(roots: list[str], label: str) -> list[tuple[int, str]]:
+    """(index, folder) for every configured folder that can be opened now.
+    The others are skipped this pass; their rows are left alone."""
+    out: list[tuple[int, str]] = []
+    for i, root in enumerate(roots):
+        if root and os.path.isdir(root):
+            out.append((i, root))
+        else:
+            log.warning("%s folder not found, skipped this pass: %r", label, root)
+    return out
+
+
+def _root_prefixes(roots: list[str]) -> list[str]:
+    return [os.path.normcase(_store_path(r).rstrip("\\/")) for r in roots]
+
+
+def _root_index(path: str, prefixes: list[str]) -> Optional[int]:
+    """Index of the configured folder that holds `path` (longest match)."""
+    p = os.path.normcase(path)
+    best, best_len = None, -1
+    for i, pre in enumerate(prefixes):
+        if p == pre or p.startswith(pre + "\\") or p.startswith(pre + "/"):
+            if len(pre) > best_len:
+                best, best_len = i, len(pre)
+    return best
+
+
 def _import_art_file(
     db: Session, *, entity_kind: str, entity_id, role: str, image_path: Optional[str],
     stats: FolderScanStats,
@@ -490,38 +524,125 @@ def _size(path: str) -> int:
         return 0
 
 
+_MOVIE_COPY_FIELDS = (
+    "year", "overview", "runtime_min", "poster_path", "backdrop_path", "genres",
+    "tagline", "movie_cast", "directors", "tmdb_rating", "tmdb_vote_count",
+)
+
+
+def _movie_roots(db: Session, movie: Movie, prefixes: list[str]) -> set[int]:
+    paths = db.scalars(select(MediaFile.path).where(
+        MediaFile.kind == MediaKind.movie, MediaFile.ref_id == movie.id,
+    )).all()
+    return {i for i in (_root_index(p, prefixes) for p in paths) if i is not None}
+
+
+def _match_movie(db: Session, found: FoundMovie, ri: int, prefixes: list[str]) -> tuple[Optional[Movie], Optional[Movie]]:
+    """Find the movie a new file belongs to. Returns (movie, twin_of): a
+    match whose files all live in another folder is not reused; the caller
+    makes a separate entry and copies details from `twin_of`."""
+    cands: list[Movie] = []
+    if found.tmdb_id:
+        m = db.scalar(select(Movie).where(Movie.tmdb_id == found.tmdb_id))
+        if m is not None:
+            cands.append(m)
+    q = select(Movie).where(func.lower(Movie.title) == found.title.lower(), Movie.radarr_id.is_(None))
+    q = q.where(Movie.year == found.year) if found.year else q
+    for m in db.scalars(q.order_by(Movie.created_at)).all():
+        if m not in cands:
+            cands.append(m)
+    if not cands:
+        return None, None
+    owners = {m.id: _movie_roots(db, m, prefixes) for m in cands}
+    for m in cands:
+        if ri in owners[m.id]:
+            return m, None
+    for m in cands:
+        if not owners[m.id]:
+            return m, None
+    return None, cands[0]
+
+
+def _tmdb_twin(db: Session, movie: Movie) -> Optional[Movie]:
+    """The entry with a TMDB id that this one duplicates (same title/year)."""
+    q = select(Movie).where(
+        func.lower(Movie.title) == (movie.title or "").lower(),
+        Movie.tmdb_id.is_not(None), Movie.id != movie.id,
+    )
+    q = q.where(Movie.year == movie.year) if movie.year else q.where(Movie.year.is_(None))
+    return db.scalars(q.order_by(Movie.created_at)).first()
+
+
+def _copy_movie_details(src: Movie, dst: Movie, *, fill_only: bool) -> None:
+    for field in _MOVIE_COPY_FIELDS:
+        value = getattr(src, field)
+        if value in (None, [], "") or (fill_only and getattr(dst, field) not in (None, [], "")):
+            continue
+        setattr(dst, field, list(value) if isinstance(value, list) else value)
+
+
+def _copy_movie_art(db: Session, src: Movie, dst: Movie, stats: FolderScanStats) -> None:
+    """Give a duplicate entry the first entry's poster and backdrop when it
+    has none of its own. A sidecar in its own folder still wins later."""
+    from app.services.art import _absolute_path
+    for role in (ROLE_POSTER, ROLE_BACKDROP):
+        if _has_art(db, ENTITY_MOVIE, dst.id, role):
+            continue
+        row = db.get(ArtOverride, (ENTITY_MOVIE, src.id, role))
+        if row is None or not row.local_path:
+            continue
+        try:
+            data = _absolute_path(row.local_path).read_bytes()
+        except OSError:
+            continue
+        _save_art_bytes(db, ENTITY_MOVIE, dst.id, role, data, f"copy:{src.id}", stats)
+
+
 def scan_movies(db: Session) -> FolderScanStats:
     stats = FolderScanStats()
-    root = settings.library_root_movies
-    if not root or not os.path.isdir(root):
-        log.warning("movies root not found: %r", root)
-        return stats
+    roots = library_folders.folders(db, "movies")
+    prefixes = _root_prefixes(roots)
+    for ri, root in _reachable(roots, "movies"):
+        _scan_movies_root(db, root, ri, prefixes, stats)
+    db.flush()
+    stats.log_summary("movies")
+    return stats
+
+
+def _scan_movies_root(db: Session, root: str, ri: int, prefixes: list[str], stats: FolderScanStats) -> None:
     seen: set[str] = set()
     for found in discover_movies(root):
         path = _store_path(found.path)
         seen.add(path)
         movie = None
+        twin_of = None
         ref = _existing_ref(db, path, MediaKind.movie)
         if ref is not None:
             movie = db.get(Movie, ref)
-        if movie is None and found.tmdb_id:
-            movie = db.scalar(select(Movie).where(Movie.tmdb_id == found.tmdb_id))
         if movie is None:
-            q = select(Movie).where(func.lower(Movie.title) == found.title.lower(), Movie.radarr_id.is_(None))
-            q = q.where(Movie.year == found.year) if found.year else q
-            movie = db.scalars(q).first()
+            movie, twin_of = _match_movie(db, found, ri, prefixes)
         new = movie is None
         if new:
             movie = Movie(title=found.title, year=found.year, added_at=_mtime(found.path) or datetime.now(timezone.utc))
             db.add(movie)
-        if found.tmdb_id and movie.tmdb_id is None:
-            movie.tmdb_id = found.tmdb_id
         db.flush()
+        if found.tmdb_id and movie.tmdb_id is None and db.scalar(
+            select(Movie.id).where(Movie.tmdb_id == found.tmdb_id, Movie.id != movie.id)
+        ) is None:
+            movie.tmdb_id = found.tmdb_id
+            db.flush()
         stats.movies += int(new)
+
+        # A duplicate of a movie in another folder: copy its details instead
+        # of matching TMDB again (the id belongs to the other entry).
+        twin = twin_of if twin_of is not None else (_tmdb_twin(db, movie) if movie.tmdb_id is None else None)
+        if twin is not None:
+            _copy_movie_details(twin, movie, fill_only=twin_of is None)
+            db.flush()
 
         # Title/year match on TMDB only for rows that have no TMDB id yet.
         # Results are disk-cached, so rescans do not re-hit the API.
-        match = _tmdb_search("movie", found.title, found.year) if movie.tmdb_id is None else None
+        match = _tmdb_search("movie", found.title, found.year) if movie.tmdb_id is None and twin is None else None
         if match:
             clash = db.scalar(select(Movie).where(Movie.tmdb_id == match.get("id"), Movie.id != movie.id))
             if clash is None:
@@ -542,13 +663,12 @@ def scan_movies(db: Session) -> FolderScanStats:
                              image_path=_find_sidecar(folder, ("poster", "folder", "cover", f"{stem}-poster".lower())), stats=stats)
             _import_art_file(db, entity_kind=ENTITY_MOVIE, entity_id=movie.id, role=ROLE_BACKDROP,
                              image_path=_find_sidecar(folder, ("fanart", "backdrop", "background", f"{stem}-fanart".lower())), stats=stats)
+        if twin is not None:
+            _copy_movie_art(db, twin, movie, stats)
         if match:
             _fetch_tmdb_art(db, ENTITY_MOVIE, movie.id, ROLE_POSTER, match.get("poster_path"), stats)
             _fetch_tmdb_art(db, ENTITY_MOVIE, movie.id, ROLE_BACKDROP, match.get("backdrop_path"), stats)
     _mark_missing_under(db, MediaKind.movie, root, seen, stats)
-    db.flush()
-    stats.log_summary("movies")
-    return stats
 
 
 # ---------------------------------------------------------------------------
@@ -579,11 +699,18 @@ def discover_show(show_dir: str) -> Iterator[FoundEpisode]:
 
 
 def scan_tv(db: Session) -> FolderScanStats:
+    """Shows merge across folders: a show split over two drives is one
+    series, and an episode found in both gets two files."""
     stats = FolderScanStats()
-    root = settings.library_root_tv
-    if not root or not os.path.isdir(root):
-        log.warning("tv root not found: %r", root)
-        return stats
+    art_done: set = set()
+    for _ri, root in _reachable(library_folders.folders(db, "tv"), "tv"):
+        _scan_tv_root(db, root, art_done, stats)
+    db.flush()
+    stats.log_summary("tv")
+    return stats
+
+
+def _scan_tv_root(db: Session, root: str, art_done: set, stats: FolderScanStats) -> None:
     seen: set[str] = set()
     for show_name in sorted(os.listdir(root)):
         show_dir = os.path.join(root, show_name)
@@ -651,17 +778,17 @@ def scan_tv(db: Session) -> FolderScanStats:
             seen.add(path)
             _upsert_file(db, kind=MediaKind.episode, ref_id=ep.id, path=path, stats=stats)
 
-        _import_art_file(db, entity_kind=ENTITY_SERIES, entity_id=series.id, role=ROLE_POSTER,
-                         image_path=_find_sidecar(show_dir, ("poster", "folder", "cover")), stats=stats)
-        _import_art_file(db, entity_kind=ENTITY_SERIES, entity_id=series.id, role=ROLE_BACKDROP,
-                         image_path=_find_sidecar(show_dir, ("fanart", "backdrop", "background")), stats=stats)
+        # One art pick per series per pass: with the show in two folders the
+        # first folder's sidecar wins, so the two don't swap every scan.
+        for role, stems in ((ROLE_POSTER, ("poster", "folder", "cover")), (ROLE_BACKDROP, ("fanart", "backdrop", "background"))):
+            side = _find_sidecar(show_dir, stems)
+            if side and (series.id, role) not in art_done:
+                art_done.add((series.id, role))
+                _import_art_file(db, entity_kind=ENTITY_SERIES, entity_id=series.id, role=role, image_path=side, stats=stats)
         if match:
             _fetch_tmdb_art(db, ENTITY_SERIES, series.id, ROLE_POSTER, match.get("poster_path"), stats)
             _fetch_tmdb_art(db, ENTITY_SERIES, series.id, ROLE_BACKDROP, match.get("backdrop_path"), stats)
     _mark_missing_under(db, MediaKind.episode, root, seen, stats)
-    db.flush()
-    stats.log_summary("tv")
-    return stats
 
 
 # ---------------------------------------------------------------------------
@@ -768,16 +895,34 @@ def discover_music(root: str) -> Iterator[FoundTrack]:
 
 
 def scan_music(db: Session) -> FolderScanStats:
+    """Artists and albums merge across folders."""
     stats = FolderScanStats()
-    root = settings.library_root_music
-    if not root or not os.path.isdir(root):
-        log.warning("music root not found: %r", root)
-        return stats
+    cache = _MusicCache()
+    for _ri, root in _reachable(library_folders.folders(db, "music"), "music"):
+        _scan_music_root(db, root, cache, stats)
+    db.flush()
+    stats.log_summary("music")
+    return stats
+
+
+@dataclass
+class _MusicCache:
+    artists: dict = None  # type: ignore[assignment]
+    albums: dict = None  # type: ignore[assignment]
+    album_art_done: set = None  # type: ignore[assignment]
+    artist_art_done: set = None  # type: ignore[assignment]
+
+    def __post_init__(self) -> None:
+        self.artists, self.albums = {}, {}
+        self.album_art_done, self.artist_art_done = set(), set()
+
+
+def _scan_music_root(db: Session, root: str, cache: _MusicCache, stats: FolderScanStats) -> None:
     seen: set[str] = set()
-    artists: dict[str, Artist] = {}
-    albums: dict[tuple, Album] = {}
-    album_art_done: set = set()
-    artist_art_done: set = set()
+    artists = cache.artists
+    albums = cache.albums
+    album_art_done = cache.album_art_done
+    artist_art_done = cache.artist_art_done
 
     for ft in discover_music(root):
         akey = ft.artist.lower()
@@ -862,6 +1007,3 @@ def scan_music(db: Session) -> FolderScanStats:
                 _import_art_file(db, entity_kind=ENTITY_ARTIST, entity_id=artist.id, role=ROLE_THUMB,
                                  image_path=_find_sidecar(artist_dir, ("artist", "folder", "poster", "thumb")), stats=stats)
     _mark_missing_under(db, MediaKind.track, root, seen, stats)
-    db.flush()
-    stats.log_summary("music")
-    return stats

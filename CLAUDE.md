@@ -51,6 +51,13 @@ INSTALL.md for the operator view.
   owns the library (`services/sync.py`). Otherwise `services/scan_library.py`
   scans `LIBRARY_ROOT_*` folders. Never let both write the same library.
   Requests need Radarr/Sonarr; `/api/client/features` tells clients.
+- Library folders: several per library (`app/services/library_folders.py`).
+  Source is the `libraries` table once Admin > Library folders saves (then for
+  every library), else `LIBRARY_ROOT_*` split on `;`. TV and music merge
+  across folders; movies don't (same movie in two folders = two entries, the
+  second copies details/art since `tmdb_id` is unique). An unreachable folder
+  is skipped and its files keep their state; removing a folder in Admin marks
+  its files missing.
 - Scanner-imported art uses `source_kind` `local` or `tmdb`; admin-set art
   (`upload`, `url`, ...) is never overwritten.
 - Migrations go through Alembic. Keep revision ids stable: existing installs

@@ -158,8 +158,11 @@ class Settings(BaseSettings):
     metadata_ttl_days: int = 30
     metadata_cache_root: Path = _DATA_ROOT / "metadata-cache"
 
-    # Library roots. Blank means "not configured". UNC paths such as
-    # \\nas\media\Movies work as long as the service account can read them.
+    # Library folders. Blank means "not configured". Several folders per
+    # library are separated by `;` (D:\Movies;\\nas\media\Movies). UNC
+    # paths work as long as the service account can read them. Once folders
+    # are saved in Admin > Library folders, the database is used instead of
+    # these keys (app/services/library_folders.py).
     library_root_movies: str = ""
     library_root_tv: str = ""
     library_root_music: str = ""
