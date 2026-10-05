@@ -929,6 +929,26 @@ export function MiniPlayer() {
     return () => document.removeEventListener("mousedown", onDocClick);
   }, [dockMenuOpen]);
 
+  // Reserve space for the fixed dock so it never covers page content (the
+  // Home "Continue Watching" heading, the bottom of every page). Mirror the
+  // exact visibility of the `.mini` bar below: shown only with a non-empty
+  // queue and off the /login and /watch routes. The matching bottom padding
+  // is applied by the body[data-dock="1"] rule in globals.css, sized from
+  // the same tokens the dock uses so it stays pixel-accurate per breakpoint.
+  const dockBarVisible = !queueEmpty && !onLoginRoute && !onWatchRoute;
+  useEffect(() => {
+    const prev = document.body.getAttribute("data-dock");
+    if (dockBarVisible) {
+      document.body.setAttribute("data-dock", "1");
+    } else {
+      document.body.removeAttribute("data-dock");
+    }
+    return () => {
+      if (prev === null) document.body.removeAttribute("data-dock");
+      else document.body.setAttribute("data-dock", prev);
+    };
+  }, [dockBarVisible]);
+
   if (queueEmpty) return null;
   // onWatchRoute: dock chrome hides via the conditional in JSX,
   // but the <audio> stays mounted so playback survives the route change.

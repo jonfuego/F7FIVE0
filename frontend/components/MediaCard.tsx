@@ -14,7 +14,7 @@ import type { CSSProperties } from "react";
 import { Check, Play } from "lucide-react";
 import { Icon } from "@/components/Icon";
 import { Poster } from "./Poster";
-import { colorForTitle, hueFromString } from "@/lib/format";
+import { colorForTitle, episodeSubtitle, hueFromString } from "@/lib/format";
 import type { FileStatus } from "@/lib/progress";
 
 type Kind = "movie" | "series" | "album" | "track" | "music_video" | "music_video_release";
@@ -61,6 +61,10 @@ export function MediaCard({
     ["--pg" as never]: colorForTitle(title),
     ["--ph" as never]: String(hueFromString(title)),
   };
+  // Drop a repeated "S04E02" second line when the title already carries the
+  // code; show the episode title (or the show name) instead. No-op for
+  // subtitles without an episode code (movies, albums, music videos).
+  const secondLine = episodeSubtitle(title, subtitle);
 
   return (
     <Link
@@ -126,7 +130,7 @@ export function MediaCard({
       </div>
       <div className="info">
         <div className="t">{title}</div>
-        {subtitle ? <div className="s">{subtitle}</div> : null}
+        {secondLine ? <div className="s">{secondLine}</div> : null}
       </div>
       {overlay}
     </Link>
