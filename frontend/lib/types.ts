@@ -268,6 +268,12 @@ export type ActiveTranscode = {
   direct_play: boolean;
   started_at: string;
   bytes_served: number;
+  // Latest ffmpeg realtime factor (encoded media time / wall time); null for
+  // direct-play or before the first measurement. below_realtime_sec is how long
+  // the encode has stayed under 1.0x, so the UI can flag a server that can't
+  // keep up once it has been behind for 30s or more.
+  speed: number | null;
+  below_realtime_sec: number;
 };
 
 export type WatchHistoryRow = {

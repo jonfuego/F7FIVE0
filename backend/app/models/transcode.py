@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import (
-    BigInteger, Boolean, DateTime, ForeignKey, Index, Integer, String,
+    BigInteger, Boolean, DateTime, Float, ForeignKey, Index, Integer, String,
     UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import UUID
@@ -44,6 +44,14 @@ class TranscodeSession(UUIDPKMixin, TimestampMixin, Base):
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     ended_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     bytes_served: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+
+    # Latest ffmpeg realtime factor (encoded media time / wall time), parsed
+    # from `-progress` by the stream gateway and written here so the admin API
+    # (a separate process) can read it. Null for direct-play and until the
+    # first progress block arrives. `below_realtime_sec` is how long the encode
+    # has stayed under 1.0x; the admin flags "server can't keep up" past 30s.
+    speed: Mapped[Optional[float]] = mapped_column(Float)
+    below_realtime_sec: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
 
 class TranscodeCache(UUIDPKMixin, TimestampMixin, Base):

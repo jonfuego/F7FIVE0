@@ -665,6 +665,12 @@ class ActiveTranscodeOut(BaseModel):
     direct_play: bool
     started_at: datetime
     bytes_served: int
+    # Latest ffmpeg realtime factor (encoded media time / wall time). Null for
+    # direct-play and until the first progress block arrives. A value below
+    # 1.0 means the encode is slower than playback; `below_realtime_sec` is how
+    # long it has stayed there, so the admin can flag "server can't keep up".
+    speed: Optional[float] = None
+    below_realtime_sec: int = 0
 
 
 class WatchHistoryRowOut(BaseModel):
