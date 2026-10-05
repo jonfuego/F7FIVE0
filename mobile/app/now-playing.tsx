@@ -5,8 +5,8 @@ import {
   FileText,
   List,
   Minus,
-  PauseCircle,
-  PlayCircle,
+  Pause,
+  Play,
   Plus,
   Radio,
   Repeat,
@@ -195,13 +195,16 @@ export default function NowPlayingScreen(): React.ReactElement {
           fill
         />
         <IconButton
-          icon={isPlaying ? PauseCircle : PlayCircle}
+          icon={isPlaying ? Pause : Play}
           onPress={() => {
             tick();
             void togglePlay();
           }}
           accessibilityLabel={isPlaying ? "Pause" : "Play"}
-          size={72}
+          size={32}
+          diameter={56}
+          square
+          fill
           color={colors.accent}
         />
         <IconButton

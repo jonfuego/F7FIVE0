@@ -1416,14 +1416,17 @@ button { border: 0; background: transparent; color: inherit; font: inherit; curs
 .np .controls .keys .k {
   width: 48px; height: 48px;
   display: grid; place-items: center;
-  border-radius: var(--radius-full);
+  border-radius: var(--radius-2);
   color: var(--ink-2);
   cursor: pointer;
   transition: background .15s var(--ease), color .15s var(--ease);
 }
 .np .controls .keys .k:hover { background: var(--surface-3); color: var(--ink); }
+/* Play key sits in line with the other transport keys (square, not a big round
+   button) so it stops dominating the row; the hive fill still sets it apart. */
 .np .controls .keys .k.play {
-  width: 72px; height: 72px;
+  width: 48px; height: 48px;
+  border-radius: var(--radius-2);
   background: var(--hive);
   color: var(--on-hive);
 }
@@ -1682,12 +1685,13 @@ body[data-dock="1"] .shell > main {
 .mini .right .icbtn {
   width: 36px; height: 36px;
   display: grid; place-items: center;
-  border-radius: var(--radius-full);
+  border-radius: var(--radius-2);
   color: var(--ink-3);
   cursor: pointer;
 }
 .mini .right .icbtn:hover { background: var(--surface-3); color: var(--ink); }
 .mini .right .icbtn.play {
+  border-radius: var(--radius-2);
   background: var(--hive);
   color: var(--on-hive);
 }

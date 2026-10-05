@@ -15,6 +15,7 @@ import { Icon } from "@/components/Icon";
 import { SkipBack, SkipForward, Play, Pause, ListMusic } from "lucide-react";
 import { Player } from "@/components/Player";
 import { VideoTransport } from "@/components/VideoTransport";
+import type { QualityControlData } from "@/components/QualityMenu";
 import { QueuePanel } from "@/components/QueuePanel";
 import { PlayerTrackMenu } from "@/components/PlayerTrackMenu";
 import { apiGet, apiPost, ApiError } from "@/lib/client-api";
@@ -31,6 +32,28 @@ const AUDIO_CONTAINERS = new Set([
 function isAudioStream(stream: StreamStart): boolean {
   const c = (stream.container ?? "").toLowerCase();
   return AUDIO_CONTAINERS.has(c);
+}
+
+// Resolution shown on the info line. In HLS mode the source size lies: a
+// resumed or CPU transcode serves a smaller rendition than the file (seen:
+// "TRANSCODED 1080P" while the 720p rendition played). Use the rendition that
+// is actually playing (the hls.js loaded level, or the chosen server height),
+// and only fall back to the source size for direct play.
+function renditionResolution(
+  stream: StreamStart,
+  quality: QualityControlData | null,
+): string {
+  if (stream.mode === "hls" && quality) {
+    if (quality.kind === "hls") {
+      const level = quality.levels[quality.loadedLevel];
+      if (level?.height) {
+        return formatResolution(level.width ?? Math.round((level.height * 16) / 9), level.height);
+      }
+    } else if (quality.kind === "server" && quality.current) {
+      return formatResolution(Math.round((quality.current * 16) / 9), quality.current);
+    }
+  }
+  return formatResolution(stream.width, stream.height);
 }
 
 // Mint a QueueItem from a resolved stream so an audio file opened directly
@@ -112,6 +135,10 @@ export default function WatchPage() {
   // Saved quality pick (height). Sent to stream/start on CPU-only servers,
   // which encode exactly one rendition per stream.
   const [quality, setQuality] = useState<number | null>(() => prefHeight(readQualityPref()));
+  // Quality gear descriptor reported up from <Player>. Handed to VideoTransport
+  // (which renders the gear in its controls row) and read for the info line's
+  // playing-rendition height.
+  const [qualityControl, setQualityControl] = useState<QualityControlData | null>(null);
 
   // Detect "queue advanced past route while we were linked" and follow
   // it by replacing the route. Without this, /watch falls through to
@@ -407,6 +434,7 @@ export default function WatchPage() {
             onVideoEl={setVideoEl}
             serverQuality={quality}
             onServerQuality={onServerQuality}
+            onQualityControl={setQualityControl}
           />
         ) : resume.kind === "prompt" ? (
           <ResumePrompt
@@ -430,6 +458,7 @@ export default function WatchPage() {
                   : 0
               }
               onSeekBeforeStart={onSeekBeforeStart}
+              quality={qualityControl}
             />
           ) : (
             // Dock-audio path: the decorative scrub, driven by the dock tick.
@@ -463,7 +492,7 @@ export default function WatchPage() {
               <span>{stream.mode === "direct" ? "Direct" : "Transcoded"}</span>
               {stream.variant ? <span>· {stream.variant}</span> : null}
               {!isAudioStream(stream) ? (
-                <span>· {formatResolution(stream.width, stream.height)}</span>
+                <span>· {renditionResolution(stream, qualityControl)}</span>
               ) : null}
               <span>· {stream.container?.toUpperCase() ?? ""}</span>
             </div>
