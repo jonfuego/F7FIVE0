@@ -210,6 +210,20 @@ def parse_title_year(name: str) -> tuple[str, Optional[int]]:
     return _clean_spaces(stem), None
 
 
+def _show_title_year(show_name: str) -> tuple[str, Optional[int]]:
+    """Show title and year from a top-level TV folder name.
+
+    Scene-style folders carry an episode code in the folder name itself
+    (`Smallville S04E02`, `Smallville.S04E04.1080p.WEB-DL`). Left alone each
+    one becomes its own single-episode show. Cut the name at the episode code
+    and parse the text before it, so every episode of a show groups under one
+    series."""
+    m = _EPISODE_RE.search(show_name) or _EPISODE_X_RE.search(show_name)
+    base = show_name[: m.start()] if m else show_name
+    title, year = parse_title_year(base)
+    return title or _clean_spaces(base) or show_name, year
+
+
 def parse_episode(filename: str) -> Optional[tuple[int, int, Optional[str]]]:
     """Return (season, episode, title-or-None) from an episode file name."""
     stem = os.path.splitext(filename)[0]
@@ -719,21 +733,30 @@ def _scan_tv_root(db: Session, root: str, art_done: set, stats: FolderScanStats)
         episodes = list(discover_show(show_dir))
         if not episodes:
             continue
-        title, year = parse_title_year(show_name)
-        title = title or show_name
+        title, year = _show_title_year(show_name)
         tmdb_tag = parse_tmdb_tag(show_name)
+        scene_named = bool(_EPISODE_RE.search(show_name) or _EPISODE_X_RE.search(show_name))
 
+        # Resolve the series this folder belongs to. A scene-named folder (the
+        # episode code is in the folder name, so it holds one episode) resolves
+        # by title, so every such folder collapses onto one show and a rescan
+        # pulls the episode off the old per-episode series. A normal show folder
+        # resolves through an episode we already indexed first, so an enriched
+        # or renamed series keeps its rows instead of spawning a duplicate.
         series = None
-        for fe in episodes:
-            ref = _existing_ref(db, _store_path(fe.path), MediaKind.episode)
-            ep = db.get(Episode, ref) if ref is not None else None
-            if ep is not None:
-                series = db.get(Series, ep.series_id)
-                break
-        if series is None and tmdb_tag:
+        if tmdb_tag:
             series = db.scalar(select(Series).where(Series.tmdb_id == tmdb_tag))
+        if series is None and not scene_named:
+            for fe in episodes:
+                ref = _existing_ref(db, _store_path(fe.path), MediaKind.episode)
+                ep = db.get(Episode, ref) if ref is not None else None
+                if ep is not None:
+                    series = db.get(Series, ep.series_id)
+                    break
         if series is None:
-            series = db.scalars(select(Series).where(func.lower(Series.title) == title.lower(), Series.sonarr_id.is_(None))).first()
+            series = db.scalars(select(Series).where(
+                func.lower(Series.title) == title.lower(), Series.sonarr_id.is_(None),
+            )).first()
         new = series is None
         if new:
             series = Series(title=title, added_at=_mtime(show_dir) or datetime.now(timezone.utc))
@@ -762,19 +785,32 @@ def _scan_tv_root(db: Session, root: str, art_done: set, stats: FolderScanStats)
                 db.add(season)
                 db.flush()
                 seasons[fe.season] = season
+            path = _store_path(fe.path)
             ep = db.scalar(select(Episode).where(
                 Episode.series_id == series.id,
                 Episode.season_number == fe.season,
                 Episode.episode_number == fe.episode,
             ))
             if ep is None:
-                ep = Episode(series_id=series.id, season_number=fe.season, episode_number=fe.episode, title=fe.title)
-                db.add(ep)
+                # A rescan after the scene-folder grouping fix: this episode may
+                # already exist under the old per-episode series. Move the row
+                # onto the grouped show so watch history survives, instead of
+                # making a duplicate and orphaning the old one.
+                ref = _existing_ref(db, path, MediaKind.episode)
+                moved = db.get(Episode, ref) if ref is not None else None
+                if moved is not None and moved.series_id != series.id:
+                    moved.series_id = series.id
+                    moved.season_number = fe.season
+                    moved.episode_number = fe.episode
+                    ep = moved
+                else:
+                    ep = Episode(series_id=series.id, season_number=fe.season,
+                                 episode_number=fe.episode, title=fe.title)
+                    db.add(ep)
+                    stats.episodes += 1
                 db.flush()
-                stats.episodes += 1
             elif fe.title and not ep.title:
                 ep.title = fe.title
-            path = _store_path(fe.path)
             seen.add(path)
             _upsert_file(db, kind=MediaKind.episode, ref_id=ep.id, path=path, stats=stats)
 

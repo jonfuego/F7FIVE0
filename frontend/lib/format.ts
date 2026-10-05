@@ -91,9 +91,10 @@ const EPISODE_CODE_RE = /^(S\d{1,3}E\d{1,3})(?:\s*-\s*(.*))?$/i;
 // endpoints build the subtitle as "S04E02 - Episode Title" (or a bare
 // "S04E02" when the episode has no title). When the card's own title
 // already carries the episode code (e.g. "Smallville S04E02"), repeating
-// "S04E02" underneath is noise, so drop the code: show the episode title
-// if there is one, else fall back to the show name (the card title). If
-// the title does not contain the code, the subtitle is returned unchanged.
+// "S04E02" underneath is noise, so drop the code and show the episode title.
+// When there is no episode title, the second line would just repeat the card
+// title, so hide it (return null) instead. If the title does not contain the
+// code, the subtitle is returned unchanged.
 export function episodeSubtitle(
   title: string,
   subtitle: string | null | undefined,
@@ -105,7 +106,11 @@ export function episodeSubtitle(
   const episodeTitle = m[2]?.trim() || null;
   // Only rewrite when the title already contains the same code.
   if (!title.toLowerCase().includes(code.toLowerCase())) return subtitle;
-  return episodeTitle ?? title;
+  // Never repeat the card title underneath itself; drop the line instead.
+  if (!episodeTitle || episodeTitle.toLowerCase() === title.toLowerCase()) {
+    return null;
+  }
+  return episodeTitle;
 }
 
 export function hueFromString(s: string): number {

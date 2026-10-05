@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.config import settings
 from app.models.art import ArtOverride
@@ -200,6 +200,80 @@ def test_scan_tv(db_session, libs, fake_probe, system_user):
     # Rescan keeps one series.
     scan_library.scan_tv(db_session)
     assert len(db_session.scalars(select(Series)).all()) == 1
+
+
+def test_tv_scene_folders_group_under_one_show(db_session, libs, fake_probe, system_user):
+    # Two top-level folders named with episode codes for the same show. Each
+    # used to become its own one-episode series; now they collapse onto one.
+    root = libs["tv"]
+    _touch(root / "Smallville S04E02" / "Smallville S04E02.mkv")
+    _touch(root / "Smallville.S04E04.1080p.WEB-DL" / "Smallville.S04E04.1080p.WEB-DL.mkv")
+
+    stats = scan_library.scan_tv(db_session)
+    series = db_session.scalars(select(Series)).all()
+    assert len(series) == 1
+    assert series[0].title == "Smallville"
+    eps = db_session.scalars(
+        select(Episode).order_by(Episode.season_number, Episode.episode_number)
+    ).all()
+    assert [(e.season_number, e.episode_number) for e in eps] == [(4, 2), (4, 4)]
+    assert stats.series == 1 and stats.episodes == 2
+
+
+def test_tv_rescan_moves_episodes_off_old_per_episode_series(
+    db_session, libs, fake_probe, system_user, client,
+):
+    # Existing install: the old scanner made one show per scene folder. A
+    # rescan with the grouping fix must move the episodes onto the one grouped
+    # show, and the emptied old series must not be listed by /api/library/series.
+    from datetime import datetime, timezone
+
+    from app.models.tv import Season
+
+    root = libs["tv"]
+    f1 = root / "Smallville S04E02" / "Smallville S04E02.mkv"
+    f2 = root / "Smallville.S04E04.1080p.WEB-DL" / "Smallville.S04E04.1080p.WEB-DL.mkv"
+    _touch(f1)
+    _touch(f2)
+
+    old_series_ids = []
+    for title, season, epnum, path in (
+        ("Smallville S04E02", 4, 2, f1),
+        ("Smallville S04E04", 4, 4, f2),
+    ):
+        s = Series(title=title)
+        db_session.add(s)
+        db_session.flush()
+        old_series_ids.append(s.id)
+        db_session.add(Season(series_id=s.id, season_number=season))
+        ep = Episode(series_id=s.id, season_number=season, episode_number=epnum)
+        db_session.add(ep)
+        db_session.flush()
+        db_session.add(MediaFile(
+            kind=MediaKind.episode, ref_id=ep.id, path=str(path),
+            scan_state=ScanState.ready, probed_at=datetime.now(timezone.utc),
+        ))
+    db_session.flush()
+    assert len(db_session.scalars(select(Series)).all()) == 2
+
+    scan_library.scan_tv(db_session)
+    db_session.flush()
+
+    grouped = db_session.scalars(
+        select(Series).where(func.lower(Series.title) == "smallville")
+    ).all()
+    assert len(grouped) == 1
+    eps = db_session.scalars(select(Episode).where(Episode.series_id == grouped[0].id)).all()
+    assert sorted((e.season_number, e.episode_number) for e in eps) == [(4, 2), (4, 4)]
+    # The old per-episode series kept no episodes.
+    for sid in old_series_ids:
+        assert db_session.scalars(select(Episode).where(Episode.series_id == sid)).all() == []
+
+    # The series list (behind /api/library/series in the web BFF) drops the
+    # emptied old series.
+    resp = client.get("/api/series")
+    assert resp.status_code == 200, resp.text
+    assert [row["title"] for row in resp.json()] == ["Smallville"]
 
 
 def test_scan_music_folder_names(db_session, libs, fake_probe, system_user):
