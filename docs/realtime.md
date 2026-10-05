@@ -8,40 +8,42 @@ local test, and what still needs checking on the VM.
 
 The live channel is a long-lived `text/event-stream` HTTP response from the API
 (`GET /api/live`), with client-to-server commands sent as ordinary
-`POST /api/live/command`. WebSockets were considered and rejected for this app.
+`POST /api/live/command`. WebSockets also work through the proxy (see the local
+test below); SSE was kept for the auth model, not because WebSockets fail.
 
-### Why not WebSockets
+### Why SSE and not WebSockets
 
 The web client reaches the API through the single-origin proxy in
 `frontend/proxy.ts` (Next.js 16 "proxy", formerly middleware, Node runtime).
-That proxy forwards backend-bound requests with `NextResponse.rewrite(target)`:
+The local test showed that its `NextResponse.rewrite` DOES carry a WebSocket
+`Upgrade` through to the API on the standalone server. Transport passthrough is
+not the deciding factor. These are:
 
-```ts
-// frontend/proxy.ts
-return NextResponse.rewrite(target, { request: { headers } });
-```
+- Auth. The browser keeps its tokens in httpOnly cookies and reaches the API
+  through BFF route handlers that swap the cookie for a Bearer token. A Next
+  route handler cannot accept an `Upgrade`, so a browser WebSocket would have
+  to skip the BFF and go through `proxy.ts` straight to the API, and the API
+  would then have to accept the session cookie itself. SSE keeps the existing
+  model: the browser's `EventSource` goes through the BFF route
+  (`frontend/app/api/live/route.ts`), and the native app sends its own Bearer
+  and is routed straight to the API by `backendFor()` in `proxy.ts`.
+- Front doors. SSE is a plain long HTTP response, the same kind of traffic HLS
+  already sends through Cloudflare Tunnel, Tailscale Funnel and Caddy.
+  WebSocket passthrough is per-front-door behavior that still needs checking
+  on each one.
+- What the channel needs today is mostly server-to-client push; client
+  commands are rare and fit ordinary POSTs.
 
-`NextResponse.rewrite` performs an internal, fetch-style rewrite of an ordinary
-HTTP request/response. It does not perform an HTTP `Upgrade` handshake and does
-not hand the raw socket to the backend, so a WebSocket `Upgrade: websocket`
-request cannot complete through it. A browser `new WebSocket("/stream-or-api")`
-would have to bypass `proxy.ts` entirely, which breaks the single-origin model
-(one port / one tunnel hostname) the whole deployment relies on.
+Decision (Jon, 2026-10-04): keep SSE + POST.
 
-SSE, by contrast, is a plain long HTTP response. It rides the exact same path
-that HLS streaming already uses (a long `StreamingResponse` from the backend,
-proxied straight through). Because the browser `EventSource` cannot set an
-`Authorization` header, the web client connects through a Next BFF route
-(`frontend/app/api/live/route.ts`) that swaps the httpOnly session cookie for
-the Bearer token and streams the backend body back unchanged. The native app
-sets its own `Bearer` header and is routed straight to the API by
-`backendFor()` in `proxy.ts`.
+### Keep `Cache-Control: no-transform` on the stream
 
-Given this is a self-hosted product reached through tunnels (Cloudflare,
-Tailscale Funnel) and reverse proxies (Caddy), SSE is also the safer default:
-long HTTP responses pass every one of those front doors that HLS already works
-through, whereas WebSocket passthrough is per-front-door configuration that can
-silently fail. SSE + POST is the choice.
+Next's built-in response compression gzips a proxied `text/event-stream` when
+the client sends `Accept-Encoding: gzip` (Android's HTTP stack does by
+default) and then holds the frames until the stream ends. The test below
+reproduced this on the rewrite path. `no-transform` in the response's
+`Cache-Control` turns that off. `backend/app/api/live.py` and the BFF route
+both send it; do not remove it.
 
 ### Shape of what was built
 
@@ -71,10 +73,29 @@ add workers without adding that first.
 
 ## Local test performed
 
-A full standalone-server WebSocket passthrough test was NOT run in this
-environment (no built standalone server + live tunnel here). The choice is made
-from the `proxy.ts` code analysis above (rewrite cannot carry an Upgrade) plus
-the following local tests that DID run and pass:
+### WebSocket passthrough spike (2026-10-04)
+
+Built a minimal Next app with the same pins (next 16.3.8, react 19.3.0) and
+byte-identical copies of `frontend/proxy.ts`, `frontend/next.config.mjs`
+(`output: "standalone"`), `frontend/lib/server-env.ts` and
+`frontend/app/api/live/route.ts`; built it with `next build --webpack` and ran
+the standalone `node server.js` on :3001. A stand-in API on :8001 answered
+WebSocket echo on any path and SSE on `/api/live` (three frames, one second
+apart, same headers as `live.py`). Run on Node 22 in a Linux shell on the dev
+PC. Full output and the harness: `_personal-removed\batch1\f7five0_realtime-spike_v1.txt`
+(gitignored).
+
+| Test | Result |
+|------|--------|
+| WS direct to :8001 (control) | pass, echo returned |
+| WS via :3001 `/api/ws-test` (non-BFF, rewritten to the API) | pass, echo returned |
+| WS via :3001 `/api/live` with Bearer (rewritten to the API) | pass, echo returned |
+| SSE direct to :8001 | frames at 1 s, 2 s, 3 s |
+| SSE via :3001 rewrite, Bearer, `Accept-Encoding: gzip` | frames at 1 s, 2 s, 3 s |
+| SSE via :3001 BFF route, cookie | frames at 1 s, 2 s, 3 s |
+| Control: SSE rewrite WITHOUT `no-transform`, gzip accepted | gzipped, frames held until the stream ended (3 s) |
+
+### Backend and client tests (pytest / jest)
 
 1. Backend SSE generator and hub, end to end in-process
    (`backend/tests/api/test_live_channel.py`,
@@ -90,11 +111,10 @@ the following local tests that DID run and pass:
 4. App client SSE parsing and reconnect/heartbeat logic, with an injected
    transport (`mobile/src/live/__tests__/liveChannel.test.ts`). Result: pass.
 
-Note on the TestClient: Starlette's `TestClient` does not stream a
-`text/event-stream` response incrementally (it buffers), so the SSE delivery
-test drives the extracted `sse_event_stream` generator directly with asyncio
-against the real hub. The HTTP-level auth and time tests use the TestClient
-normally.
+Starlette's `TestClient` buffers a `text/event-stream` response, so the SSE
+delivery test drives the extracted `sse_event_stream` generator directly with
+asyncio against the real hub. The HTTP-level auth and time tests use the
+TestClient normally.
 
 ## TO-DO: VM checks (not doable from the dev PC)
 
@@ -117,6 +137,6 @@ for `library.scan_finished`), and that `POST /api/live/command` returns 200.
       live path if needed) so SSE frames are not held back, and that the idle
       heartbeat keeps the connection open.
 
-If any front door cannot pass SSE cleanly after config, re-evaluate: the next
-fallback is long-poll, not WebSockets (WebSockets have the same per-front-door
-risk plus the `proxy.ts` Upgrade problem above).
+If any front door cannot pass SSE cleanly after config, re-evaluate. WebSocket
+is a real option (it passes `proxy.ts`), at the cost of cookie auth on the API
+for browsers; long-poll is the other fallback.
