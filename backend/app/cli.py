@@ -416,12 +416,7 @@ def cmd_analyze_audio(args: argparse.Namespace) -> int:
     """
     import time as _time
 
-    from app.models.audio_analysis import (
-        ANALYSIS_VERSION, TrackAudioAnalysis, TrackSimilarity,
-    )
-    from app.models.media_file import MediaFile, MediaKind, ScanState
     from app.services import audio_analysis as aa
-    from app.services import path_map
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     log = logging.getLogger("analyze-audio")
@@ -430,6 +425,7 @@ def cmd_analyze_audio(args: argparse.Namespace) -> int:
     allow_boost = bool(getattr(args, "allow_boost", False))
     throttle_sec = max(0.0, float(getattr(args, "throttle", 0.5)))
     force = bool(getattr(args, "force", False))
+    top_n = int(getattr(args, "similar_top_n", aa.DEFAULT_SIMILAR_TOP_N))
 
     counts = {"analyzed": 0, "skipped": 0, "no_file": 0, "failed": 0}
 
@@ -445,50 +441,20 @@ def cmd_analyze_audio(args: argparse.Namespace) -> int:
                  len(track_ids), force)
 
         # ---- Phase 1: per-track loudness + waveform + track gain ----
+        # One file at a time (throttled). The per-track work and the status it
+        # returns are the SHARED engine in services.audio_analysis, so the
+        # automatic scheduler job and this CLI stay identical.
         analyzed_this_run: list[uuid.UUID] = []
         for i, tid in enumerate(track_ids, start=1):
-            row = db.scalar(
-                select(TrackAudioAnalysis).where(TrackAudioAnalysis.track_id == tid)
+            status = aa.analyze_track(
+                db, tid, target_lufs=target_lufs,
+                allow_boost=allow_boost, force=force,
             )
-            if row is not None and row.analyzed_at is not None and not force:
-                counts["skipped"] += 1
-                continue
-
-            mf = db.scalar(
-                select(MediaFile)
-                .where(
-                    MediaFile.kind == MediaKind.track,
-                    MediaFile.ref_id == tid,
-                    MediaFile.scan_state == ScanState.ready,
-                )
-                .order_by(MediaFile.id)
-                .limit(1)
-            )
-            if mf is None:
-                counts["no_file"] += 1
-                continue
-
-            path = path_map.translate(mf.path) or mf.path
-            lufs = aa.measure_loudness(path)
-            peaks = aa.compute_waveform(path)
-            if lufs is None and peaks is None:
-                counts["failed"] += 1
-                log.warning("  track %s: analysis produced nothing (%s)", tid, path)
-                continue
-
-            gain = aa.compute_gain_db(lufs, target_lufs=target_lufs, allow_boost=allow_boost)
-            if row is None:
-                row = TrackAudioAnalysis(track_id=tid)
-                db.add(row)
-            row.media_file_id = mf.id
-            row.integrated_lufs = lufs
-            row.track_gain_db = gain
-            row.waveform_peaks = peaks
-            row.analysis_version = ANALYSIS_VERSION
-            row.analyzed_at = datetime.now(timezone.utc)
-            db.flush()
-            counts["analyzed"] += 1
-            analyzed_this_run.append(tid)
+            counts[status] = counts.get(status, 0) + 1
+            if status == aa.STATUS_ANALYZED:
+                analyzed_this_run.append(tid)
+            elif status == aa.STATUS_FAILED:
+                log.warning("  track %s: analysis produced nothing", tid)
 
             if i % 25 == 0:
                 log.info("  progress %d/%d %s", i, len(track_ids), counts)
@@ -498,70 +464,19 @@ def cmd_analyze_audio(args: argparse.Namespace) -> int:
         db.commit()
 
         # ---- Album gain: target the album's integrated loudness ----
-        # Album gain normalizes each album to the same reference (target LUFS)
-        # using the album's own integrated loudness (mean of its tracks' LUFS as
-        # a cheap stand-in for a true album measurement), so intra-album
-        # dynamics are preserved. Recomputed for every album touched this run.
-        touched_albums: set[uuid.UUID] = set()
-        for tid in analyzed_this_run:
-            t = db.get(Track, tid)
-            if t is not None:
-                touched_albums.add(t.album_id)
-        for album_id in touched_albums:
-            album_track_ids = list(db.scalars(
-                select(Track.id).where(Track.album_id == album_id)
-            ))
-            rows = list(db.scalars(
-                select(TrackAudioAnalysis)
-                .where(TrackAudioAnalysis.track_id.in_(album_track_ids))
-            ))
-            lufs_vals = [r.integrated_lufs for r in rows if r.integrated_lufs is not None]
-            if not lufs_vals:
-                continue
-            album_lufs = sum(lufs_vals) / len(lufs_vals)
-            album_gain = aa.compute_gain_db(
-                album_lufs, target_lufs=target_lufs, allow_boost=allow_boost,
-            )
-            for r in rows:
-                r.album_gain_db = album_gain
+        aa.recompute_album_gains(
+            db, analyzed_this_run,
+            target_lufs=target_lufs, allow_boost=allow_boost,
+        )
         db.commit()
 
         # ---- Phase 2: similarity edges (top-N per track) ----
-        top_n = int(getattr(args, "similar_top_n", 25))
-        # Build feature vectors for every analyzed track in the library so the
-        # graph is complete, not just this run's slice.
-        all_rows = list(db.scalars(
-            select(TrackAudioAnalysis).where(TrackAudioAnalysis.analyzed_at.isnot(None))
-        ))
-        feats: list[tuple[uuid.UUID, aa.AudioFeatures]] = []
-        for r in all_rows:
-            fv = aa.features_from_waveform(r.waveform_peaks or [], r.integrated_lufs)
-            feats.append((r.track_id, fv))
-
-        if len(feats) >= 2 and (force or analyzed_this_run):
-            # Recompute edges only for tracks analyzed this run (or all, on
-            # --force) to keep an incremental run cheap.
-            seeds = set(analyzed_this_run) if not force else {t for t, _ in feats}
-            for seed_id, seed_fv in feats:
-                if seed_id not in seeds:
-                    continue
-                scored = [
-                    (other_id, aa.similarity_score(seed_fv, other_fv))
-                    for other_id, other_fv in feats
-                    if other_id != seed_id
-                ]
-                scored.sort(key=lambda p: p[1], reverse=True)
-                top = scored[:top_n]
-                # Replace this seed's edges.
-                db.query(TrackSimilarity).filter(
-                    TrackSimilarity.track_id == seed_id
-                ).delete(synchronize_session=False)
-                for other_id, score in top:
-                    db.add(TrackSimilarity(
-                        track_id=seed_id, similar_track_id=other_id, score=score,
-                    ))
-            db.commit()
-            log.info("similarity graph updated for %d seed track(s)", len(seeds))
+        rebuilt = aa.rebuild_similarity(
+            db, analyzed_this_run, top_n=top_n, force=force,
+        )
+        db.commit()
+        if rebuilt:
+            log.info("similarity graph updated for %d seed track(s)", rebuilt)
 
     log.info("analyze-audio complete: %s", counts)
     return 0

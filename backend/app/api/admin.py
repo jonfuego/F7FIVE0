@@ -23,6 +23,7 @@ from fastapi import HTTPException
 from app import scheduler
 from app.api.deps import evict_session_cache, get_db, require_admin
 from app.api.schemas import (
+    AudioAnalysisProgressOut, AudioAnalysisStartOut,
     LibraryFolderOut, LibraryFoldersIn, LibraryFoldersLibraryOut, LibraryFoldersOut,
     MetadataSettingsOut, ReminderOut, ReminderSnoozeIn, TmdbKeyCheckOut, TmdbKeyIn,
     TmdbKeyStatusOut,
@@ -346,6 +347,48 @@ def analyze_markers(
         "series_id": str(series_id) if series_id else None,
         "force": force,
     }
+
+
+# ---------------------------------------------------------------------------
+# Audio analysis (smart-audio backfill)
+# ---------------------------------------------------------------------------
+@router.get("/audio/progress", response_model=AudioAnalysisProgressOut)
+def audio_analysis_progress(
+    _admin: Annotated[User, Depends(require_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> AudioAnalysisProgressOut:
+    """How far the automatic audio-analysis backfill has got.
+
+    Loudness leveling, the waveform scrubber, and similar-track radio all read
+    `track_audio_analysis` / `track_similarity`, which the scheduler fills one
+    track at a time. The admin panel polls this to show `analyzed / total`."""
+    from app.services import audio_analysis as aa
+    prog = aa.analysis_progress(db)
+    return AudioAnalysisProgressOut(
+        analyzed=prog["analyzed"],
+        total=prog["total"],
+        pending=max(0, prog["total"] - prog["analyzed"]),
+    )
+
+
+@router.post("/audio/analyze", response_model=AudioAnalysisStartOut, status_code=202)
+def analyze_audio_now(
+    _admin: Annotated[User, Depends(require_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> AudioAnalysisStartOut:
+    """Start (or re-arm) the automatic audio-analysis walk now.
+
+    Backs the 'Analyze music now' admin action. The work runs out of band on
+    the scheduler, one track at a time, using the same engine as the
+    analyze-audio CLI. Already-analyzed tracks are skipped, so this is safe to
+    click repeatedly; it just fills whatever is still pending."""
+    from app.services import audio_analysis as aa
+    prog = aa.analysis_progress(db)
+    pending = max(0, prog["total"] - prog["analyzed"])
+    scheduler.trigger_audio_analysis_now()
+    return AudioAnalysisStartOut(
+        status="enqueued", pending=pending, total=prog["total"],
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -296,3 +296,209 @@ def similarity_score(a: AudioFeatures, b: AudioFeatures) -> float:
     # dist is in [0, 1] because each weighted term is bounded by its weight and
     # the weights sum to 1. Invert so 0 distance -> score 1.
     return round(max(0.0, 1.0 - dist), 4)
+
+
+# ---------------------------------------------------------------------------
+# Shared backfill engine
+#
+# Both the `analyze-audio` CLI and the scheduler's automatic job call these.
+# The per-track work, album-gain pass, and similarity rebuild live here once so
+# the CLI and the job never drift apart. The CLI adds argument parsing, logging,
+# and a throttle sleep around `analyze_track`; the scheduler job calls the same
+# functions one track at a time at low priority. Nothing here runs on a request
+# path; each ffmpeg pass is a subprocess.
+# ---------------------------------------------------------------------------
+# Default number of similarity edges to keep per track.
+DEFAULT_SIMILAR_TOP_N = 25
+
+# Statuses `analyze_track` returns so callers can total them.
+STATUS_ANALYZED = "analyzed"
+STATUS_SKIPPED = "skipped"
+STATUS_NO_FILE = "no_file"
+STATUS_FAILED = "failed"
+
+
+def tracks_needing_analysis(db) -> list:
+    """Track ids that have NO analysis row yet (the automatic job's working set).
+
+    A track is "needing analysis" when no `track_audio_analysis` row exists for
+    it, or the row exists but was never stamped `analyzed_at` (a half-written or
+    failed row). Returns ids ordered by track id for a stable, resumable walk.
+    This is the exact set the scheduler job fills; it never re-touches tracks
+    the CLI already analyzed.
+    """
+    from sqlalchemy import select
+
+    from app.models.audio_analysis import TrackAudioAnalysis
+    from app.models.music import Track
+
+    analyzed_ids = set(db.scalars(
+        select(TrackAudioAnalysis.track_id)
+        .where(TrackAudioAnalysis.analyzed_at.isnot(None))
+    ))
+    all_ids = list(db.scalars(select(Track.id).order_by(Track.id)))
+    return [tid for tid in all_ids if tid not in analyzed_ids]
+
+
+def analysis_progress(db) -> dict:
+    """Return {'analyzed': int, 'total': int} for the music library.
+
+    `total` is every track; `analyzed` is every track with a stamped analysis
+    row. The admin progress readout renders `analyzed / total`.
+    """
+    from sqlalchemy import func, select
+
+    from app.models.audio_analysis import TrackAudioAnalysis
+    from app.models.music import Track
+
+    total = int(db.scalar(select(func.count()).select_from(Track)) or 0)
+    analyzed = int(db.scalar(
+        select(func.count())
+        .select_from(TrackAudioAnalysis)
+        .where(TrackAudioAnalysis.analyzed_at.isnot(None))
+    ) or 0)
+    return {"analyzed": analyzed, "total": total}
+
+
+def analyze_track(db, track_id, *, target_lufs: float = TARGET_LUFS,
+                  allow_boost: bool = False, force: bool = False) -> str:
+    """Analyze ONE track: loudness, waveform, track gain -> a stamped row.
+
+    Returns one of STATUS_ANALYZED / STATUS_SKIPPED / STATUS_NO_FILE /
+    STATUS_FAILED. Does NOT commit; the caller owns the transaction boundary so
+    it can batch commits and throttle between files. Skips a track that already
+    has a stamped row unless `force`. This is the single per-track unit of work
+    shared by the CLI and the scheduler job.
+    """
+    from datetime import datetime, timezone
+
+    from sqlalchemy import select
+
+    from app.models.audio_analysis import ANALYSIS_VERSION, TrackAudioAnalysis
+    from app.models.media_file import MediaFile, MediaKind, ScanState
+    from app.services import path_map
+
+    row = db.scalar(
+        select(TrackAudioAnalysis).where(TrackAudioAnalysis.track_id == track_id)
+    )
+    if row is not None and row.analyzed_at is not None and not force:
+        return STATUS_SKIPPED
+
+    mf = db.scalar(
+        select(MediaFile)
+        .where(
+            MediaFile.kind == MediaKind.track,
+            MediaFile.ref_id == track_id,
+            MediaFile.scan_state == ScanState.ready,
+        )
+        .order_by(MediaFile.id)
+        .limit(1)
+    )
+    if mf is None:
+        return STATUS_NO_FILE
+
+    path = path_map.translate(mf.path) or mf.path
+    lufs = measure_loudness(path)
+    peaks = compute_waveform(path)
+    if lufs is None and peaks is None:
+        return STATUS_FAILED
+
+    gain = compute_gain_db(lufs, target_lufs=target_lufs, allow_boost=allow_boost)
+    if row is None:
+        row = TrackAudioAnalysis(track_id=track_id)
+        db.add(row)
+    row.media_file_id = mf.id
+    row.integrated_lufs = lufs
+    row.track_gain_db = gain
+    row.waveform_peaks = peaks
+    row.analysis_version = ANALYSIS_VERSION
+    row.analyzed_at = datetime.now(timezone.utc)
+    db.flush()
+    return STATUS_ANALYZED
+
+
+def recompute_album_gains(db, analyzed_track_ids, *,
+                          target_lufs: float = TARGET_LUFS,
+                          allow_boost: bool = False) -> None:
+    """Set album_gain_db for every album touched by `analyzed_track_ids`.
+
+    Album gain normalizes each album toward the target using the album's own
+    integrated loudness (mean of its tracks' LUFS as a cheap stand-in), so
+    intra-album dynamics are preserved. Does NOT commit.
+    """
+    from sqlalchemy import select
+
+    from app.models.audio_analysis import TrackAudioAnalysis
+    from app.models.music import Track
+
+    touched_albums = set()
+    for tid in analyzed_track_ids:
+        t = db.get(Track, tid)
+        if t is not None:
+            touched_albums.add(t.album_id)
+    for album_id in touched_albums:
+        album_track_ids = list(db.scalars(
+            select(Track.id).where(Track.album_id == album_id)
+        ))
+        rows = list(db.scalars(
+            select(TrackAudioAnalysis)
+            .where(TrackAudioAnalysis.track_id.in_(album_track_ids))
+        ))
+        lufs_vals = [r.integrated_lufs for r in rows if r.integrated_lufs is not None]
+        if not lufs_vals:
+            continue
+        album_lufs = sum(lufs_vals) / len(lufs_vals)
+        album_gain = compute_gain_db(
+            album_lufs, target_lufs=target_lufs, allow_boost=allow_boost,
+        )
+        for r in rows:
+            r.album_gain_db = album_gain
+
+
+def rebuild_similarity(db, seed_track_ids, *,
+                       top_n: int = DEFAULT_SIMILAR_TOP_N,
+                       force: bool = False) -> int:
+    """Rebuild similarity edges for the given seed tracks (top-N per seed).
+
+    Features come from every analyzed track in the library so the graph is
+    complete, but edges are rewritten only for `seed_track_ids` (or all analyzed
+    tracks when `force`) to keep an incremental run cheap. Returns the number of
+    seed tracks whose edges were rebuilt. Does NOT commit.
+    """
+    from sqlalchemy import select
+
+    from app.models.audio_analysis import TrackAudioAnalysis, TrackSimilarity
+
+    all_rows = list(db.scalars(
+        select(TrackAudioAnalysis).where(TrackAudioAnalysis.analyzed_at.isnot(None))
+    ))
+    feats = [
+        (r.track_id, features_from_waveform(r.waveform_peaks or [], r.integrated_lufs))
+        for r in all_rows
+    ]
+    seeds = set(seed_track_ids)
+    if len(feats) < 2 or (not force and not seeds):
+        return 0
+    if force:
+        seeds = {t for t, _ in feats}
+
+    rebuilt = 0
+    for seed_id, seed_fv in feats:
+        if seed_id not in seeds:
+            continue
+        scored = [
+            (other_id, similarity_score(seed_fv, other_fv))
+            for other_id, other_fv in feats
+            if other_id != seed_id
+        ]
+        scored.sort(key=lambda p: p[1], reverse=True)
+        top = scored[:top_n]
+        db.query(TrackSimilarity).filter(
+            TrackSimilarity.track_id == seed_id
+        ).delete(synchronize_session=False)
+        for other_id, score in top:
+            db.add(TrackSimilarity(
+                track_id=seed_id, similar_track_id=other_id, score=score,
+            ))
+        rebuilt += 1
+    return rebuilt

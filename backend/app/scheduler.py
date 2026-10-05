@@ -26,6 +26,7 @@ _scheduler: Optional[BackgroundScheduler] = None
 JOB_FULL_SYNC = "arr_full_sync"
 JOB_MUSIC_VIDEOS_SCAN = "music_videos_scan"
 JOB_FOLDER_SCAN = "folder_scan"
+JOB_AUDIO_ANALYSIS = "audio_analysis"
 
 # Defer enrichment far enough that the upsert transaction is committed
 # before the worker reads the row. Five seconds matches the spec.
@@ -54,7 +55,9 @@ def _run_music_videos_scan() -> None:
 
 def _run_folder_scan() -> None:
     """Scan the libraries that have no *arr (movies / TV / music folders),
-    then the music-videos folder when one is configured."""
+    then the music-videos folder when one is configured. Finally kick off one
+    low-priority audio-analysis step so new music gets loudness / waveform /
+    similarity filled in without an operator running the CLI."""
     has_music_videos = False
     try:
         with db_session() as db:
@@ -64,6 +67,70 @@ def _run_folder_scan() -> None:
         log.exception("folder scan raised")
     if has_music_videos:
         _run_music_videos_scan()
+    # Audio analysis runs AFTER the scan so freshly imported tracks are in the
+    # working set. It only ever processes one track per step and reschedules
+    # itself, so it stays low-priority and never blocks the scan path.
+    _kick_audio_analysis()
+
+
+def _run_audio_analysis_step() -> None:
+    """Analyze ONE un-analyzed track, then reschedule the next step.
+
+    Low-priority, strictly one track at a time: the job finds the first track
+    with no `track_audio_analysis` row, runs the SHARED analysis engine on it
+    (the same `services.audio_analysis` code the `analyze-audio` CLI uses),
+    recomputes that track's album gain and similarity edges, commits, and
+    queues the next step a short delay later. When nothing is left it stops, so
+    an idle library costs nothing. A later folder scan re-arms it for new music.
+    """
+    try:
+        from app.services import audio_analysis as aa
+        with db_session() as db:
+            pending = aa.tracks_needing_analysis(db)
+            if not pending:
+                log.info("audio analysis: nothing to do")
+                return
+            tid = pending[0]
+            status = aa.analyze_track(db, tid)
+            db.commit()
+            if status == aa.STATUS_ANALYZED:
+                aa.recompute_album_gains(db, [tid])
+                db.commit()
+                aa.rebuild_similarity(db, [tid])
+                db.commit()
+            log.info("audio analysis step: track %s -> %s (%d left)",
+                     tid, status, max(0, len(pending) - 1))
+    except Exception:
+        log.exception("audio analysis step raised")
+        return
+    # Queue the next track. A short gap keeps the box responsive during a long
+    # first-install backfill (the equivalent of the CLI's --throttle).
+    _kick_audio_analysis(delay_sec=max(0, settings.audio_analysis_throttle_sec))
+
+
+def _kick_audio_analysis(delay_sec: int = 0) -> None:
+    """Schedule the next audio-analysis step. No-op when not running (CLI)."""
+    if _scheduler is None:
+        return
+    when = datetime.now(timezone.utc) + timedelta(seconds=delay_sec)
+    _scheduler.add_job(
+        _run_audio_analysis_step,
+        id=JOB_AUDIO_ANALYSIS,
+        name="audio analysis (one track)",
+        max_instances=1,       # never run two analysis steps at once
+        coalesce=True,
+        replace_existing=True,  # a second kick just moves the next run
+        next_run_time=when,
+    )
+
+
+def trigger_audio_analysis_now() -> None:
+    """Start the automatic audio-analysis walk now. Admin-initiated
+    ("Analyze music now"). Idempotent: re-clicking just re-arms the walk."""
+    if _scheduler is None:
+        log.warning("trigger_audio_analysis_now called but scheduler not started")
+        return
+    _kick_audio_analysis()
 
 
 def _run_series_rescan(sonarr_id: int) -> None:

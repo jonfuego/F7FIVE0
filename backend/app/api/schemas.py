@@ -723,6 +723,27 @@ class ServerHealthOut(BaseModel):
     last_sync_at: Optional[datetime] = None
 
 
+class AudioAnalysisProgressOut(BaseModel):
+    """Progress of the automatic audio-analysis backfill for the admin panel.
+
+    `analyzed` is the number of tracks with a stamped analysis row; `total` is
+    every track in the music library; `pending` is the remainder still waiting
+    (total - analyzed). The admin readout shows `analyzed / total`."""
+
+    analyzed: int
+    total: int
+    pending: int
+
+
+class AudioAnalysisStartOut(BaseModel):
+    """Response to 'Analyze music now': how many tracks are still un-analyzed
+    when the walk is (re)armed, so the admin knows how much is left to do."""
+
+    status: str
+    pending: int
+    total: int
+
+
 # ---- ux-extras: new-arrivals badge + intro/credits markers ----------------
 class NewArrivalsBadgeOut(BaseModel):
     """Count of items added since the caller's last home-page visit."""
