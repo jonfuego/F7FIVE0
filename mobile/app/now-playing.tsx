@@ -30,6 +30,7 @@ import { useTrackRadio } from "@/player/useTrackRadio";
 import { useApi } from "@/state/auth";
 import { IconButton } from "@/ui/IconButton";
 import { LyricsView } from "@/ui/LyricsView";
+import { PlayerTrackMenu } from "@/ui/PlayerTrackMenu";
 import { QueuePanel } from "@/ui/QueuePanel";
 import { WaveformScrubber } from "@/ui/WaveformScrubber";
 
@@ -139,6 +140,12 @@ export default function NowPlayingScreen(): React.ReactElement {
           >
             <Icon icon={List} size={24} color={colors.text} />
           </Pressable>
+          <PlayerTrackMenu
+            albumId={nowPlaying?.albumId ?? null}
+            artistId={nowPlaying?.artistId ?? null}
+            beforeNavigate={() => router.back()}
+            size={24}
+          />
         </View>
       </View>
 

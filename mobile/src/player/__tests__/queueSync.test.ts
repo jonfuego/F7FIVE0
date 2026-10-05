@@ -7,7 +7,17 @@ import {
 
 describe("queue sync", () => {
   const metas: QueueSnapshotItem[] = [
-    { mediaFileId: "mf1", trackId: "t1", title: "One", artist: "A", album: "Alb", artPath: "/c1.jpg", durationSec: 200 },
+    {
+      mediaFileId: "mf1",
+      trackId: "t1",
+      title: "One",
+      artist: "A",
+      artistId: "ar1",
+      album: "Alb",
+      albumId: "al1",
+      artPath: "/c1.jpg",
+      durationSec: 200,
+    },
     { mediaFileId: "mf2", trackId: "t2", title: "Two" },
   ];
 
@@ -19,17 +29,22 @@ describe("queue sync", () => {
       title: "One",
       track_id: "t1",
       artist_name: "A",
+      artist_id: "ar1",
       album_title: "Alb",
+      album_id: "al1",
       cover_path: "/c1.jpg",
       duration_sec: 200,
     });
     // Missing optional fields serialize as null (backend allows extra/null).
+    // album_id / artist_id keep a synced queue linkable back to the menu.
     expect(items[1]).toEqual({
       media_file_id: "mf2",
       title: "Two",
       track_id: "t2",
       artist_name: null,
+      artist_id: null,
       album_title: null,
+      album_id: null,
       cover_path: null,
       duration_sec: null,
     });

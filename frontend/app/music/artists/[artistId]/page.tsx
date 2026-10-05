@@ -368,7 +368,7 @@ function ArtistMixActions({ artistId }: { artistId: string }) {
         disabled={busy !== null}
         onClick={() => fetchAndPlay("radio")}
       >
-        {busy === "radio" ? "..." : "Start Radio"}
+        {busy === "radio" ? "..." : "Artist radio"}
       </button>
       {error ? (
         <span

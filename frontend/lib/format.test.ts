@@ -40,6 +40,14 @@ test("passes through a non-code subtitle", () => {
   assert.equal(episodeSubtitle("Smallville", "Season 4"), "Season 4");
 });
 
+test("non-code subtitle equal to the title returns null", () => {
+  // A "Season 4" grouping folder whose subtitle is also "Season 4": the second
+  // line would just repeat the card title, so hide it. Case-insensitive.
+  assert.equal(episodeSubtitle("Season 4", "Season 4"), null);
+  assert.equal(episodeSubtitle("Season 4", "season 4"), null);
+  assert.equal(episodeSubtitle("Season 4", "  Season 4  "), null);
+});
+
 test("null and undefined subtitles return null", () => {
   assert.equal(episodeSubtitle("Smallville S04E02", null), null);
   assert.equal(episodeSubtitle("Smallville S04E02", undefined), null);

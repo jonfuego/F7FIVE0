@@ -16,6 +16,7 @@ import { SkipBack, SkipForward, Play, Pause, ListMusic } from "lucide-react";
 import { Player } from "@/components/Player";
 import { VideoTransport } from "@/components/VideoTransport";
 import { QueuePanel } from "@/components/QueuePanel";
+import { PlayerTrackMenu } from "@/components/PlayerTrackMenu";
 import { apiGet, apiPost, ApiError } from "@/lib/client-api";
 import { formatDuration, formatResolution } from "@/lib/format";
 import { useQueue, type QueueItem } from "@/lib/queue";
@@ -814,6 +815,13 @@ function DockLinkedView({
         >
           <Icon icon={ListMusic} size={26} />
         </button>
+        <PlayerTrackMenu
+          albumId={item?.album_id ?? null}
+          artistId={item?.artist_id ?? null}
+          placement="up"
+          buttonStyle={iconButtonStyle}
+          iconSize={24}
+        />
       </div>
     </div>
   );

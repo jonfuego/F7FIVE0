@@ -100,12 +100,19 @@ export function episodeSubtitle(
   subtitle: string | null | undefined,
 ): string | null {
   if (!subtitle) return subtitle ?? null;
+  // Never show a second line that just repeats the card title, with or without
+  // an episode code (e.g. a "Season 4" folder whose subtitle is also
+  // "Season 4"). Compared case-insensitively on the trimmed text.
+  const sameAsTitle = (s: string) =>
+    s.trim().toLowerCase() === title.trim().toLowerCase();
   const m = EPISODE_CODE_RE.exec(subtitle.trim());
-  if (!m) return subtitle;
+  if (!m) return sameAsTitle(subtitle) ? null : subtitle;
   const code = m[1];
   const episodeTitle = m[2]?.trim() || null;
   // Only rewrite when the title already contains the same code.
-  if (!title.toLowerCase().includes(code.toLowerCase())) return subtitle;
+  if (!title.toLowerCase().includes(code.toLowerCase())) {
+    return sameAsTitle(subtitle) ? null : subtitle;
+  }
   // Never repeat the card title underneath itself; drop the line instead.
   if (!episodeTitle || episodeTitle.toLowerCase() === title.toLowerCase()) {
     return null;
