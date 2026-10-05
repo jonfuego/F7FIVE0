@@ -81,6 +81,33 @@ export function colorForTitle(
   return "var(--surface-2)";
 }
 
+// Episode-code matcher. Matches a season/episode code like "S04E02" (any
+// digit count) at the head of a string, optionally followed by a " - "
+// separator and the rest of the line. Case-insensitive so "s04e02" is
+// caught too.
+const EPISODE_CODE_RE = /^(S\d{1,3}E\d{1,3})(?:\s*-\s*(.*))?$/i;
+
+// Pick the second line for an episode/series card. The recent + search
+// endpoints build the subtitle as "S04E02 - Episode Title" (or a bare
+// "S04E02" when the episode has no title). When the card's own title
+// already carries the episode code (e.g. "Smallville S04E02"), repeating
+// "S04E02" underneath is noise, so drop the code: show the episode title
+// if there is one, else fall back to the show name (the card title). If
+// the title does not contain the code, the subtitle is returned unchanged.
+export function episodeSubtitle(
+  title: string,
+  subtitle: string | null | undefined,
+): string | null {
+  if (!subtitle) return subtitle ?? null;
+  const m = EPISODE_CODE_RE.exec(subtitle.trim());
+  if (!m) return subtitle;
+  const code = m[1];
+  const episodeTitle = m[2]?.trim() || null;
+  // Only rewrite when the title already contains the same code.
+  if (!title.toLowerCase().includes(code.toLowerCase())) return subtitle;
+  return episodeTitle ?? title;
+}
+
 export function hueFromString(s: string): number {
   let h = 0;
   for (let i = 0; i < s.length; i += 1) {

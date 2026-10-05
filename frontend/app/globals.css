@@ -1556,6 +1556,27 @@ button { border: 0; background: transparent; color: inherit; font: inherit; curs
 
 /* ============ Mini player dock ============ */
 
+/* Reserve space under page content for the fixed dock so it never covers
+   the last rows or (on Home) the "Continue Watching" heading. Applied only
+   while the dock bar is actually shown: MiniPlayer sets body[data-dock="1"]
+   with the same visibility rule the `.mini` bar uses. The padding is the
+   dock's own box: content min-height + top padding + bottom padding (which
+   already folds in the safe-area inset) + the 1px top border. */
+body[data-dock="1"] .shell > main {
+  padding-bottom: calc(
+    var(--miniplayer-h) + 14px + max(14px, env(safe-area-inset-bottom)) + 1px
+  );
+}
+
+@media (max-width: 720px) {
+  /* Phones: taller transport (64px play button) and 16px vertical padding. */
+  body[data-dock="1"] .shell > main {
+    padding-bottom: calc(
+      64px + 16px + max(16px, env(safe-area-inset-bottom)) + 1px
+    );
+  }
+}
+
 .mini {
   position: fixed;
   bottom: 0;
