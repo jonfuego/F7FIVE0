@@ -45,6 +45,7 @@ import {
   subtitleLabel,
 } from "./streamChoices";
 import { activeMarker, clampSeek, formatClock, hlsBaseOffset, upNextState } from "./transport";
+import { videoController } from "@/player/playerController";
 
 interface VideoPlayerProps {
   mediaFileId: string;
@@ -253,6 +254,29 @@ export function VideoPlayer({ mediaFileId, resumeSec = 0, onClose, onPlayNext }:
     },
     [duration, base],
   );
+
+  // Uniform player controller (item 8c). Groundwork so a future watch-together
+  // room can command this player (play/pause/seek/setRate) and read its
+  // position without knowing it is react-native-video. Behavior is unchanged:
+  // play/pause flip the same `paused` state and seek reuses seekAbs. Deps are
+  // read through refs/callbacks so the controller identity stays stable.
+  const baseRef = useRef(base);
+  baseRef.current = base;
+  const controller = useMemo(
+    () =>
+      videoController({
+        getRef: () => ref.current,
+        getBase: () => baseRef.current,
+        getPosition: () => positionRef.current,
+        getPaused: () => pausedRef.current,
+        setPaused,
+        setRate,
+      }),
+    [],
+  );
+  // Keep the eslint deps happy without changing behavior: the controller is a
+  // stable groundwork handle the room layer will drive later.
+  void controller;
 
   const next = nextEp.data ?? null;
   const upNext = upNextState(position, markers.data, !!next && !!onPlayNext);

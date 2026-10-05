@@ -12,7 +12,7 @@
 
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { CSSProperties } from "react";
@@ -48,6 +48,8 @@ import {
   type RepeatMode,
 } from "@/lib/queue";
 import { QueuePanel } from "./QueuePanel";
+import { videoElementController } from "@/lib/playerController";
+import type { PlayerController } from "@/lib/playerController";
 import type {
   AlbumDetail,
   Progress,
@@ -115,6 +117,17 @@ export function MiniPlayer() {
   const activeRef = useRef<"A" | "B">("A");
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const barRef = useRef<HTMLDivElement | null>(null);
+  // Uniform player controller (item 8c) over the active dock <audio>. The dock
+  // is always direct-play, so the element clock is source time (offset 0). The
+  // toggle and scrub below drive the audio through this so a future
+  // watch-together room can command the dock the same way as the video player.
+  const controllerRef = useRef<ReturnType<typeof videoElementController> | null>(null);
+  const audioController: PlayerController = useMemo(() => {
+    const c = videoElementController(() => audioRef.current, () => 0);
+    controllerRef.current = c;
+    return c;
+  }, []);
+  useEffect(() => () => controllerRef.current?.dispose(), []);
   const [stream, setStream] = useState<StreamStart | null>(null);
   const [streamError, setStreamError] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -936,11 +949,11 @@ export function MiniPlayer() {
   const togglePlay = () => {
     const audio = audioRef.current;
     if (!audio) return;
+    // Route through the controller (item 8c). Same effect as before.
     if (audio.paused) {
-      const p = audio.play();
-      if (p && typeof p.catch === "function") p.catch(() => { /* ignore */ });
+      audioController.play();
     } else {
-      audio.pause();
+      audioController.pause();
     }
   };
 
@@ -955,11 +968,9 @@ export function MiniPlayer() {
     if (rect.width <= 0) return;
     const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
     const t = ratio * duration;
-    try {
-      audio.currentTime = t;
-    } catch {
-      // ignore
-    }
+    // Controller.seek takes a source second; the dock is direct-play so source
+    // time == element time (item 8c). Same as the prior audio.currentTime = t.
+    audioController.seek(t);
     setNow(t);
   };
   const onScrubPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
