@@ -25,6 +25,26 @@ type Options = {
   method?: string;
 };
 
+// Single-flight session refresh. When the access token expires, several
+// requests get a 401 at the same moment (Admin alone polls on four timers).
+// Without a shared lock each 401 refreshed on its own: the first rotated the
+// token, the second used the grace window, and the rest presented a revoked
+// token, which the API treats as reuse and kills the session. Here every 401
+// awaits one shared in-flight refresh promise, so the token rotates once.
+let inFlightRefresh: Promise<boolean> | null = null;
+
+export function refreshSession(): Promise<boolean> {
+  if (!inFlightRefresh) {
+    inFlightRefresh = fetch("/api/session/refresh", { method: "POST" })
+      .then((res) => res.ok)
+      .catch(() => false)
+      .finally(() => {
+        inFlightRefresh = null;
+      });
+  }
+  return inFlightRefresh;
+}
+
 export async function apiGet<T>(path: string, opts: Options = {}): Promise<T> {
   return request<T>(path, { ...opts, method: "GET" });
 }
@@ -49,10 +69,11 @@ async function request<T>(path: string, opts: Options): Promise<T> {
   const first = await doFetch(path, opts);
   if (first.status !== 401) return handle<T>(first);
 
-  // One refresh attempt, then retry the original call exactly once. A
-  // second 401 after refresh means the refresh cookie is dead.
-  const refreshed = await fetch("/api/session/refresh", { method: "POST" });
-  if (!refreshed.ok) {
+  // One refresh attempt shared across every concurrent 401, then retry the
+  // original call exactly once. A second 401 after refresh means the refresh
+  // cookie is dead.
+  const refreshed = await refreshSession();
+  if (!refreshed) {
     redirectToLogin();
     return new Promise<T>(() => {}); // never resolves; navigation is underway
   }

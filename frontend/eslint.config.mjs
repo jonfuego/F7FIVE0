@@ -14,5 +14,6 @@ export default defineConfig([
       "react-hooks/purity": "warn",
     },
   },
-  globalIgnores([".next/**", "node_modules/**", "next-env.d.ts", "scripts/**"]),
+  // Test files run under node --test with type stripping, not the Next build.
+  globalIgnores([".next/**", "node_modules/**", "next-env.d.ts", "scripts/**", "**/*.test.ts"]),
 ]);
