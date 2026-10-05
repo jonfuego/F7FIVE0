@@ -45,6 +45,88 @@ log = logging.getLogger("f7five0.transcoder")
 IDLE_TIMEOUT_SEC = 600          # kill session after 600s with no segment reads
 JANITOR_INTERVAL_SEC = 30       # how often the background sweeper runs
 START_WAIT_SEC = 10             # how long to wait for the first segment on a cold start
+STATS_PERIOD_SEC = 30           # how often ffmpeg emits a -progress block
+REALTIME_FACTOR = 1.0           # speed below this means ffmpeg is slower than playback
+
+
+# ---------------------------------------------------------------------------
+# ffmpeg -progress parsing (pure, unit-testable)
+# ---------------------------------------------------------------------------
+def parse_progress_speed(block: str) -> Optional[float]:
+    r"""Extract the realtime factor (speed) from one ffmpeg `-progress` block.
+
+    ffmpeg's `-progress` writes newline-separated `key=value` pairs, ending
+    each block with `progress=continue` (or `progress=end`). The realtime
+    factor is the ratio of encoded media time to wall-clock time:
+
+        speed > 1.0  ffmpeg is ahead of playback (fine)
+        speed < 1.0  ffmpeg is slower than realtime (the server can't keep up)
+
+    ffmpeg prints it directly as `speed=1.23x`. We prefer that value when
+    present. A value of `N/A` (emitted right at startup before a measurement
+    exists) is treated as "unknown" and returns None.
+
+    `block` may contain one or many progress blocks (for example the whole
+    captured stream in a test); the LAST parseable `speed=` wins so a caller
+    that hands over accumulated output sees the most recent measurement.
+
+    Returns the speed as a float (for example 0.47 for `speed=0.47x`), or
+    None when no usable `speed=` line is present.
+    """
+    speed: Optional[float] = None
+    for raw in block.splitlines():
+        line = raw.strip()
+        if not line.startswith("speed="):
+            continue
+        value = line.split("=", 1)[1].strip().rstrip("xX").strip()
+        if not value or value.upper() == "N/A":
+            continue
+        try:
+            speed = float(value)
+        except ValueError:
+            continue
+    return speed
+
+
+def speed_from_out_time(out_time_sec: float, wall_sec: float) -> Optional[float]:
+    r"""Compute a realtime factor from encoded media time over wall time.
+
+    Fallback for the rare case ffmpeg does not emit `speed=` (older builds):
+    encoded output seconds divided by elapsed wall-clock seconds. Returns
+    None when wall time is non-positive (no measurement yet).
+    """
+    if wall_sec <= 0:
+        return None
+    return out_time_sec / wall_sec
+
+
+def parse_out_time_sec(block: str) -> Optional[float]:
+    r"""Pull the encoded media position (seconds) from a `-progress` block.
+
+    ffmpeg emits `out_time_us=` (microseconds) and/or `out_time_ms=` (which,
+    despite the name, is also microseconds in current ffmpeg). The LAST value
+    seen wins. Returns None when neither is present or parseable.
+    """
+    out_us: Optional[float] = None
+    for raw in block.splitlines():
+        line = raw.strip()
+        key = None
+        if line.startswith("out_time_us="):
+            key = "out_time_us"
+        elif line.startswith("out_time_ms="):
+            key = "out_time_ms"
+        if key is None:
+            continue
+        value = line.split("=", 1)[1].strip()
+        if not value or value.upper() == "N/A":
+            continue
+        try:
+            out_us = float(value)
+        except ValueError:
+            continue
+    if out_us is None:
+        return None
+    return out_us / 1_000_000.0
 
 
 # ---------------------------------------------------------------------------
@@ -130,6 +212,13 @@ def _build_ffmpeg_args(
         settings.ffmpeg_bin,
         "-hide_banner",
         "-loglevel", "warning",
+        # Emit a machine-readable progress block to stdout every
+        # STATS_PERIOD_SEC seconds. `-progress pipe:1` keeps the encode speed
+        # out of the warning-level log (so `-loglevel warning` is preserved)
+        # and on a separate stream from stderr warnings; `_read_progress`
+        # parses `speed=` from it. See parse_progress_speed.
+        "-progress", "pipe:1",
+        "-stats_period", str(STATS_PERIOD_SEC),
         "-y",
     ]
     opts = opts or TrackOpts()
@@ -244,6 +333,12 @@ class TranscodeJob:
     started_at: float = field(default_factory=time.time)
     last_access_at: float = field(default_factory=time.time)
     session_row_id: Optional[uuid.UUID] = None
+    # Latest realtime factor (speed) parsed from ffmpeg -progress, or None
+    # until the first block arrives. Wall-clock time (monotonic) when the
+    # speed first dropped below realtime, reset to None whenever it recovers;
+    # used to tell "a brief dip" from "the server can't keep up".
+    current_speed: Optional[float] = None
+    below_realtime_since: Optional[float] = None
 
     @property
     def key(self) -> tuple[uuid.UUID, uuid.UUID, str, int, str]:
@@ -261,6 +356,29 @@ class TranscodeJob:
 
     def touch(self) -> None:
         self.last_access_at = time.time()
+
+    def record_speed(self, speed: float, now: Optional[float] = None) -> int:
+        """Update the current speed and the below-realtime clock.
+
+        Returns how many whole seconds the job has stayed below realtime
+        (0 when it is keeping up). The admin surfaces this so the UI can flag
+        a server that has fallen behind for a sustained window.
+        """
+        now = time.time() if now is None else now
+        self.current_speed = speed
+        if speed < REALTIME_FACTOR:
+            if self.below_realtime_since is None:
+                self.below_realtime_since = now
+            return int(now - self.below_realtime_since)
+        self.below_realtime_since = None
+        return 0
+
+    def below_realtime_sec(self, now: Optional[float] = None) -> int:
+        """Whole seconds the job has been continuously below realtime, else 0."""
+        if self.below_realtime_since is None:
+            return 0
+        now = time.time() if now is None else now
+        return int(now - self.below_realtime_since)
 
     def kill(self) -> None:
         if self.is_running():
@@ -480,7 +598,9 @@ class TranscodeManager:
         )
         proc = subprocess.Popen(
             args,
-            stdout=subprocess.DEVNULL,
+            # stdout carries the `-progress pipe:1` key=value blocks; a reader
+            # thread parses `speed=` from it. stderr still carries warnings.
+            stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             cwd=str(out_dir),
         )
@@ -504,6 +624,15 @@ class TranscodeManager:
             target=_drain_stderr,
             args=(proc, job.key),
             name=f"ffmpeg-stderr-{media_file_id}",
+            daemon=True,
+        ).start()
+        # Read -progress from stdout in a daemon thread: parse the encode
+        # speed each block, log it periodically and track it on the job so
+        # the admin can see a server falling behind.
+        threading.Thread(
+            target=_read_progress,
+            args=(proc, job),
+            name=f"ffmpeg-progress-{media_file_id}",
             daemon=True,
         ).start()
         return job
@@ -592,6 +721,70 @@ def _drain_stderr(proc: subprocess.Popen, key: tuple) -> None:
                 log.warning("ffmpeg[%s]: %s", key, text)
     except Exception:
         log.exception("error draining ffmpeg stderr for %s", key)
+
+
+def _read_progress(proc: subprocess.Popen, job: "TranscodeJob") -> None:
+    r"""Consume ffmpeg's `-progress pipe:1` stream and track the encode speed.
+
+    Each block ends with a `progress=continue`/`progress=end` line. When one
+    arrives we parse the realtime factor (prefer ffmpeg's `speed=`, else
+    compute encoded-out-time over wall-clock), record it on the job, persist
+    it on the session row, and log a one-line summary per job with the
+    encoder, the rendition/resolution and the realtime factor. ffmpeg emits a
+    block every STATS_PERIOD_SEC seconds, so the log line is periodic
+    (~every 30s) rather than per-frame.
+    """
+    buf: list[str] = []
+    try:
+        assert proc.stdout is not None
+        for raw in proc.stdout:
+            line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
+            buf.append(line)
+            if not line.startswith("progress="):
+                continue
+            block = "\n".join(buf)
+            buf = []
+            speed = parse_progress_speed(block)
+            if speed is None:
+                out_time = parse_out_time_sec(block)
+                if out_time is not None:
+                    speed = speed_from_out_time(out_time, time.time() - job.started_at)
+            if speed is None:
+                continue
+            below = job.record_speed(speed)
+            encoder = "h264_nvenc" if job.variant.height and _is_nvenc(job) else job.variant.label
+            _persist_speed(job.session_row_id, speed, below)
+            log.info(
+                "ffmpeg progress %s rendition=%s(%sp) speed=%.2fx realtime%s",
+                encoder,
+                job.variant.label,
+                job.variant.height,
+                speed,
+                "" if speed >= REALTIME_FACTOR else f" BELOW (server can't keep up, {below}s)",
+            )
+    except Exception:
+        log.exception("error reading ffmpeg progress for %s", job.key)
+
+
+def _is_nvenc(job: "TranscodeJob") -> bool:
+    return bool(getattr(settings, "nvenc_enabled", False))
+
+
+def _persist_speed(row_id: Optional[uuid.UUID], speed: float, below_sec: int) -> None:
+    """Write the latest speed onto the session row so the admin API (a
+    separate process from the stream gateway) can read it. Swallows DB
+    failures the same way the open/close helpers do."""
+    if row_id is None:
+        return
+    try:
+        with db_session() as db:
+            row = db.get(TranscodeSession, row_id)
+            if row is None:
+                return
+            row.speed = speed
+            row.below_realtime_sec = below_sec
+    except Exception:
+        log.exception("failed to persist transcode speed for %s", row_id)
 
 
 # ---------------------------------------------------------------------------

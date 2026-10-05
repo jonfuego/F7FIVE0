@@ -99,6 +99,8 @@ def active_transcodes(
                 direct_play=r.direct_play,
                 started_at=r.started_at,
                 bytes_served=r.bytes_served,
+                speed=r.speed,
+                below_realtime_sec=r.below_realtime_sec,
             )
         )
     return out

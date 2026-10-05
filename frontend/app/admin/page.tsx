@@ -411,6 +411,30 @@ function LibrarySection() {
 // ---------------------------------------------------------------------------
 // Active streams
 // ---------------------------------------------------------------------------
+// Seconds an encode must stay below 1.0x realtime before we warn the operator.
+// A brief dip is normal (keyframe-heavy scene, a second job starting); a
+// sustained window means the box genuinely can't encode fast enough.
+const CANT_KEEP_UP_SEC = 30;
+
+function TranscodeSpeedCell({ row }: { row: ActiveTranscode }) {
+  // Direct play has no ffmpeg and no speed; nothing to show.
+  if (row.direct_play || row.speed === null || row.speed === undefined) {
+    return <span className="text-neutral-600">-</span>;
+  }
+  const behind =
+    row.speed < 1.0 && row.below_realtime_sec >= CANT_KEEP_UP_SEC;
+  return (
+    <span className={behind ? "text-red-300" : "text-neutral-300"}>
+      <span className="font-sans">{row.speed.toFixed(2)}x</span>
+      {behind ? (
+        <span className="ml-2 rounded bg-red-950/60 px-1.5 py-0.5 text-xs font-medium text-red-200">
+          Server can&apos;t keep up
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
 function ActiveStreamsSection() {
   const [rows, setRows] = useState<ActiveTranscode[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -462,6 +486,7 @@ function ActiveStreamsSection() {
                 <th className="px-2 py-2 font-medium">User</th>
                 <th className="px-2 py-2 font-medium">Title</th>
                 <th className="px-2 py-2 font-medium">Mode</th>
+                <th className="px-2 py-2 font-medium">Speed</th>
                 <th className="px-2 py-2 font-medium">Started</th>
                 <th className="px-2 py-2 font-medium text-right">Bytes</th>
               </tr>
@@ -473,6 +498,9 @@ function ActiveStreamsSection() {
                   <td className="px-2 py-2 text-neutral-200">{r.title}</td>
                   <td className="px-2 py-2 text-neutral-300">
                     {r.direct_play ? "Direct" : `HLS ${r.variant}`}
+                  </td>
+                  <td className="px-2 py-2">
+                    <TranscodeSpeedCell row={r} />
                   </td>
                   <td className="px-2 py-2 text-neutral-300">
                     {formatRelative(r.started_at)}
