@@ -1,10 +1,12 @@
 """Live channel: a Server-Sent Events (SSE) stream plus a command POST.
 
-Transport choice: SSE over WebSockets, because the web client reaches the API
-through the Next standalone `proxy.ts` (`NextResponse.rewrite`), which forwards
-long HTTP responses but not the WebSocket Upgrade handshake. SSE is a plain
-long-lived HTTP response, so it rides the same route HLS already uses. The full
-spike and the VM-passthrough TO-DO list live in `docs/realtime.md`.
+Transport choice: SSE over WebSockets. Both pass the Next standalone
+`proxy.ts`, but a Next route handler cannot accept a WebSocket Upgrade, so the
+browser's cookie-to-Bearer BFF only works for plain HTTP. SSE is a plain
+long-lived HTTP response, so it also rides the same route HLS already uses.
+Keep `Cache-Control: no-transform` below: without it Next gzips the stream on
+the proxy path and holds the frames. The spike results and the VM-passthrough
+TO-DO list live in `docs/realtime.md`.
 
 Endpoints:
   GET  /api/live            long-lived `text/event-stream`. Requires a Bearer

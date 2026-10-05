@@ -5,9 +5,9 @@
 // backend expects, opens the long-lived text/event-stream to the API, and
 // streams its body straight back to the browser unchanged.
 //
-// Why SSE and not WebSockets: the single-origin proxy (proxy.ts) forwards
-// requests with NextResponse.rewrite, which carries a long HTTP response but
-// not the WebSocket Upgrade handshake. See docs/realtime.md.
+// Why SSE and not WebSockets: a route handler like this one cannot accept a
+// WebSocket Upgrade, so the cookie-to-Bearer swap only works for plain HTTP.
+// (proxy.ts itself does pass an Upgrade through.) See docs/realtime.md.
 
 import { NextRequest } from "next/server";
 import { cookies } from "next/headers";

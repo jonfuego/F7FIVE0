@@ -1,11 +1,10 @@
 """In-process live-event hub for the Server-Sent Events (SSE) live channel.
 
-Why SSE and not WebSockets: the web client reaches the API through the Next
-standalone `proxy.ts`, which forwards requests with `NextResponse.rewrite`.
-That path forwards ordinary HTTP (including a long-lived streaming response)
-but does not carry the WebSocket `Upgrade` handshake. SSE is a plain long
-HTTP response, so it rides the same route HLS streaming already uses. See
-`docs/realtime.md` for the full spike.
+Why SSE and not WebSockets: both pass the Next standalone `proxy.ts`, but the
+browser reaches the API through cookie-to-Bearer BFF route handlers, and a Next
+route handler cannot accept a WebSocket `Upgrade`. SSE is a plain long HTTP
+response, so it works through the BFF and rides the same route HLS streaming
+already uses. See `docs/realtime.md` for the spike results.
 
 Single worker only. The API runs one uvicorn worker (CLAUDE.md), so this hub
 living in process memory reaches every connected client. If the API is ever

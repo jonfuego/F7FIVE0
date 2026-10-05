@@ -6,9 +6,9 @@
 // reconnect), and reconnects with exponential backoff. Commands go back to the
 // server over POST /api/live/command.
 //
-// Transport rationale (WebSocket vs SSE) is in docs/realtime.md: the single
-// EventSource rides the same long-HTTP path that HLS already uses and passes
-// the Next proxy, which a WebSocket Upgrade does not.
+// Transport rationale (WebSocket vs SSE) is in docs/realtime.md: the
+// EventSource goes through the cookie-to-Bearer BFF route, which cannot
+// accept a WebSocket Upgrade, and rides the same long-HTTP path HLS uses.
 
 "use client";
 
