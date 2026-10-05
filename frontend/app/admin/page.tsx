@@ -443,7 +443,11 @@ function AudioAnalysisSection() {
     setStatus(null);
     try {
       await apiPost("/api/admin/audio/analyze", {});
-      setStatus("Analysis queued. It runs one track at a time in the background.");
+      setStatus(
+        progress && progress.total === 0
+          ? "No music to analyze."
+          : "Analysis queued. It runs one track at a time in the background.",
+      );
       load();
     } catch (err) {
       setStatus(err instanceof Error ? err.message : "Failed to start analysis.");
@@ -476,8 +480,14 @@ function AudioAnalysisSection() {
         </button>
         {progress ? (
           <span className="text-xs text-neutral-400">
-            {progress.analyzed} / {progress.total} tracks analyzed
-            {progress.pending > 0 ? ` (${progress.pending} pending)` : ""}
+            {progress.total > 0 ? (
+              <>
+                {progress.analyzed} / {progress.total} tracks analyzed
+                {progress.pending > 0 ? ` (${progress.pending} pending)` : ""}
+              </>
+            ) : (
+              "No music to analyze."
+            )}
           </span>
         ) : error ? (
           <span className="text-xs text-rose-400">{error}</span>
