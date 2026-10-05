@@ -28,7 +28,7 @@ const tsc = run("npx", ["tsc", "--noEmit", "--pretty", "false"]);
 fs.writeFileSync(path.join(reports, "tsc.log"), tsc.out || "(no tsc output)\n");
 
 console.log("[verify] eslint");
-const eslint = run("npx", ["eslint", ".", "--ext", ".ts,.tsx"]);
+const eslint = run("npx", ["eslint", "."]);
 fs.writeFileSync(path.join(reports, "eslint.log"), eslint.out || "(no eslint output)\n");
 
 console.log("[verify] jest --json");

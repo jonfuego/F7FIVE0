@@ -43,6 +43,7 @@ export default function TabsLayout(): React.ReactElement {
       )}
       screenOptions={{
         headerShown: false,
+        sceneStyle: { backgroundColor: colors.background },
         tabBarActiveTintColor: colors.accent,
         tabBarInactiveTintColor: colors.textMuted,
         tabBarStyle: {
@@ -50,7 +51,6 @@ export default function TabsLayout(): React.ReactElement {
           borderTopColor: colors.border,
         },
       }}
-      sceneContainerStyle={{ backgroundColor: colors.background }}
     >
       <Tabs.Screen
         name="index"

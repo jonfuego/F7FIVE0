@@ -10,8 +10,8 @@ INSTALL.md for the operator view.
   and `app.stream:app` (stream gateway, :8002). Do not merge them.
 - `frontend/`: Next.js 16 App Router, strict TypeScript, Tailwind. Built as
   a standalone bundle; runs as `node server.js` on :3001.
-- `mobile/`: Expo SDK 51 + react-native-tvos 0.74 (phone, Android TV,
-  Android Auto). `npm ci` relies on `.npmrc` legacy-peer-deps.
+- `mobile/`: Expo SDK 54 + react-native-tvos 0.81, old architecture
+  (phone, Android TV, Android Auto). `npm ci` relies on `.npmrc` legacy-peer-deps.
 - `installer/`: `install.ps1` (does all the work, idempotent),
   `remote-access.ps1` (Tailscale / Cloudflare / port forwarding / token /
   off), `common.ps1` (helpers both dot-source), `uninstall.ps1`,

@@ -11,7 +11,7 @@ export function useAlphaRail<T>(
   data: T[],
   getTitle: (item: T) => string,
   numColumns = 1,
-): { listRef: React.RefObject<FlatList<T>>; active: Set<string>; onSelect: (letter: string) => void } {
+): { listRef: React.RefObject<FlatList<T> | null>; active: Set<string>; onSelect: (letter: string) => void } {
   const listRef = useRef<FlatList<T>>(null);
   const index = useMemo(
     () => buildAlphaIndex(data.map(getTitle)),

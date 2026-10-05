@@ -1,37 +1,56 @@
 # Native library compatibility (react-native-tvos)
 
-Checked before feature work per spec section 9. Target: **Expo SDK 51 / React
-Native 0.74** via the `react-native-tvos` fork, so the same codebase builds the
-Android phone and Android TV targets.
+Target: **Expo SDK 54 / React Native 0.81** via the `react-native-tvos` fork
+(`0.81.5-2`), on the **old architecture** (`newArchEnabled: false` in
+`app.config.ts`), so the same codebase builds the Android phone and Android TV
+targets. Upgraded from SDK 51 / RN 0.74 on 2026-10-03.
 
-## Why SDK 51 / RN 0.74 (not 52 / 0.76)
+## Why SDK 54 on the old architecture
 
-`react-native-track-player` has **no stable release for RN 0.76** (only
-`5.0.0-alpha*`). Its last stable line, `4.1.x`, peer-depends on
-`react-native >=0.60` and builds cleanly on RN 0.74. Expo 52 would force RN 0.76
-and therefore an alpha track-player, which is not acceptable for the
-lock-screen-audio finish line. Expo 51 + `react-native-tvos@0.74.5-0` keeps every
-media library on a stable release. This is the single most important pin.
+SDK 54 is the last Expo SDK that still supports the old architecture; SDK 55+
+(RN 0.82+) is New Architecture only. `react-native-track-player` still has no
+stable New Architecture release (4.1.2 is the last stable line; 5.x is alpha),
+so the app stays on the old architecture for now. The next step (SDK 55+)
+needs track-player, google-cast, passkey, video, and the local Expo modules
+proven on New Architecture first.
+
+SDK 51 to 54 notes:
+
+- `react-native-track-player` 4.1.2 fails to compile under Kotlin 2.x
+  (`Bundle?` passed to `Arguments.fromBundle`). `patches/` carries the fix,
+  applied by `patch-package` on `npm install` (upstream issue #2579).
+- `react-native-reanimated` stays on 3.x: 4.x requires New Architecture.
+  `package.json` `expo.install.exclude` keeps `expo install --fix` from
+  bumping it.
+- The Kotlin stdlib pin plugin (`withKotlinStdlibPin`) is gone: SDK 54 builds
+  with Kotlin 2.1, which reads the stdlib androidx.credentials pulls in.
+- `expo-file-system`'s classic API moved to `expo-file-system/legacy`.
+- Android is always edge-to-edge (targetSdk 36); check insets on device.
+- Bottom tabs: `sceneContainerStyle` became `screenOptions.sceneStyle`.
+- ESLint 9 flat config (`eslint.config.js`, `eslint-config-expo/flat`).
+- Node 20.19.4 or newer is required.
 
 ## Pinned versions (all exact, no ^/~)
 
 | Library | Version | Phone | Android TV | Notes |
 |---|---|---|---|---|
-| expo | 51.0.39 | yes | yes | SDK 51 |
-| react | 18.2.0 | yes | yes | |
-| react-native (fork) | npm:react-native-tvos@0.74.5-0 | yes | yes | TV + phone from one core |
-| @react-native-tvos/config-tv | 0.1.6 | n/a | yes | Adds the TV/leanback manifest at prebuild when EXPO_TV=1 |
-| expo-router | 3.5.24 | yes | yes | File-based routes |
+| expo | 54.0.37 | yes | yes | SDK 54 |
+| react | 19.1.0 | yes | yes | |
+| react-native (fork) | npm:react-native-tvos@0.81.5-2 | yes | yes | TV + phone from one core |
+| @react-native-tvos/config-tv | 0.1.7 | n/a | yes | Adds the TV/leanback manifest at prebuild when EXPO_TV=1 |
+| expo-router | 6.0.24 | yes | yes | File-based routes |
 | @tanstack/react-query | 5.59.20 | yes | yes | Pure JS; TV-agnostic |
-| expo-secure-store | 13.0.2 | yes | yes | Keystore-backed refresh token |
-| react-native-track-player | 4.1.2 | yes | see below | Stable; RN 0.74 compatible |
-| react-native-video | 6.9.0 | yes | yes | Phone + TV video; peer react-native `*` |
-| react-native-safe-area-context | 4.10.5 | yes | yes | |
-| react-native-screens | 3.31.1 | yes | yes | |
-| react-native-gesture-handler | 2.16.2 | yes | yes | now-playing swipe / router gestures |
-| react-native-reanimated | 3.10.1 | yes | yes | |
-| expo-file-system | 17.0.1 | yes | yes | Downloads (crit 42/43). NEEDS NATIVE REBUILD (new module). SDK 51 pin. |
-| expo-network | 6.0.1 | yes | yes | Offline detection for flush-on-reconnect (crit 43). NEEDS NATIVE REBUILD. SDK 51 pin. |
+| expo-secure-store | 15.0.8 | yes | yes | Keystore-backed refresh token |
+| react-native-track-player | 4.1.2 (patched) | yes | see below | Old architecture only |
+| react-native-video | 6.19.3 | yes | yes | Phone + TV video |
+| react-native-google-cast | 4.9.1 | yes | n/a | Phone sender only |
+| react-native-passkey | 3.6.2 | yes | yes | |
+| react-native-safe-area-context | 5.6.2 | yes | yes | |
+| react-native-screens | 4.16.0 | yes | yes | |
+| react-native-gesture-handler | 2.28.0 | yes | yes | now-playing swipe / router gestures |
+| react-native-reanimated | 3.19.5 | yes | yes | 3.x for the old architecture |
+| expo-file-system | 19.0.24 | yes | yes | Downloads, through `expo-file-system/legacy` |
+| expo-network | 8.0.8 | yes | yes | Offline detection for flush-on-reconnect |
 
 ## Phase 2 (1.2.0) additions
 

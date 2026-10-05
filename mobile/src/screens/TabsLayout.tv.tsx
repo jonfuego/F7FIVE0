@@ -22,6 +22,7 @@ export default function TvTabsLayout(): React.ReactElement {
       )}
       screenOptions={{
         headerShown: false,
+        sceneStyle: { backgroundColor: colors.background },
         tabBarActiveTintColor: colors.accent,
         tabBarInactiveTintColor: colors.textMuted,
         tabBarLabelStyle: { fontSize: 24 },
@@ -31,7 +32,6 @@ export default function TvTabsLayout(): React.ReactElement {
           borderTopColor: colors.border,
         },
       }}
-      sceneContainerStyle={{ backgroundColor: colors.background }}
     >
       <Tabs.Screen
         name="index"
