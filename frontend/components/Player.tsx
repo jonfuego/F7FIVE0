@@ -220,8 +220,21 @@ export function Player({
 
     let disposed = false;
     let heartbeat: number | null = null;
+    // Where to seek to within the element once media is ready, in element
+    // (stream) seconds. Direct play uses initialResume (a source second, since
+    // its timeline == source). HLS resumed from a bucketed start seeks forward
+    // by seek_within_sec so the viewer lands on the EXACT requested second
+    // even though the encode began at the bucket boundary.
+    const seekWithin =
+      stream.mode === "hls" ? (stream.seek_within_sec ?? 0) : 0;
     let resumePos: number | null =
-      initialResume != null && initialResume > 0 ? initialResume : null;
+      stream.mode === "direct"
+        ? initialResume != null && initialResume > 0
+          ? initialResume
+          : null
+        : seekWithin > 0
+          ? seekWithin
+          : null;
 
     // Reset quality state on every new stream.
     setLevels([]);
@@ -359,9 +372,14 @@ export function Player({
       trySeekNow();
     }
 
-    // A resumed HLS stream's timeline starts at 0 at `offset_sec` into the
-    // source; convert to source time for saved progress.
-    const base = stream.mode === "hls" ? (stream.offset_sec ?? 0) : 0;
+    // A resumed HLS stream's timeline starts at 0 at the encode start
+    // (timeline_offset_sec, the bucket) into the source; convert element time
+    // to source time for saved progress. Falls back to offset_sec for an older
+    // backend without the timeline field.
+    const base =
+      stream.mode === "hls"
+        ? (stream.timeline_offset_sec ?? stream.offset_sec ?? 0)
+        : 0;
 
     function send(streamPosition: number, durationHint?: number | null) {
       // Fire-and-forget. If the write fails we'll catch up on the next tick.
@@ -481,9 +499,12 @@ export function Player({
     return () => video.removeEventListener("timeupdate", onTime);
   }, []);
 
-  // Markers are in source time; a resumed HLS stream's clock starts at
-  // offset_sec into the source.
-  const timeBase = stream.mode === "hls" ? (stream.offset_sec ?? 0) : 0;
+  // Markers are in source time; a resumed HLS stream's clock starts at the
+  // encode start (timeline_offset_sec, the bucket) into the source.
+  const timeBase =
+    stream.mode === "hls"
+      ? (stream.timeline_offset_sec ?? stream.offset_sec ?? 0)
+      : 0;
   const sourceTime = currentTime + timeBase;
   const activeMarker =
     markers.find((m) => sourceTime >= m.start_sec && sourceTime < m.end_sec) ?? null;

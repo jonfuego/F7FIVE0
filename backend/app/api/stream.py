@@ -240,6 +240,17 @@ def stream_start(
     # what the caller passed. HLS carries the caller's bucket through to
     # the transcoder via the `t` query param.
     bucket = _quantize_offset(body.resume_sec) if mode == "hls" else 0
+    # Exact-second landing. The encode starts at the bucket, so the HLS
+    # timeline's second 0 is `bucket` seconds into the source. The caller asked
+    # to resume at `resume_sec` (the true source position). To land on that
+    # exact second the client seeks `requested - bucket` seconds INTO the
+    # stream after it loads, instead of sitting at the bucket boundary (up to
+    # OFFSET_BUCKET_SEC-1 seconds early). For direct play nothing is bucketed,
+    # so the true position is 0 and there is nothing to seek within.
+    requested_sec = (
+        max(0, body.resume_sec) if (mode == "hls" and body.resume_sec) else 0
+    )
+    seek_within = requested_sec - bucket  # 0..OFFSET_BUCKET_SEC-1 for HLS
     params = sign_stream_url_params(user.id, mf.id, offset_bucket=bucket,
                                     opts=opts_token)
     q = {
@@ -287,5 +298,11 @@ def stream_start(
         subtitle=body.subtitle,
         quality=body.quality or "original",
         track_opts=opts_token or None,
-        offset_sec=bucket,
+        # True source position the caller resumed at (not the bucket). The
+        # client adds this to the element clock to report the real position.
+        offset_sec=requested_sec,
+        # Where the HLS encode actually begins (element clock 0 == this second).
+        timeline_offset_sec=bucket,
+        # How far to seek into the stream after start to hit the exact second.
+        seek_within_sec=seek_within,
     )

@@ -500,7 +500,15 @@ export type StreamStart = {
   cover_path: string | null;
   artist_name: string | null;
   album_title: string | null;
-  // Where the stream starts in the source (seconds). A resumed HLS stream's
-  // timeline starts at 0, so add this to <video>.currentTime.
+  // The TRUE source position the caller resumed at (seconds). Used for
+  // reporting the real position, not for mapping the element clock.
   offset_sec?: number;
+  // Where the HLS encode actually begins (seconds). The element clock reads 0
+  // at this source second, so add this to <video>.currentTime to get source
+  // time. Equals offset_sec on an on-bucket resume; 0 for direct play. Falls
+  // back to offset_sec when an older backend omits it.
+  timeline_offset_sec?: number;
+  // Seconds to seek forward WITHIN the stream after it loads, to land on the
+  // exact requested second despite the bucketed encode start. 0 usually.
+  seek_within_sec?: number;
 };
