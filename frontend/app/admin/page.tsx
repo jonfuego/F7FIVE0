@@ -67,6 +67,7 @@ export default function AdminPage() {
             <LibraryFoldersSection />
             <MetadataSection />
             <LibrarySection />
+            <AudioAnalysisSection />
             <HealthSection />
             <ActiveStreamsSection />
             <SessionsSection />
@@ -404,6 +405,90 @@ function LibrarySection() {
         </button>
         {status ? <span className="text-xs text-neutral-400">{status}</span> : null}
       </div>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Audio analysis (smart-audio backfill)
+// ---------------------------------------------------------------------------
+type AudioAnalysisProgress = { analyzed: number; total: number; pending: number };
+
+function AudioAnalysisSection() {
+  const [progress, setProgress] = useState<AudioAnalysisProgress | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const data = await apiGet<AudioAnalysisProgress>("/api/admin/audio/progress");
+      setProgress(data);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load progress.");
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+    // Poll while a backfill is running so analyzed / total climbs live.
+    const id = window.setInterval(load, 5_000);
+    return () => window.clearInterval(id);
+  }, [load]);
+
+  async function analyzeNow() {
+    if (busy) return;
+    setBusy(true);
+    setStatus(null);
+    try {
+      await apiPost("/api/admin/audio/analyze", {});
+      setStatus("Analysis queued. It runs one track at a time in the background.");
+      load();
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : "Failed to start analysis.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const pct =
+    progress && progress.total > 0
+      ? Math.min(100, Math.round((progress.analyzed / progress.total) * 100))
+      : 0;
+
+  return (
+    <section className="rounded-xl border border-neutral-800 bg-neutral-900/40 p-6">
+      <h2 className="text-base font-semibold">Audio analysis</h2>
+      <p className="mt-1 text-xs text-neutral-500">
+        Loudness leveling, the waveform scrubber, and similar-track radio need
+        each track analyzed once. New music is analyzed automatically after a
+        folder scan, one track at a time. Use this to kick it off right away.
+      </p>
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          onClick={analyzeNow}
+          disabled={busy}
+          className={primaryButtonCls}
+        >
+          {busy ? "Queuing..." : "Analyze music now"}
+        </button>
+        {progress ? (
+          <span className="text-xs text-neutral-400">
+            {progress.analyzed} / {progress.total} tracks analyzed
+            {progress.pending > 0 ? ` (${progress.pending} pending)` : ""}
+          </span>
+        ) : error ? (
+          <span className="text-xs text-rose-400">{error}</span>
+        ) : null}
+      </div>
+      {progress && progress.total > 0 ? (
+        <div className="mt-3 h-1.5 w-full max-w-md overflow-hidden rounded-full bg-neutral-800">
+          <div className="h-full bg-emerald-500" style={{ width: `${pct}%` }} />
+        </div>
+      ) : null}
+      {status ? <p className="mt-3 text-xs text-neutral-400">{status}</p> : null}
     </section>
   );
 }

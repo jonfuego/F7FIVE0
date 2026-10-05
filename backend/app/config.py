@@ -173,6 +173,12 @@ class Settings(BaseSettings):
     # or changed files are probed.
     folder_scan_interval_minutes: int = 30
 
+    # Seconds the automatic audio-analysis job waits between tracks (see
+    # app/scheduler.py:_run_audio_analysis_step). It analyzes one track per
+    # step and reschedules itself, so this spacing keeps a first-install
+    # loudness/waveform/similarity backfill low-priority and the box responsive.
+    audio_analysis_throttle_sec: int = 2
+
     # Stream Gateway path allow-list.
     # Semicolon-delimited list of absolute paths that media_files.path values
     # are allowed to live under. Defense-in-depth on top of HMAC signing and
