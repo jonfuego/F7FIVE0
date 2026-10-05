@@ -31,6 +31,7 @@ import { Icon } from "@/components/Icon";
 import { Play, Pause, Volume2, VolumeX, Maximize, Minimize } from "lucide-react";
 import { videoElementController } from "@/lib/playerController";
 import type { PlayerController } from "@/lib/playerController";
+import { QualityControl, type QualityControlData } from "./QualityMenu";
 
 type Props = {
   // The live <video>, or null before <Player> mounts it / after it unmounts.
@@ -44,9 +45,13 @@ type Props = {
   offsetSec?: number;
   // Seek to a source time before offsetSec: the page restarts the stream there.
   onSeekBeforeStart?: (sourceSec: number) => void;
+  // Quality gear descriptor from <Player> (via the watch page). Rendered in the
+  // controls row near fullscreen; its menu opens upward. Null when there's
+  // nothing to pick or while casting.
+  quality?: QualityControlData | null;
 };
 
-export function VideoTransport({ videoEl, durationSec, offsetSec = 0, onSeekBeforeStart }: Props) {
+export function VideoTransport({ videoEl, durationSec, offsetSec = 0, onSeekBeforeStart, quality }: Props) {
   const offset = offsetSec > 0 ? offsetSec : 0;
   const barRef = useRef<HTMLDivElement | null>(null);
   // Uniform player controller (item 8c). The transport drives the <video>
@@ -320,6 +325,8 @@ export function VideoTransport({ videoEl, durationSec, offsetSec = 0, onSeekBefo
         >
           {isFullscreen ? <FullscreenExitIcon /> : <FullscreenIcon />}
         </button>
+        {/* Quality gear, next to fullscreen. Its menu opens upward from the bar. */}
+        <QualityControl data={quality ?? null} />
       </div>
     </>
   );

@@ -13,6 +13,12 @@ interface IconButtonProps {
   color?: string;
   disabled?: boolean;
   fill?: boolean;
+  /** Square control (radius.md) instead of the default pill. Used by the
+   * play/pause control so it matches the square-cap Lucide icons. */
+  square?: boolean;
+  /** Explicit control size in dp (width and height). Defaults to the MIN_TOUCH
+   * box. Kept within the 44 to 56 dp range for the play control. */
+  diameter?: number;
 }
 
 /** Icon-only button. Always >= 44x44 dp and always has an accessibilityLabel
@@ -25,6 +31,8 @@ export function IconButton({
   color = colors.text,
   disabled,
   fill,
+  square,
+  diameter,
 }: IconButtonProps): React.ReactElement {
   return (
     <Pressable
@@ -35,6 +43,13 @@ export function IconButton({
       hitSlop={8}
       style={({ pressed, focused }) => [
         styles.btn,
+        square && styles.square,
+        diameter != null && {
+          width: diameter,
+          height: diameter,
+          minWidth: diameter,
+          minHeight: diameter,
+        },
         focused && styles.focused,
         pressed && styles.pressed,
         disabled && styles.disabled,
@@ -53,6 +68,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     borderRadius: radius.pill,
   },
+  // Square play/pause control (crit: not radius.pill).
+  square: { borderRadius: radius.md },
   pressed: { opacity: 0.6 },
   disabled: { opacity: 0.35 },
   // Visible focus ring for TV / keyboard D-pad navigation.

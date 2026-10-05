@@ -46,15 +46,16 @@
 
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type HlsType from "hls.js";
 import type { Level } from "hls.js";
 import { apiPut } from "@/lib/client-api";
 import type { MediaMarker, Progress, StreamStart } from "@/lib/types";
 import CastButton from "./CastButton";
+import type { QualityControlData } from "./QualityMenu";
 import { useCast } from "@/lib/cast";
 import { Icon } from "@/components/Icon";
-import { Settings, Check, Cast } from "lucide-react";
+import { Cast } from "lucide-react";
 import { loadFeatures, useFeatures } from "@/lib/features";
 import {
   CPU_START_HEIGHT,
@@ -84,6 +85,12 @@ type Props = {
   // back to the server: the page re-requests the stream at this height.
   serverQuality?: number | null;
   onServerQuality?: (height: number) => void;
+  // The quality gear moved out of the Player overlay into the VideoTransport
+  // controls row. Player still owns the level state, so it reports the gear
+  // descriptor (or null when there's nothing to pick / while casting) up to the
+  // watch page, which hands it to VideoTransport and also reads the playing
+  // rendition height from it for the info line.
+  onQualityControl?: (data: QualityControlData | null) => void;
 };
 
 const HEARTBEAT_MS = 10_000;
@@ -114,6 +121,7 @@ export function Player({
   onVideoEl,
   serverQuality,
   onServerQuality,
+  onQualityControl,
 }: Props) {
   const features = useFeatures();
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -480,14 +488,14 @@ export function Player({
     };
   }, [stream, onError, initialResume]);
 
-  function selectLevel(index: number) {
+  const selectLevel = useCallback((index: number) => {
     const instance = hlsRef.current;
     if (!instance) return;
     instance.currentLevel = index; // -1 means auto
     setUserLevel(index);
     const height = index >= 0 ? instance.levels[index]?.height : undefined;
     writeQualityPref(index < 0 ? "auto" : height ? String(height) : "auto");
-  }
+  }, []);
 
   // Sample the playhead for the skip-button gate. timeupdate fires a few
   // times a second, which is plenty for showing/hiding a button.
@@ -520,6 +528,42 @@ export function Player({
   }
 
   const isCasting = cast.isConnected;
+
+  // The quality gear descriptor. Same conditions the overlay used, but the gear
+  // now renders in the VideoTransport bar: multi-rendition HLS switches hls.js
+  // levels; a CPU-only server restarts the stream at the chosen height. Null
+  // while casting or when there's nothing to pick. Reported up so VideoTransport
+  // can render it and the watch page can read the playing rendition height.
+  const qualityControl = useMemo<QualityControlData | null>(() => {
+    if (isCasting) return null;
+    if (levels.length > 1) {
+      return { kind: "hls", levels, loadedLevel, userLevel, onSelect: selectLevel };
+    }
+    if (stream.mode === "hls" && onServerQuality && features && !features.transcode?.hardware) {
+      return {
+        kind: "server",
+        heights: serverQualityHeights(stream.height),
+        current: serverQuality ?? CPU_START_HEIGHT,
+        onSelect: onServerQuality,
+      };
+    }
+    return null;
+  }, [
+    isCasting,
+    levels,
+    loadedLevel,
+    userLevel,
+    selectLevel,
+    stream.mode,
+    stream.height,
+    onServerQuality,
+    features,
+    serverQuality,
+  ]);
+
+  useEffect(() => {
+    onQualityControl?.(qualityControl);
+  }, [qualityControl, onQualityControl]);
 
   return (
     <div className="relative h-full w-full">
@@ -575,197 +619,13 @@ export function Player({
         </button>
       ) : null}
 
-      {/* Top-right overlay: cast button + gear. The launcher upgrades to
-          a clickable icon after the SDK registers the custom element. */}
+      {/* Top-right overlay: cast button only. The quality gear moved to the
+          VideoTransport controls row (it was too close to the Close player X). */}
       <div className="absolute right-3 top-3 z-10 flex items-center gap-2">
         <CastButton status={cast.status} />
-        {levels.length > 1 && !isCasting ? (
-          <QualityMenu
-            levels={levels}
-            loadedLevel={loadedLevel}
-            userLevel={userLevel}
-            onSelect={selectLevel}
-          />
-        ) : stream.mode === "hls" && onServerQuality && features && !features.transcode?.hardware && !isCasting ? (
-          <ServerQualityMenu
-            heights={serverQualityHeights(stream.height)}
-            current={serverQuality ?? CPU_START_HEIGHT}
-            onSelect={onServerQuality}
-          />
-        ) : null}
       </div>
     </div>
   );
-}
-
-function QualityMenu({
-  levels,
-  loadedLevel,
-  userLevel,
-  onSelect,
-}: {
-  levels: Level[];
-  loadedLevel: number;
-  userLevel: number;
-  onSelect: (index: number) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    function onDocClick(e: MouseEvent) {
-      if (!rootRef.current) return;
-      if (!rootRef.current.contains(e.target as Node)) setOpen(false);
-    }
-    document.addEventListener("mousedown", onDocClick);
-    return () => document.removeEventListener("mousedown", onDocClick);
-  }, [open]);
-
-  // Build entries indexed by their position in hls.levels (stable for
-  // `hls.currentLevel`), sorted by height descending for display.
-  const entries = levels
-    .map((lv, i) => ({ index: i, height: lv.height ?? 0, bitrate: lv.bitrate ?? 0 }))
-    .sort((a, b) => b.height - a.height || b.bitrate - a.bitrate);
-
-  const activeLevel = levels[loadedLevel];
-  const autoLabel = activeLevel?.height
-    ? `Auto (${activeLevel.height}p)`
-    : "Auto";
-  const buttonLabel = userLevel === -1
-    ? autoLabel
-    : (levels[userLevel]?.height ? `${levels[userLevel].height}p` : `Level ${userLevel}`);
-
-  return (
-    <div ref={rootRef} className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-1.5 rounded-md bg-black/60 px-2.5 py-1 text-xs font-medium text-neutral-100 backdrop-blur-sm transition hover:bg-black/75"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        title="Quality"
-      >
-        <GearIcon />
-        <span className="hidden sm:inline">{buttonLabel}</span>
-      </button>
-      {open ? (
-        <div
-          role="menu"
-          className="absolute right-0 mt-1 min-w-[9rem] overflow-hidden rounded-md border border-neutral-800 bg-neutral-950/95 text-sm shadow-lg backdrop-blur-sm"
-        >
-          <MenuItem
-            label={autoLabel}
-            selected={userLevel === -1}
-            onClick={() => { onSelect(-1); setOpen(false); }}
-          />
-          <div className="border-t border-neutral-900" />
-          {entries.map((e) => (
-            <MenuItem
-              key={e.index}
-              label={e.height ? `${e.height}p` : `Level ${e.index}`}
-              selected={userLevel === e.index}
-              onClick={() => { onSelect(e.index); setOpen(false); }}
-            />
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-/** Quality picker for CPU-only servers: each choice restarts the stream at
- * that height (one encode at a time), rather than switching hls.js levels. */
-function ServerQualityMenu({
-  heights,
-  current,
-  onSelect,
-}: {
-  heights: number[];
-  current: number;
-  onSelect: (height: number) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    function onDocClick(e: MouseEvent) {
-      if (!rootRef.current) return;
-      if (!rootRef.current.contains(e.target as Node)) setOpen(false);
-    }
-    document.addEventListener("mousedown", onDocClick);
-    return () => document.removeEventListener("mousedown", onDocClick);
-  }, [open]);
-
-  const shown = heights.includes(current) ? current : heights[0];
-
-  return (
-    <div ref={rootRef} className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-1.5 rounded-md bg-black/60 px-2.5 py-1 text-xs font-medium text-neutral-100 backdrop-blur-sm transition hover:bg-black/75"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        title="Quality"
-      >
-        <GearIcon />
-        <span className="hidden sm:inline">{`${shown}p`}</span>
-      </button>
-      {open ? (
-        <div
-          role="menu"
-          className="absolute right-0 mt-1 min-w-[9rem] overflow-hidden rounded-md border border-neutral-800 bg-neutral-950/95 text-sm shadow-lg backdrop-blur-sm"
-        >
-          {heights.map((h) => (
-            <MenuItem
-              key={h}
-              label={`${h}p`}
-              selected={h === shown}
-              onClick={() => {
-                setOpen(false);
-                if (h !== shown) onSelect(h);
-              }}
-            />
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function MenuItem({
-  label,
-  selected,
-  onClick,
-}: {
-  label: string;
-  selected: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      role="menuitemradio"
-      aria-checked={selected}
-      onClick={onClick}
-      className={`flex w-full items-center justify-between gap-3 px-3 py-1.5 text-left transition hover:bg-neutral-900 ${
-        selected ? "text-hive-text" : "text-neutral-200"
-      }`}
-    >
-      <span>{label}</span>
-      {selected ? <CheckIcon /> : null}
-    </button>
-  );
-}
-
-function GearIcon() {
-  return <Icon icon={Settings} size={14} aria-hidden="true" />;
-}
-
-function CheckIcon() {
-  return <Icon icon={Check} size={12} aria-hidden="true" />;
 }
 
 function CastPlayingIcon() {
