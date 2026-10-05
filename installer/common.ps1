@@ -132,6 +132,25 @@ function Set-InstallAcl([string]$root, [string]$serviceSid) {
         & icacls $p /inheritance:r /grant:r @grants /C /Q | Out-Null
         if ($LASTEXITCODE -ne 0) { Fail "could not set permissions on $p (icacls $LASTEXITCODE)" }
     }
+    # logs\: let Users open and list the folder so a non-elevated window can
+    # reach Setup's own logs. This grant is on the folder object only, with no
+    # (OI)/(CI), so new service log files (F7FIVE0-*.out/err.log) do not inherit
+    # Users access and stay Administrators + SYSTEM + service account. Setup's
+    # own files (install-*.log, setup-summary.txt) get Users read added by
+    # Grant-SetupLogRead after they are written.
+    $logsDir = Join-Path $root "logs"
+    & icacls $logsDir /grant:r "*S-1-5-32-545:(RX)" /C /Q | Out-Null
+    if ($LASTEXITCODE -ne 0) { Fail "could not grant Users list on $logsDir (icacls $LASTEXITCODE)" }
+}
+
+# Grants Users (BUILTIN\Users) read on one of Setup's own log files, with no
+# inheritance (it is a file). Call it after the file exists. Service logs are
+# never passed here, so they keep their Administrators + SYSTEM + service
+# account ACL. Safe to call again on a re-run (icacls /grant replaces the
+# existing Users entry).
+function Grant-SetupLogRead([string]$path) {
+    if (-not $path -or -not (Test-Path $path)) { return }
+    & icacls $path /grant:r "*S-1-5-32-545:(R)" /C /Q | Out-Null
 }
 
 function Get-EnvValue([string]$key) {
