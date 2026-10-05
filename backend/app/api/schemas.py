@@ -646,11 +646,24 @@ class StreamStartResponse(BaseModel):
     audio_track_index: Optional[int] = None
     subtitle: Optional[Union[int, str]] = None
     quality: Optional[str] = None
-    # Where this stream starts in the source, in seconds. An HLS stream
-    # resumed mid-file (the `t` bucket) has a timeline starting at 0, so
-    # players add this to <video>.currentTime to get the source position.
-    # Always 0 for direct play.
+    # The TRUE source position the caller asked to resume at, in seconds.
+    # This is the raw `resume_sec` (clamped), NOT the bucket. The player adds
+    # this to the element clock to report the real source position, and uses it
+    # with `seek_within_sec` to land on the exact requested second. Always 0 for
+    # direct play (the client seeks natively via Range).
     offset_sec: int = 0
+    # Where the HLS encode actually starts, in seconds: `_quantize_offset`
+    # buckets the requested second down so one movie resumed at 45:12 vs 45:13
+    # shares one ffmpeg session. The element's clock reads 0 at this source
+    # second. Players add this to <video>.currentTime to map element time to
+    # source time. Equals `offset_sec` for direct play (both 0).
+    timeline_offset_sec: int = 0
+    # Seconds the client must seek forward WITHIN the stream, after it starts,
+    # to land on the exact requested second despite the bucketed encode start.
+    # It is `offset_sec - timeline_offset_sec` (0..OFFSET_BUCKET_SEC-1). The
+    # player sets <video>.currentTime to this once the media is ready. 0 for
+    # direct play and for an on-bucket resume.
+    seek_within_sec: int = 0
 
 
 # ---- Admin ----------------------------------------------------------------
@@ -991,3 +1004,29 @@ class ReminderOut(BaseModel):
 
 class ReminderSnoozeIn(BaseModel):
     forever: bool = False
+
+
+# ---- Live channel + server clock ------------------------------------------
+class LiveEventOut(BaseModel):
+    """The typed live-event envelope as returned over HTTP (the SSE wire form
+    is the same JSON object). `ts` is server UNIX seconds; `id` is unique."""
+
+    type: str
+    data: Optional[object] = None
+    ts: float
+    id: str
+
+
+class LiveCommandRequest(BaseModel):
+    """A client -> server command posted to /api/live/command. `type` is a
+    dotted event name; `data` is an arbitrary JSON payload."""
+
+    type: str = Field(min_length=1, max_length=128)
+    data: Optional[object] = None
+
+
+class ServerTimeOut(BaseModel):
+    """Server clock for client offset / round-trip estimation."""
+
+    unix_ms: int
+    unix_sec: float
