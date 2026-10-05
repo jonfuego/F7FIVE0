@@ -12,6 +12,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { Settings } from "lucide-react";
 import { Icon } from "@/components/Icon";
+import { refreshSession } from "@/lib/client-api";
 
 type Me = {
   id: string;
@@ -146,8 +147,9 @@ async function loadMeWithRefresh(): Promise<Me | null> {
   const first = await fetch("/api/session/me", { cache: "no-store" });
   if (first.ok) return (await first.json()) as Me;
   if (first.status !== 401) return null;
-  const refresh = await fetch("/api/session/refresh", { method: "POST" });
-  if (!refresh.ok) return null;
+  // Share the single-flight refresh so this does not race the data fetches.
+  const refreshed = await refreshSession();
+  if (!refreshed) return null;
   const retry = await fetch("/api/session/me", { cache: "no-store" });
   if (!retry.ok) return null;
   return (await retry.json()) as Me;
