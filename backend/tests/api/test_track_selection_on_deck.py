@@ -553,15 +553,25 @@ def test_progress_upsert_recovers_from_insert_race(client, db_session, h264_movi
 
 
 def test_stream_start_reports_hls_offset(client, h264_movie):
-    """A resumed HLS stream starts its own timeline at 0; the response tells
-    the player where that 0 sits in the source."""
+    """A resumed HLS stream starts its own timeline at the bucketed encode
+    start; the response reports the TRUE requested second as offset_sec, the
+    bucket as timeline_offset_sec (where element clock 0 sits in the source),
+    and how far to seek within the stream to land on the exact second."""
     r = client.post("/api/stream/start", json={
         "file_id": str(h264_movie.id), "quality": "480p", "resume_sec": 47,
     })
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["mode"] == "hls"
-    assert body["offset_sec"] == 40 and _q(body["url"])["t"] == "40"
-    # Direct play seeks client-side; its offset is always 0.
+    # The encode (and the signed `t`) still bucket to 40...
+    assert body["timeline_offset_sec"] == 40 and _q(body["url"])["t"] == "40"
+    # ...but offset_sec is the true source position the caller asked for...
+    assert body["offset_sec"] == 47
+    # ...and the client seeks the 7s remainder into the stream to hit it.
+    assert body["seek_within_sec"] == 7
+    # Direct play seeks client-side; all offsets are always 0.
     r = client.post("/api/stream/start", json={"file_id": str(h264_movie.id), "resume_sec": 47})
-    assert r.json()["mode"] == "direct" and r.json()["offset_sec"] == 0
+    body = r.json()
+    assert body["mode"] == "direct"
+    assert body["offset_sec"] == 0 and body["timeline_offset_sec"] == 0
+    assert body["seek_within_sec"] == 0

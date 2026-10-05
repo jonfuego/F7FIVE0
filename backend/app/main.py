@@ -20,6 +20,7 @@ from app.api import auth as auth_routes
 from app.api import auto_playlist as auto_playlist_routes
 from app.api import client as client_routes
 from app.api import library as library_routes
+from app.api import live as live_routes
 from app.api import media_files as media_files_routes
 from app.api import passkeys as passkeys_routes
 from app.api import queue as queue_routes
@@ -133,6 +134,12 @@ app.include_router(auto_playlist_routes.router, prefix="/api", tags=["library", 
 app.include_router(tracks_routes.router, prefix="/api", tags=["library", "tracks"])
 app.include_router(media_files_routes.router, prefix="/api", tags=["library", "media-files"])
 app.include_router(stream_routes.router, prefix="/api", tags=["stream"])
+# Live channel (SSE) + server-clock endpoint. Mounted at /api so a request
+# with a Bearer token (app) or the web BFF's cookie->bearer swap reaches it,
+# and so the documented tunnel ingress routes it to the API on :8001. The live
+# hub is in-process: the API runs one uvicorn worker (see CLAUDE.md and
+# docs/realtime.md); multi-worker would need PostgreSQL LISTEN/NOTIFY.
+app.include_router(live_routes.router, prefix="/api", tags=["live"])
 app.include_router(webhook_routes.router, prefix="/api/webhooks", tags=["webhooks"])
 app.include_router(remote_access_routes.router, prefix="/api/admin/remote-access", tags=["admin", "remote-access"])
 app.include_router(admin_routes.router, prefix="/api/admin", tags=["admin"])

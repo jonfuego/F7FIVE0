@@ -25,10 +25,12 @@
 
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { formatDuration } from "@/lib/format";
 import { Icon } from "@/components/Icon";
 import { Play, Pause, Volume2, VolumeX, Maximize, Minimize } from "lucide-react";
+import { videoElementController } from "@/lib/playerController";
+import type { PlayerController } from "@/lib/playerController";
 
 type Props = {
   // The live <video>, or null before <Player> mounts it / after it unmounts.
@@ -47,6 +49,24 @@ type Props = {
 export function VideoTransport({ videoEl, durationSec, offsetSec = 0, onSeekBeforeStart }: Props) {
   const offset = offsetSec > 0 ? offsetSec : 0;
   const barRef = useRef<HTMLDivElement | null>(null);
+  // Uniform player controller (item 8c). The transport drives the <video>
+  // through this so a future watch-together room can command playback the same
+  // way regardless of which player is mounted. offset is captured via a ref so
+  // the controller always maps element time to source time correctly.
+  const videoElRef = useRef<HTMLVideoElement | null>(videoEl);
+  videoElRef.current = videoEl;
+  const offsetRef = useRef(offset);
+  offsetRef.current = offset;
+  const controllerRef = useRef<ReturnType<typeof videoElementController> | null>(null);
+  const controller: PlayerController = useMemo(() => {
+    const c = videoElementController(
+      () => videoElRef.current,
+      () => offsetRef.current,
+    );
+    controllerRef.current = c;
+    return c;
+  }, []);
+  useEffect(() => () => controllerRef.current?.dispose(), []);
   // True while the scrub handle is held; timeupdate then leaves the readout
   // alone so it shows where the pointer is.
   const draggingRef = useRef(false);
@@ -142,11 +162,12 @@ export function VideoTransport({ videoEl, durationSec, offsetSec = 0, onSeekBefo
   const togglePlay = () => {
     const v = videoEl;
     if (!v) return;
+    // Drive through the controller (item 8c). Same effect as calling the
+    // element directly; routing it here means one code path a room can reuse.
     if (v.paused) {
-      const p = v.play();
-      if (p && typeof p.catch === "function") p.catch(() => { /* ignore */ });
+      controller.play();
     } else {
-      v.pause();
+      controller.pause();
     }
   };
 
@@ -172,11 +193,9 @@ export function VideoTransport({ videoEl, durationSec, offsetSec = 0, onSeekBefo
       if (release && onSeekBeforeStart) onSeekBeforeStart(Math.floor(t));
       return;
     }
-    try {
-      v.currentTime = t - offset;
-    } catch {
-      // ignore
-    }
+    // Controller.seek takes an absolute SOURCE second and maps it to element
+    // time internally (item 8c). Same as the prior `v.currentTime = t - offset`.
+    controller.seek(t);
   };
   const onScrubPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     e.preventDefault();

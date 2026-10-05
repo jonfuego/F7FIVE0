@@ -50,6 +50,11 @@ const BFF_PREFIXES = [
   "/api/admin/",
   "/api/art/",
   "/api/requests/",
+  // Live channel (SSE) + command POST. The browser's EventSource cannot set an
+  // Authorization header, so these go through the Next BFF route which swaps
+  // the httpOnly cookie for the Bearer token. A native app sending its own
+  // Bearer is routed straight to the API by backendFor() below.
+  "/api/live/",
 ];
 
 const ASSETLINKS_PATH = "/.well-known/assetlinks.json";
@@ -80,7 +85,10 @@ function backendFor(req: NextRequest): string | null {
   if (pathname === ASSETLINKS_PATH) return API_ORIGIN;
   if (!pathname.startsWith("/api/")) return null;
   if (pathname.startsWith("/api/session/")) return null;
-  const isBff = BFF_PREFIXES.some((p) => pathname.startsWith(p));
+  // The live SSE stream is served at exactly /api/live (no trailing slash),
+  // which the /api/live/ prefix would miss; treat it as a BFF path too.
+  const isBff =
+    pathname === "/api/live" || BFF_PREFIXES.some((p) => pathname.startsWith(p));
   if (!isBff) return API_ORIGIN;
   const auth = req.headers.get("authorization") ?? "";
   if (auth.toLowerCase().startsWith("bearer ")) return API_ORIGIN;

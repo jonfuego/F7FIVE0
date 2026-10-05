@@ -325,8 +325,14 @@ export default function WatchPage() {
 
   function onServerQuality(height: number) {
     writeQualityPref(String(height));
-    // Source position: a resumed HLS stream counts from its own start.
-    const base = stream?.mode === "hls" ? (stream.offset_sec ?? 0) : 0;
+    // Source position: a resumed HLS stream's element clock reads 0 at the
+    // encode start (timeline_offset_sec, the bucket), so add that to the
+    // element time to get the true source second. Falls back to offset_sec for
+    // an older backend that did not send the timeline field.
+    const base =
+      stream?.mode === "hls"
+        ? (stream.timeline_offset_sec ?? stream.offset_sec ?? 0)
+        : 0;
     const at = Math.floor(base + (videoEl?.currentTime ?? 0));
     setQuality(height);
     setResume({ kind: "chose", resumeSec: at });
@@ -417,7 +423,11 @@ export default function WatchPage() {
             <VideoTransport
               videoEl={videoEl}
               durationSec={totalSec}
-              offsetSec={stream.mode === "hls" ? (stream.offset_sec ?? 0) : 0}
+              offsetSec={
+                stream.mode === "hls"
+                  ? (stream.timeline_offset_sec ?? stream.offset_sec ?? 0)
+                  : 0
+              }
               onSeekBeforeStart={onSeekBeforeStart}
             />
           ) : (

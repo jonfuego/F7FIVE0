@@ -15,7 +15,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from app.config import settings
 from app.db import db_session
-from app.services import library_folders, scan_library, scan_music_videos, sync
+from app.services import library_folders, live_hub, scan_library, scan_music_videos, sync
 
 
 log = logging.getLogger("f7five0.scheduler")
@@ -67,6 +67,14 @@ def _run_folder_scan() -> None:
         log.exception("folder scan raised")
     if has_music_videos:
         _run_music_videos_scan()
+    # One harmless real live-channel event, proving the hub end to end: the
+    # library scan finished. Connected web/app clients can refresh instead of
+    # waiting for their next poll. Fire-and-forget; a publish with no listeners
+    # is a no-op (see services/live_hub).
+    try:
+        live_hub.publish("library.scan_finished", {"music_videos": has_music_videos})
+    except Exception:
+        log.exception("publishing library.scan_finished raised")
     # Audio analysis runs AFTER the scan so freshly imported tracks are in the
     # working set. It only ever processes one track per step and reschedules
     # itself, so it stays low-priority and never blocks the scan path.
