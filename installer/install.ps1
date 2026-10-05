@@ -890,6 +890,13 @@ if (-not $IsUpgrade) {
     $summary.Add("")
     $summary.Add("Sign in as '$AdminUser'. Your libraries fill in over the next few minutes.")
 }
+# A key saved later in Admin > Metadata lives in the database, so only a
+# fresh install can tell for sure that there is none yet.
+if (-not $IsUpgrade -and -not (Get-EnvValue "TMDB_API_KEY")) {
+    $summary.Add("")
+    $summary.Add("Next: add a free TMDB key for movie and show posters and descriptions.")
+    $summary.Add("  Sign in, then Admin > Metadata. It walks you through getting one.")
+}
 foreach ($w in $script:Warnings) { $attention.Add($w) }
 if ($attention.Count) {
     $summary.Add("")

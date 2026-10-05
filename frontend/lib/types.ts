@@ -371,6 +371,27 @@ export type LibraryFolders = {
   libraries: LibraryFoldersLibrary[];
 };
 
+// ---- Metadata settings (Admin > Metadata) ----------------------------------
+export type TmdbKeyStatus = {
+  configured: boolean;
+  // "admin": saved on the Admin page; "env": from Setup (.env); null: none.
+  source: "admin" | "env" | null;
+  masked: string | null;
+};
+
+export type MetadataSettings = { tmdb: TmdbKeyStatus };
+
+export type TmdbKeyCheck = { ok: boolean; message: string };
+
+// ---- Admin reminders (banner) -----------------------------------------------
+export type AdminReminder = {
+  id: string;
+  title: string;
+  body: string;
+  action_label: string;
+  action_href: string;
+};
+
 // ---- Intro/credits markers -------------------------------------------------
 export type MediaMarker = {
   kind: "intro" | "credits";

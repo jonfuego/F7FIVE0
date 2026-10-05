@@ -23,7 +23,8 @@
 4. Create your admin account.
 5. Choose whether other devices on your home network can connect.
 6. Optional extras: a TMDB API key (there's a link to get a free one) and a
-   contact email. Both can be added later.
+   contact email. Both can be added later: the TMDB key in **Admin >
+   Metadata**, which walks you through getting one.
 7. Ports: keep the defaults unless another program already uses port 3001.
 
 When you click Install, a console window shows progress while Setup
@@ -210,6 +211,9 @@ Restart-Service F7FIVE0-API, F7FIVE0-Stream, F7FIVE0-Web
 - **TMDB** (`TMDB_API_KEY`): free key from themoviedb.org (make an account,
   then Settings > API: https://www.themoviedb.org/settings/api). Matches movies
   and shows by title and year and adds posters, descriptions, and cast.
+  Easier: paste it in **Admin > Metadata**, which tests it with TMDB and
+  needs no restart (a key saved there wins over `.env`). Admins see a
+  reminder banner until a key is set.
 - **MusicBrainz** (`MUSICBRAINZ_USER_AGENT_EMAIL`): your email, sent with
   music lookups as MusicBrainz asks.
 - **Radarr / Sonarr / Lidarr** (`RADARR_API_KEY`, `SONARR_API_KEY`,

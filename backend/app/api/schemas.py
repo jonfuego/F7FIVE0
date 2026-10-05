@@ -958,3 +958,36 @@ class LibraryFoldersOut(BaseModel):
 
 class LibraryFoldersIn(BaseModel):
     folders: dict[str, list[str]]
+# ---- Metadata (Admin > Metadata) -------------------------------------------
+class TmdbKeyStatusOut(BaseModel):
+    configured: bool
+    # "admin": saved from the Admin page; "env": TMDB_API_KEY in .env
+    # (from Setup); None: no key.
+    source: Optional[str] = None
+    masked: Optional[str] = None
+
+
+class MetadataSettingsOut(BaseModel):
+    tmdb: TmdbKeyStatusOut
+
+
+class TmdbKeyIn(BaseModel):
+    api_key: str
+
+
+class TmdbKeyCheckOut(BaseModel):
+    ok: bool
+    message: str
+
+
+# ---- Admin reminders (web banner) --------------------------------------------
+class ReminderOut(BaseModel):
+    id: str
+    title: str
+    body: str
+    action_label: str
+    action_href: str
+
+
+class ReminderSnoozeIn(BaseModel):
+    forever: bool = False

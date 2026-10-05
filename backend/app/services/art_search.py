@@ -36,6 +36,7 @@ from app.models.art import (
 from app.models.movie import Movie
 from app.models.music import Artist, MusicVideo
 from app.models.tv import Series
+from app.services import tmdb_key
 from app.services.arr import LidarrClient, RadarrClient, SonarrClient
 from app.services.arr._base import ArrClientError
 from app.services.art_sources import audiodb as audiodb_source
@@ -123,8 +124,8 @@ def _movie_candidates(
         finally:
             client.close()
         out.extend(_normalize_images("radarr", "Radarr", images))
-    if movie.tmdb_id and settings.tmdb_api_key:
-        out.extend(tmdb_source.movie_images(settings.tmdb_api_key, movie.tmdb_id))
+    if movie.tmdb_id and tmdb_key.get():
+        out.extend(tmdb_source.movie_images(tmdb_key.get(), movie.tmdb_id))
     return _dedupe_by_url(out)
 
 
@@ -152,8 +153,8 @@ def _series_candidates(
         finally:
             client.close()
         out.extend(_normalize_images("sonarr", "Sonarr", images))
-    if series.tmdb_id and settings.tmdb_api_key:
-        out.extend(tmdb_source.series_images(settings.tmdb_api_key, series.tmdb_id))
+    if series.tmdb_id and tmdb_key.get():
+        out.extend(tmdb_source.series_images(tmdb_key.get(), series.tmdb_id))
     return _dedupe_by_url(out)
 
 

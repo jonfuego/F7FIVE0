@@ -5,7 +5,7 @@ Fetches movie records with cast and crew embedded via
 rate limit at 40 requests per 10-second window enforced at module
 scope so multiple threads can't outrun the upstream cap.
 
-When TMDB_API_KEY is empty the client returns None immediately. The
+When no key is set (Admin > Metadata or TMDB_API_KEY) the client returns None immediately. The
 runner treats that as `metadata_status = no_external_id` for the row.
 """
 from __future__ import annotations
@@ -17,7 +17,7 @@ import time
 from collections import deque
 from typing import Optional
 
-from app.config import settings
+from app.services import tmdb_key
 from app.services.metadata._base import (
     ProviderError,
     cache_read,
@@ -71,7 +71,8 @@ class TMDBClient:
         """Return the parsed TMDB record for `tmdb_id`. None when no key
         is configured or the upstream returns 404. Raises ProviderError
         on other HTTP failures."""
-        if not settings.tmdb_api_key:
+        api_key = tmdb_key.get()
+        if not api_key:
             return None
         key = f"movie_{int(tmdb_id)}"
         cached = cache_read(self.PROVIDER, key)
@@ -83,7 +84,7 @@ class TMDBClient:
             resp = self._client.get(
                 f"{self.BASE_URL}/movie/{int(tmdb_id)}",
                 params={
-                    "api_key": settings.tmdb_api_key,
+                    "api_key": api_key,
                     "append_to_response": "credits",
                 },
             )
@@ -110,14 +111,15 @@ class TMDBClient:
         Returns the first TMDB search hit (id, overview, poster_path,
         backdrop_path, release_date / first_air_date). Cached on disk like
         every other TMDB call, including misses."""
-        if not settings.tmdb_api_key or kind not in ("movie", "tv") or not title:
+        api_key = tmdb_key.get()
+        if not api_key or kind not in ("movie", "tv") or not title:
             return None
         key = f"search_{kind}_{title.lower()}_{year or ''}"
         cached = cache_read(self.PROVIDER, key)
         if cached is not None:
             return None if is_negative(cached) else cached
 
-        params = {"api_key": settings.tmdb_api_key, "query": title, "include_adult": "false"}
+        params = {"api_key": api_key, "query": title, "include_adult": "false"}
         if year:
             params["year" if kind == "movie" else "first_air_date_year"] = str(year)
         _rate_wait()

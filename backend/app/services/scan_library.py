@@ -61,7 +61,7 @@ from app.models.media_file import MediaFile, MediaKind, ScanState
 from app.models.movie import Movie
 from app.models.music import Album, Artist, Track
 from app.models.tv import Episode, Season, Series
-from app.services import ffprobe, library_folders
+from app.services import ffprobe, library_folders, tmdb_key
 from app.services.path_map import translate as translate_path
 
 
@@ -456,7 +456,7 @@ def _fetch_tmdb_art(db: Session, entity_kind: str, entity_id, role: str, tmdb_pa
 
 
 def _tmdb_search(kind: str, title: str, year: Optional[int]) -> Optional[dict]:
-    if not settings.tmdb_api_key or not title:
+    if not tmdb_key.get() or not title:
         return None
     from app.services.metadata._base import ProviderError
     from app.services.metadata.tmdb import TMDBClient

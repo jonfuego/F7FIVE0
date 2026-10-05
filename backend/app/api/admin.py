@@ -24,6 +24,8 @@ from app import scheduler
 from app.api.deps import evict_session_cache, get_db, require_admin
 from app.api.schemas import (
     LibraryFolderOut, LibraryFoldersIn, LibraryFoldersLibraryOut, LibraryFoldersOut,
+    MetadataSettingsOut, ReminderOut, ReminderSnoozeIn, TmdbKeyCheckOut, TmdbKeyIn,
+    TmdbKeyStatusOut,
     ActiveTranscodeOut, AdminSessionOut, AuthEventOut, MatchApply,
     MatchCandidate, OverrideOut, OverrideUpdate, ServerHealthOut,
     SortOverrideOut, SortOverrideUpdate, WatchHistoryRowOut,
@@ -40,7 +42,7 @@ from app.services.arr.lidarr import LidarrClient
 from app.services.arr.radarr import RadarrClient
 from app.services.arr.sonarr import SonarrClient
 from app.config import settings
-from app.services import library_folders
+from app.services import library_folders, reminders, tmdb_key
 from app.services.metadata.runner import enrich_album, enrich_artist, enrich_movie
 
 log = logging.getLogger("f7five0.admin.override")
@@ -1009,3 +1011,96 @@ def put_library_folders(
     log.info("library folders saved: %s", library_folders.all_folders(db))
     scheduler.trigger_folder_scan_now()
     return _library_folders_out(db)
+# Metadata: the TMDB key (Admin > Metadata)
+# ---------------------------------------------------------------------------
+def _metadata_out(db: Session) -> MetadataSettingsOut:
+    src = tmdb_key.source(db)
+    key = tmdb_key.saved(db) if src == "admin" else (settings.tmdb_api_key or "").strip()
+    return MetadataSettingsOut(tmdb=TmdbKeyStatusOut(
+        configured=src is not None, source=src, masked=tmdb_key.masked(key) if key else None,
+    ))
+
+
+@router.get("/metadata", response_model=MetadataSettingsOut)
+def get_metadata_settings(
+    _admin: Annotated[User, Depends(require_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> MetadataSettingsOut:
+    return _metadata_out(db)
+
+
+@router.post("/metadata/tmdb/test", response_model=TmdbKeyCheckOut)
+def test_tmdb_key(
+    body: TmdbKeyIn,
+    _admin: Annotated[User, Depends(require_admin)],
+) -> TmdbKeyCheckOut:
+    """Ask TMDB whether a key works, without saving it."""
+    result = tmdb_key.check(body.api_key)
+    return TmdbKeyCheckOut(ok=result.ok, message=result.message)
+
+
+@router.put("/metadata/tmdb", response_model=MetadataSettingsOut)
+def put_tmdb_key(
+    body: TmdbKeyIn,
+    _admin: Annotated[User, Depends(require_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> MetadataSettingsOut:
+    """Check the key with TMDB, save it, and refresh the library: movies and
+    shows get matched and fetch posters on the next scan, and movies that
+    were enriched while no key was set are enriched again."""
+    result = tmdb_key.check(body.api_key)
+    if not result.ok:
+        raise HTTPException(status_code=400, detail=result.message)
+    tmdb_key.save(db, body.api_key)
+    stale = db.scalars(select(Movie).where(
+        Movie.tmdb_id.is_not(None),
+        Movie.metadata_status.in_(("no_external_id", "failed")),
+    )).all()
+    for movie in stale:
+        movie.metadata_synced_at = None
+    db.commit()
+    for movie in stale:
+        scheduler.schedule_enrich_movie(movie.id)
+    scheduler.trigger_full_sync_now()
+    log.info("tmdb key saved from the admin page; re-enriching %d movie(s)", len(stale))
+    return _metadata_out(db)
+
+
+@router.delete("/metadata/tmdb", response_model=MetadataSettingsOut)
+def delete_tmdb_key(
+    _admin: Annotated[User, Depends(require_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> MetadataSettingsOut:
+    """Remove the saved key. TMDB_API_KEY in .env (from Setup) applies again
+    if it is set; otherwise TMDB is off."""
+    tmdb_key.clear(db)
+    db.commit()
+    return _metadata_out(db)
+
+
+# ---------------------------------------------------------------------------
+# Reminders (banner in the web app)
+# ---------------------------------------------------------------------------
+@router.get("/reminders", response_model=list[ReminderOut])
+def list_reminders(
+    admin: Annotated[User, Depends(require_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> list[ReminderOut]:
+    return [
+        ReminderOut(id=r.id, title=r.title, body=r.body, action_label=r.action_label, action_href=r.action_href)
+        for r in reminders.active(db, admin.id)
+    ]
+
+
+@router.post("/reminders/{reminder_id}/snooze", status_code=204)
+def snooze_reminder(
+    reminder_id: str,
+    body: ReminderSnoozeIn,
+    admin: Annotated[User, Depends(require_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> None:
+    try:
+        reminders.snooze(db, admin.id, reminder_id, forever=body.forever)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="unknown_reminder")
+    db.commit()
