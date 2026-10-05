@@ -251,6 +251,17 @@ if ($IsUpgrade) { Write-Host "  Existing install found: upgrading in place." -Fo
 try {
 
 # ---------------------------------------------------------------------------
+Step "Securing the install folder"
+# ---------------------------------------------------------------------------
+$svcSid = $null
+if ($ServiceUser) {
+    $svcSid = Get-AccountSid $ServiceUser
+    if (-not $svcSid) { Fail "Could not find the Windows account '$ServiceUser' (-ServiceUser)." }
+}
+Set-InstallAcl $InstallDir $svcSid
+Ok "only administrators can change F7FIVE0's files"
+
+# ---------------------------------------------------------------------------
 Step "Checking this PC"
 # ---------------------------------------------------------------------------
 if (-not [Environment]::Is64BitOperatingSystem) { Fail "F7FIVE0 needs 64-bit Windows." }
@@ -668,7 +679,8 @@ foreach ($k in $want.Keys) {
     $added++
 }
 [IO.File]::WriteAllLines($EnvFile, $lines, (New-Object Text.UTF8Encoding($false)))
-Set-PrivateAcl $EnvFile
+# The services read .env, so their account (when not SYSTEM) gets read access.
+Set-PrivateAcl $EnvFile @($svcSid)
 Ok ("{0} ({1} new setting(s))" -f $EnvFile, $added)
 
 # ---------------------------------------------------------------------------
@@ -681,6 +693,8 @@ if (-not (Test-Path $VenvPy)) {
 & $VenvPy -m pip install --disable-pip-version-check -q --upgrade pip
 & $VenvPy -m pip install --disable-pip-version-check -q -r (Join-Path $BackendDir "requirements.txt")
 if ($LASTEXITCODE -ne 0) { Fail "pip install failed ($LASTEXITCODE)" }
+# Compile now: a -ServiceUser account can't write __pycache__ in backend\.
+& $VenvPy -m compileall -q (Join-Path $BackendDir "app") | Out-Null
 Ok "Python packages installed"
 
 # ---------------------------------------------------------------------------
@@ -750,16 +764,14 @@ Step "Remote access helper"
 $RaDir = Join-Path $DataDir "remote-access"
 if (-not (Test-Path $RaDir)) { New-Item -ItemType Directory -Path $RaDir | Out-Null }
 $raGrants = @("*S-1-5-32-544:(OI)(CI)F", "*S-1-5-18:(OI)(CI)F")
-$svcSid = $null
-if ($ServiceUser) {
-    try { $svcSid = (New-Object Security.Principal.NTAccount($ServiceUser)).Translate([Security.Principal.SecurityIdentifier]).Value }
-    catch { Warn "Could not look up $ServiceUser; Admin > Remote access may not be able to start its helper." }
-    if ($svcSid) { $raGrants += "*${svcSid}:(OI)(CI)M" }
-}
+if ($svcSid) { $raGrants += "*${svcSid}:(OI)(CI)M" }
 # Requests can carry tokens: only admins, SYSTEM, and the service account.
+# /reset first drops a previous service account's entry.
+& icacls $RaDir /reset | Out-Null
 & icacls $RaDir /inheritance:r /grant:r @raGrants | Out-Null
-# The task runs installer\remote-access.ps1 as SYSTEM, so only
-# administrators may change the installer folder.
+# The task runs installer\remote-access.ps1 as SYSTEM. The install folder ACL
+# (Set-InstallAcl) already limits changes to administrators; this keeps the
+# installer folder locked even if someone loosens the folder above it.
 & icacls (Join-Path $InstallDir "installer") /inheritance:r /grant:r "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-545:(OI)(CI)RX" | Out-Null
 $raScript = Join-Path $InstallDir "installer\remote-access.ps1"
 $raAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$raScript`" -InstallDir `"$InstallDir`" -FromRequest" -WorkingDirectory $InstallDir

@@ -481,7 +481,8 @@ try {
     } else {
         Step "Saving the address"
         Set-EnvKey "PUBLIC_URL" $url
-        Set-PrivateAcl $EnvFile
+        # Keep read access for the services' account (none when SYSTEM).
+        Set-PrivateAcl $EnvFile @(Get-ServiceAccountSid)
         if ($Method -eq "off") {
             Remove-Item -Force $CurrentFile -ErrorAction SilentlyContinue
             Ok "remote access is off. F7FIVE0 works on your home network only."
