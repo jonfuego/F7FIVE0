@@ -33,7 +33,11 @@ INSTALL.md for the operator view.
   the `-ServiceUser` account modify; `.env` is Administrators/SYSTEM plus read
   for the service account. Services run code from here, so never loosen it,
   and any rewrite of `.env` re-applies `Set-PrivateAcl $EnvFile` with the
-  service account SID.
+  service account SID. Exception for Setup's own logs: the `logs\` folder gives
+  Users read/list on the folder node only (no inheritance), and `install.ps1`
+  grants Users read on `install-*.log` and `setup-summary.txt` so a non-elevated
+  user can read them; service logs (`F7FIVE0-*.out/err.log`) stay private because
+  the folder grant does not inherit to files.
 - The stream gateway runs one uvicorn worker (in-process transcoder
   registry). It validates the HMAC signature before any DB lookup.
 - HLS playlists are rewritten so every URI carries the signed query.
