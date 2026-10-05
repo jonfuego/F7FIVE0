@@ -68,6 +68,13 @@ New-Item -ItemType Directory -Path (Join-Path $Dist "installer") | Out-Null
 foreach ($f in @("install.ps1", "uninstall.ps1", "common.ps1", "remote-access.ps1")) {
     Copy-Item (Join-Path $PSScriptRoot $f) (Join-Path $Dist "installer\$f")
 }
+# The Apps list icon (UninstallDisplayIcon in F7FIVE0.iss) points at the
+# installed copy, so ship the generated .ico next to the installer scripts.
+# The wizard images and the Setup.exe icon are compiled into Setup.exe and are
+# not needed at runtime. All of these come from installer\branding-src\, which
+# renders them from design\logos; the files in installer\branding\ are committed.
+$brandIco = Join-Path $PSScriptRoot "branding\f7five0.ico"
+if (Test-Path $brandIco) { Copy-Item $brandIco (Join-Path $Dist "installer\f7five0.ico") }
 foreach ($f in @("alembic.ini", ".env.example", "LICENSE", "README.md", "INSTALL.md")) {
     $s = Join-Path $Repo $f
     if (Test-Path $s) { Copy-Item $s (Join-Path $Dist $f) }

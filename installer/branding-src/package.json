@@ -1,0 +1,14 @@
+{
+  "name": "f7five0-installer-branding",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Renders the Inno Setup wizard images and icons from design/logos. Kept out of the frontend package so the installer build does not pull sharp into the web bundle.",
+  "type": "module",
+  "scripts": {
+    "generate": "node generate-branding.mjs"
+  },
+  "dependencies": {
+    "png-to-ico": "2.1.8",
+    "sharp": "0.35.5"
+  }
+}
