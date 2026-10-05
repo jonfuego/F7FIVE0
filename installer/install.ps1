@@ -274,6 +274,11 @@ if ($ServiceUser) {
 }
 Set-InstallAcl $InstallDir $svcSid
 Ok "only administrators can change F7FIVE0's files"
+# Let Users read Setup's own install log without elevation. Set-InstallAcl just
+# reset the logs folder, so grant the log file now (and again at the end once
+# the transcript has flushed). Service logs are not touched, so they stay
+# private.
+Grant-SetupLogRead $LogFile
 
 # ---------------------------------------------------------------------------
 Step "Checking this PC"
@@ -910,13 +915,20 @@ foreach ($line in $summary) {
 }
 Write-Host "  Settings: $EnvFile   Logs: $LogsDir" -ForegroundColor Gray
 Write-Host ""
-try { [IO.File]::WriteAllLines((Join-Path $LogsDir "setup-summary.txt"), $summary, (New-Object Text.UTF8Encoding($false))) } catch { }
+$summaryFile = Join-Path $LogsDir "setup-summary.txt"
+try { [IO.File]::WriteAllLines($summaryFile, $summary, (New-Object Text.UTF8Encoding($false))) } catch { }
+# Let Users read Setup's own summary without elevation. Service logs stay private.
+Grant-SetupLogRead $summaryFile
 } catch {
     Write-Host ""
     Write-Host $_.Exception.Message -ForegroundColor Red
     Write-Host "Full log: $LogFile" -ForegroundColor Yellow
+    Write-Host "If Windows says access denied, open it from an elevated PowerShell." -ForegroundColor Yellow
     try { Stop-Transcript | Out-Null } catch { }
+    try { Grant-SetupLogRead $LogFile } catch { }
     exit 1
 }
 try { Stop-Transcript | Out-Null } catch { }
+# Re-grant after the transcript is closed so Users can read the finished log.
+try { Grant-SetupLogRead $LogFile } catch { }
 exit 0
