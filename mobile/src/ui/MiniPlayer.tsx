@@ -7,6 +7,7 @@ import { usePlayer } from "@/player/PlayerProvider";
 import { colors, radius, spacing, typography } from "@/state/theme";
 import { Artwork } from "./Artwork";
 import { IconButton } from "./IconButton";
+import { PlayerTrackMenu } from "./PlayerTrackMenu";
 
 /** Persistent mini-player shown above the tab bar whenever something is queued.
  * Tap opens the full now-playing screen. */
@@ -41,6 +42,11 @@ export function MiniPlayer(): React.ReactElement | null {
         fill
       />
       <IconButton icon={SkipForward} onPress={next} accessibilityLabel="Next track" fill />
+      <PlayerTrackMenu
+        albumId={nowPlaying.albumId ?? null}
+        artistId={nowPlaying.artistId ?? null}
+        size={22}
+      />
     </Pressable>
   );
 }

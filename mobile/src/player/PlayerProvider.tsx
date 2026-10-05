@@ -53,6 +53,8 @@ interface QueueMeta {
   title: string;
   artist?: string | null;
   album?: string | null;
+  albumId?: string | null;
+  artistId?: string | null;
   artPath?: string | null;
   durationSec?: number | null;
 }
@@ -65,6 +67,8 @@ interface NowPlaying {
   artPath?: string | null;
   mediaFileId?: string;
   trackId?: string | null;
+  albumId?: string | null;
+  artistId?: string | null;
 }
 
 /** Tracks queued before and after the tapped one (see playSongs). */
@@ -453,6 +457,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
           title: s.title,
           artist: s.artist_name,
           album: s.album_title,
+          albumId: s.album_id,
+          artistId: s.artist_id,
           artPath: s.cover_path,
           durationSec: s.duration_sec,
         });
@@ -502,6 +508,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
           title: s.title,
           artist: s.artist_name,
           album: s.album_title,
+          albumId: s.album_id,
+          artistId: s.artist_id,
           artPath: s.cover_path,
           durationSec: s.duration_sec,
         });
@@ -716,6 +724,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       artPath: meta?.artPath ?? (typeof activeTrack.artwork === "string" ? activeTrack.artwork : null),
       mediaFileId: meta?.mediaFileId,
       trackId: meta?.trackId ?? null,
+      albumId: meta?.albumId ?? null,
+      artistId: meta?.artistId ?? null,
     };
   }, [activeTrack]);
 

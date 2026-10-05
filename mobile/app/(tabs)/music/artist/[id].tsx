@@ -69,13 +69,13 @@ export default function ArtistDetailScreen(): React.ReactElement {
                 </Pressable>
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel="Start radio"
+                  accessibilityLabel="Artist radio"
                   disabled={busy !== null}
                   onPress={() => void start("radio")}
                   style={({ pressed }) => [styles.ghost, pressed && styles.pressed]}
                 >
                   <Icon icon={Radio} size={18} color={colors.text} />
-                  <Text style={styles.ghostText}>{busy === "radio" ? "Loading..." : "Start radio"}</Text>
+                  <Text style={styles.ghostText}>{busy === "radio" ? "Loading..." : "Artist radio"}</Text>
                 </Pressable>
               </View>
             </View>

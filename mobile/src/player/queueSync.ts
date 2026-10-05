@@ -8,6 +8,8 @@ export interface QueueSnapshotItem {
   title: string;
   artist?: string | null;
   album?: string | null;
+  albumId?: string | null;
+  artistId?: string | null;
   artPath?: string | null;
   durationSec?: number | null;
 }
@@ -20,7 +22,9 @@ export function buildServerQueueItems(metas: QueueSnapshotItem[]): QueueItemDTO[
     title: m.title,
     track_id: m.trackId ?? null,
     artist_name: m.artist ?? null,
+    artist_id: m.artistId ?? null,
     album_title: m.album ?? null,
+    album_id: m.albumId ?? null,
     cover_path: m.artPath ?? null,
     duration_sec: m.durationSec ?? null,
   }));

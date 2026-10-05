@@ -17,7 +17,6 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { CSSProperties } from "react";
 import {
-  EllipsisVertical,
   ListMusic,
   Pause,
   Play,
@@ -42,16 +41,15 @@ import {
   subscribeToNotificationActions,
 } from "@/lib/media-notification";
 import {
-  albumToQueueItems,
   useQueue,
   type QueueItem,
   type RepeatMode,
 } from "@/lib/queue";
 import { QueuePanel } from "./QueuePanel";
+import { PlayerTrackMenu } from "./PlayerTrackMenu";
 import { videoElementController } from "@/lib/playerController";
 import type { PlayerController } from "@/lib/playerController";
 import type {
-  AlbumDetail,
   Progress,
   StreamStart,
   StreamStartRequest,
@@ -99,8 +97,6 @@ export function MiniPlayer() {
     shuffle,
     setRepeat,
     setShuffle,
-    playNextBlock,
-    addToQueue,
     clear,
     playing: queuePlaying,
     setPlaying,
@@ -136,11 +132,9 @@ export function MiniPlayer() {
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);
-  const [dockMenuOpen, setDockMenuOpen] = useState(false);
   // Drives the conditional id={...} so React reassigns id="mh-dock-audio" to
   // whichever element is active after a swap. Mirrors activeRef for render.
   const [activeKey, setActiveKey] = useState<"A" | "B">("A");
-  const dockMenuRef = useRef<HTMLDivElement | null>(null);
 
   // Resolve the active / idle physical element from the current pointer.
   const getActive = useCallback(
@@ -931,17 +925,6 @@ export function MiniPlayer() {
     }
   }, [volume, muted, stream]);
 
-  // Dismiss the dock track menu on outside click.
-  useEffect(() => {
-    if (!dockMenuOpen) return;
-    function onDocClick(e: MouseEvent) {
-      if (!dockMenuRef.current) return;
-      if (!dockMenuRef.current.contains(e.target as Node)) setDockMenuOpen(false);
-    }
-    document.addEventListener("mousedown", onDocClick);
-    return () => document.removeEventListener("mousedown", onDocClick);
-  }, [dockMenuOpen]);
-
   // Reserve space for the fixed dock so it never covers page content (the
   // Home "Continue Watching" heading, the bottom of every page). Mirror the
   // exact visibility of the `.mini` bar below: shown only with a non-empty
@@ -1035,51 +1018,10 @@ export function MiniPlayer() {
     });
   };
 
-  // Dock track menu. Acts on the current queue item. Album items fetch
-  // album detail and map through albumToQueueItems; artist radio hits
-  // the auto-playlist endpoint (already returns mapped QueueItems).
+  // The shared track menu (3-dot) acts on the current queue item's album and
+  // artist. Items whose id is missing are disabled inside the menu.
   const currentAlbumId = currentItem?.album_id ?? null;
   const currentArtistId = currentItem?.artist_id ?? null;
-  async function onMenuPlayAlbumNext() {
-    setDockMenuOpen(false);
-    if (!currentAlbumId) return;
-    try {
-      const detail = await apiGet<AlbumDetail>(
-        `/api/library/albums/${currentAlbumId}`,
-      );
-      const block = albumToQueueItems(detail);
-      if (block.length > 0) playNextBlock(block);
-    } catch {
-      // best-effort
-    }
-  }
-  async function onMenuArtistRadioNext() {
-    setDockMenuOpen(false);
-    if (!currentArtistId) return;
-    try {
-      const data = await apiGet<{ items: QueueItem[] }>(
-        `/api/library/auto-playlist/artist-radio/${currentArtistId}`,
-      );
-      if (Array.isArray(data.items) && data.items.length > 0) {
-        playNextBlock(data.items);
-      }
-    } catch {
-      // best-effort
-    }
-  }
-  async function onMenuAddAlbum() {
-    setDockMenuOpen(false);
-    if (!currentAlbumId) return;
-    try {
-      const detail = await apiGet<AlbumDetail>(
-        `/api/library/albums/${currentAlbumId}`,
-      );
-      const block = albumToQueueItems(detail);
-      if (block.length > 0) addToQueue(block);
-    } catch {
-      // best-effort
-    }
-  }
 
   const artistName = currentItem?.artist_name?.trim() || null;
   const albumTitle = currentItem?.album_title?.trim() || null;
@@ -1295,52 +1237,13 @@ export function MiniPlayer() {
             aria-label="Volume"
             className="vol-slider"
           />
-          <div ref={dockMenuRef} style={{ position: "relative", display: "inline-flex" }}>
-            <button
-              type="button"
-              onClick={() => setDockMenuOpen((v) => !v)}
-              aria-label="Track actions"
-              aria-haspopup="menu"
-              aria-expanded={dockMenuOpen}
-              className="icbtn"
-            >
-              <KebabIcon />
-            </button>
-            {dockMenuOpen ? (
-              <div role="menu" style={dockMenuStyle}>
-                {currentAlbumId ? (
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={onMenuPlayAlbumNext}
-                    style={dockMenuItemStyle}
-                  >
-                    Play album next
-                  </button>
-                ) : null}
-                {currentArtistId ? (
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={onMenuArtistRadioNext}
-                    style={dockMenuItemStyle}
-                  >
-                    Artist radio next
-                  </button>
-                ) : null}
-                {currentAlbumId ? (
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={onMenuAddAlbum}
-                    style={dockMenuItemStyle}
-                  >
-                    Add album to queue
-                  </button>
-                ) : null}
-              </div>
-            ) : null}
-          </div>
+          <PlayerTrackMenu
+            albumId={currentAlbumId}
+            artistId={currentArtistId}
+            placement="up"
+            buttonClassName="icbtn"
+            iconSize={16}
+          />
           <button
             type="button"
             onClick={() => setPanelOpen(true)}
@@ -1400,43 +1303,12 @@ function RepeatIcon() {
 function QueueIcon() {
   return <Icon icon={ListMusic} size={16} />;
 }
-function KebabIcon() {
-  return <Icon icon={EllipsisVertical} size={16} />;
-}
 function VolumeIcon() {
   return <Icon icon={Volume2} size={16} />;
 }
 function MuteIcon() {
   return <Icon icon={VolumeX} size={16} />;
 }
-
-const dockMenuStyle: CSSProperties = {
-  position: "absolute",
-  bottom: "calc(100% + 8px)",
-  right: 0,
-  minWidth: 180,
-  background: "var(--bg-2)",
-  border: "1px solid var(--line)",
-  borderRadius: 4,
-  fontFamily: "var(--grotesk)",
-  fontSize: 13,
-  boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
-  zIndex: 50,
-  overflow: "hidden",
-};
-const dockMenuItemStyle: CSSProperties = {
-  display: "block",
-  width: "100%",
-  padding: "10px 14px",
-  background: "transparent",
-  border: "none",
-  color: "var(--ink-1)",
-  textAlign: "left",
-  cursor: "pointer",
-  fontFamily: "inherit",
-  fontSize: "inherit",
-  whiteSpace: "nowrap",
-};
 
 function SubtitleLink({
   href,

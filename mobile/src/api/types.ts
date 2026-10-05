@@ -281,7 +281,9 @@ export interface QueueItemDTO {
   media_file_id: string;
   title: string;
   track_id?: string | null;
+  artist_id?: string | null;
   artist_name?: string | null;
+  album_id?: string | null;
   album_title?: string | null;
   cover_path?: string | null;
   duration_sec?: number | null;
