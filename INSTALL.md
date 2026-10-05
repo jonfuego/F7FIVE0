@@ -208,8 +208,9 @@ All of these go in `C:\F7FIVE0\.env`. Restart the services afterward:
 Restart-Service F7FIVE0-API, F7FIVE0-Stream, F7FIVE0-Web
 ```
 
-- **TMDB** (`TMDB_API_KEY`): free key from themoviedb.org (make an account,
-  then Settings > API: https://www.themoviedb.org/settings/api). Matches movies
+- **TMDB** (`TMDB_API_KEY`): free key from themoviedb.org. Make an account at
+  https://www.themoviedb.org/signup, then open Settings > API. (The API page
+  itself needs a sign-in, so it fails if you open it signed out.) Matches movies
   and shows by title and year and adds posters, descriptions, and cast.
   Easier: paste it in **Admin > Metadata**, which tests it with TMDB and
   needs no restart (a key saved there wins over `.env`). Admins see a
