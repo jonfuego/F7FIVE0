@@ -1384,6 +1384,26 @@ button { border: 0; background: transparent; color: inherit; font: inherit; curs
   color: var(--ink-2);
   margin: 4px 0 12px;
 }
+/* Season heading on the show page: links to the season page, chevron toggles. */
+.detail .episodes h3.season-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.detail .episodes h3.season-head a { color: inherit; text-decoration: none; }
+.detail .episodes h3.season-head a:hover,
+.detail .episodes h3.season-head a:focus-visible { text-decoration: underline; }
+.detail .season-toggle {
+  width: 44px; height: 44px;
+  display: grid; place-items: center;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-2);
+  color: var(--ink-3);
+  cursor: pointer;
+}
+.detail .season-toggle:hover { background: var(--surface-3); color: var(--ink); }
 .detail .card.synopsis p {
   margin: 0;
   font-size: 14px;

@@ -8,6 +8,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
 import Link from "next/link";
 import { notFound, useParams } from "next/navigation";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import EditOverridesModal, {
   algorithmicSortHint,
 } from "@/components/EditOverridesModal";
@@ -15,6 +16,7 @@ import { AuthShell } from "@/components/AuthShell";
 import { BackButton } from "@/components/BackButton";
 import { Backdrop } from "@/components/Backdrop";
 import { EpisodeRow } from "@/components/EpisodeRow";
+import { Icon } from "@/components/Icon";
 import { apiGet, apiPost, ApiError } from "@/lib/client-api";
 import { loadOverride } from "@/lib/overrides";
 import {
@@ -22,9 +24,10 @@ import {
   hueFromString,
   joinMeta,
 } from "@/lib/format";
+import { groupBySeason, seasonHref, seasonTitle, type SeasonGroup } from "@/lib/seasons";
 import type { Episode, MediaFile, Me, OverrideOut, SeriesDetail } from "@/lib/types";
 
-type Grouped = { season: number; episodes: Episode[] };
+type Grouped = SeasonGroup<Episode>;
 type EditInitial = OverrideOut & { algorithmic_sort_hint: string };
 
 export default function SeriesDetailPage() {
@@ -247,7 +250,9 @@ function SeriesHero({
               No episodes on disk yet.
             </div>
           ) : (
-            grouped.map((g, idx) => <SeasonSection key={g.season} group={g} defaultOpen={idx === 0} />)
+            grouped.map((g, idx) => (
+              <SeasonSection key={g.season} seriesId={series.id} group={g} defaultOpen={idx === 0} />
+            ))
           )}
         </div>
       </div>
@@ -278,18 +283,33 @@ function findFirstEpisodeFile(groups: Grouped[]): MediaFile | null {
 }
 
 function SeasonSection({
+  seriesId,
   group,
   defaultOpen,
 }: {
+  seriesId: string;
   group: Grouped;
   defaultOpen: boolean;
 }) {
   const [open, setOpen] = useState(defaultOpen);
-  const title = group.season === 0 ? "Specials" : `Season ${group.season}`;
+  const title = seasonTitle(group.season);
   return (
     <section className="episodes">
-      <h3 onClick={() => setOpen((o) => !o)} style={{ cursor: "pointer" }}>
-        {title} · {group.episodes.length} ep{group.episodes.length === 1 ? "" : "s"}
+      {/* The heading opens the season page (/series/<id>/season/<n>); the
+          chevron shows or hides the episodes here. */}
+      <h3 className="season-head">
+        <Link href={seasonHref(seriesId, group.season)}>
+          {title} · {group.episodes.length} ep{group.episodes.length === 1 ? "" : "s"}
+        </Link>
+        <button
+          type="button"
+          className="season-toggle"
+          aria-expanded={open}
+          aria-label={`${open ? "Hide" : "Show"} ${title} episodes`}
+          onClick={() => setOpen((o) => !o)}
+        >
+          <Icon icon={open ? ChevronUp : ChevronDown} size={16} />
+        </button>
       </h3>
       {open
         ? group.episodes.map((ep) => <EpisodeRow key={ep.id} ep={ep} />)
@@ -363,26 +383,6 @@ function AdminRescanButton({ series }: { series: SeriesDetail }) {
       {busy ? "Rescanning…" : status ?? "Rescan folder"}
     </button>
   );
-}
-
-function groupBySeason(episodes: Episode[]): Grouped[] {
-  const by = new Map<number, Episode[]>();
-  for (const ep of episodes) {
-    const arr = by.get(ep.season_number);
-    if (arr) arr.push(ep);
-    else by.set(ep.season_number, [ep]);
-  }
-  const groups: Grouped[] = [];
-  for (const [season, eps] of by.entries()) {
-    eps.sort((a, b) => a.episode_number - b.episode_number);
-    groups.push({ season, episodes: eps });
-  }
-  groups.sort((a, b) => {
-    if (a.season === 0) return 1;
-    if (b.season === 0) return -1;
-    return a.season - b.season;
-  });
-  return groups;
 }
 
 function SeriesSkeleton() {
