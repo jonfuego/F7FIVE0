@@ -175,6 +175,7 @@ def _build_ffmpeg_args(
     start_number: int = 0,
     playlist_name: str = "index.m3u8",
     opts: Optional[TrackOpts] = None,
+    audio_only: bool = False,
 ) -> list[str]:
     """Produce the argv for an on-demand HLS transcode.
 
@@ -204,6 +205,13 @@ def _build_ffmpeg_args(
 
     Bucket=0 keeps argv bit-identical to the pre-resume version so the
     default path is unchanged.
+
+    `audio_only=True` is for music the browser can't play as-is (WMA, Opus
+    and similar): no video encoder, only the first audio stream (cover art
+    that ffprobe reports as an mjpeg "video" stream is dropped), AAC out, and
+    `aresample=async=1` so the AAC encoder gets monotonic timestamps. Without
+    it a WMA source produced segments with backward DTS that Chrome refused
+    to open ("Parsed buffers not in DTS sequence").
     """
     index_path = out_dir / playlist_name
     seg_pattern = out_dir / "seg_%05d.ts"
@@ -221,6 +229,20 @@ def _build_ffmpeg_args(
         "-stats_period", str(STATS_PERIOD_SEC),
         "-y",
     ]
+    if audio_only:
+        if offset_bucket > 0:
+            args += ["-ss", str(offset_bucket)]
+        args += [
+            "-i", str(source),
+            "-map", "0:a:0",
+            "-vn", "-sn", "-dn",
+            "-af", "aresample=async=1",
+            "-c:a", "aac",
+            "-b:a", f"{variant.audio_bitrate_kbps}k",
+            "-ac", "2",
+        ]
+        return args + _hls_muxer_args(index_path, seg_pattern, start_number)
+
     opts = opts or TrackOpts()
     burn = opts.burn_sub_index is not None
     if nvenc and not burn:
@@ -290,8 +312,12 @@ def _build_ffmpeg_args(
         "-ac", "2",
     ]
 
-    # HLS muxer
-    args += [
+    return args + _hls_muxer_args(index_path, seg_pattern, start_number)
+
+
+def _hls_muxer_args(index_path: Path, seg_pattern: Path, start_number: int) -> list[str]:
+    """The HLS muxer tail shared by the video and audio-only argv."""
+    args = [
         "-f", "hls",
         "-hls_time", "6",
         "-hls_list_size", "0",
@@ -446,6 +472,7 @@ class TranscodeManager:
         source_path: Path,
         offset_bucket: int = 0,
         opts: str = "",
+        audio_only: bool = False,
     ) -> TranscodeJob:
         key = (user_id, media_file_id, variant.label, offset_bucket, opts)
         with self._lock:
@@ -460,7 +487,7 @@ class TranscodeManager:
 
             siblings = self._pop_running_siblings(key)
             job = self._start(user_id, media_file_id, variant, source_path, offset_bucket,
-                              opts=opts)
+                              opts=opts, audio_only=audio_only)
             self._jobs[key] = job
         # Kill outside the lock: kill() can wait up to 10 s for ffmpeg to exit.
         for sib in siblings:
@@ -529,6 +556,7 @@ class TranscodeManager:
         seek_offset_sec: int,
         playlist_name: str,
         opts: str = "",
+        audio_only: bool = False,
     ) -> TranscodeJob:
         """Resume-aware re-spawn for a mid-playback segment miss.
 
@@ -555,6 +583,7 @@ class TranscodeManager:
                 playlist_name=playlist_name,
                 wipe=False,
                 opts=opts,
+                audio_only=audio_only,
             )
             self._jobs[key] = job
             return job
@@ -573,6 +602,7 @@ class TranscodeManager:
         playlist_name: str = "index.m3u8",
         wipe: bool = True,
         opts: str = "",
+        audio_only: bool = False,
     ) -> TranscodeJob:
         out_dir = out_dir_for(media_file_id, variant.label, offset_bucket, opts)
         # Cold start wipes the dir: a stale partial transcode would confuse the
@@ -591,10 +621,12 @@ class TranscodeManager:
             start_number=start_number,
             playlist_name=playlist_name,
             opts=parse_token(opts),
+            audio_only=audio_only,
         )
         log.info(
-            "spawning ffmpeg uid=%s mid=%s variant=%s bucket=%s opts=%s out=%s",
-            user_id, media_file_id, variant.label, offset_bucket, opts or "-", out_dir,
+            "spawning ffmpeg uid=%s mid=%s variant=%s bucket=%s opts=%s audio_only=%s out=%s",
+            user_id, media_file_id, variant.label, offset_bucket, opts or "-",
+            audio_only, out_dir,
         )
         proc = subprocess.Popen(
             args,
@@ -798,7 +830,7 @@ manager = TranscodeManager()
 # Master playlist generation
 # ---------------------------------------------------------------------------
 def build_master_playlist(media_file_id: uuid.UUID, variants: tuple[Variant, ...],
-                          signed_query: str) -> str:
+                          signed_query: str, audio_only: bool = False) -> str:
     """Write a master m3u8 pointing at each variant's playlist.
 
     Each `URI` line is absolute-path relative and includes the signed query
@@ -807,6 +839,15 @@ def build_master_playlist(media_file_id: uuid.UUID, variants: tuple[Variant, ...
     carries uid/exp/sig and the gateway recomputes the HMAC.
     """
     lines: list[str] = ["#EXTM3U", "#EXT-X-VERSION:3"]
+    if audio_only:
+        # AAC only, no RESOLUTION, so players don't wait for a picture.
+        for v in variants:
+            lines.append(
+                f"#EXT-X-STREAM-INF:BANDWIDTH={int(v.audio_bitrate_kbps * 1.1) * 1000},"
+                f"CODECS=\"mp4a.40.2\""
+            )
+            lines.append(f"/stream/hls/{media_file_id}/{v.label}/index.m3u8?{signed_query}")
+        return "\n".join(lines) + "\n"
     for v in variants:
         # Bandwidth is bits/sec per the HLS spec. Video + audio, padded 10%.
         total_kbps = int((v.video_bitrate_kbps + v.audio_bitrate_kbps) * 1.1)

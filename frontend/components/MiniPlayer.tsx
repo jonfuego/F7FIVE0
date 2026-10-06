@@ -16,6 +16,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { CSSProperties } from "react";
+import type HlsType from "hls.js";
 import {
   ListMusic,
   Pause,
@@ -167,11 +168,46 @@ export function MiniPlayer() {
   // swapped element, so the playback effect adopts that element instead of
   // re-sourcing and restarting it.
   const gaplessHandoffRef = useRef<string | null>(null);
-  // Keep audioRef on the active element across mount and every swap.
+  // Keep audioRef on the active element. The dock renders nothing while the
+  // queue is empty, so the <audio> elements mount later than this component;
+  // ref callbacks see them arrive (an effect keyed on activeKey ran once at
+  // mount, saw null, and left audioRef null, so the dock Play button and the
+  // media keys did nothing). swapActive() repoints audioRef on a swap.
+  const setAudioA = useCallback((el: HTMLAudioElement | null) => {
+    audioARef.current = el;
+    if (activeRef.current === "A") audioRef.current = el;
+  }, []);
+  const setAudioB = useCallback((el: HTMLAudioElement | null) => {
+    audioBRef.current = el;
+    if (activeRef.current === "B") audioRef.current = el;
+  }, []);
+
+  // hls.js instances attached to a dock element (transcoded audio). Keyed by
+  // element so a swap or a track change tears down exactly the one in use.
+  const hlsByElRef = useRef(new Map<HTMLAudioElement, HlsType>());
+  const detachHls = useCallback((el: HTMLAudioElement) => {
+    const h = hlsByElRef.current.get(el);
+    if (!h) return;
+    hlsByElRef.current.delete(el);
+    try {
+      h.destroy();
+    } catch {
+      // ignore
+    }
+  }, []);
   useEffect(() => {
-    audioRef.current =
-      activeKey === "A" ? audioARef.current : audioBRef.current;
-  }, [activeKey]);
+    const map = hlsByElRef.current;
+    return () => {
+      for (const h of map.values()) {
+        try {
+          h.destroy();
+        } catch {
+          // ignore
+        }
+      }
+      map.clear();
+    };
+  }, []);
 
   const currentItem = currentIndex !== null ? items[currentIndex] ?? null : null;
   const onWatchRoute = pathname?.startsWith("/watch") ?? false;
@@ -287,7 +323,12 @@ export function MiniPlayer() {
       // gapless: the idle element is already loaded, so we only call play()
       // on it, never re-source it. Volume/mute are applied to both elements
       // by the volume effect, so a swap keeps the level consistent.
-      if (bufferedTargetRef.current !== targetId) {
+      // Only a direct stream can be buffered by setting src; a transcoded
+      // (HLS) track starts through hls.js when it becomes current.
+      if (
+        bufferedTargetRef.current !== targetId &&
+        prefetchRef.current.stream.mode === "direct"
+      ) {
         const idle = getIdle();
         if (idle) {
           idle.src = prefetchRef.current.stream.url;
@@ -438,7 +479,13 @@ export function MiniPlayer() {
         shouldAutoPlayRef.current = true;
         setPlaying(true);
       }
-    } else {
+    }
+    // Transcoded audio is HLS. Chrome's <audio> only plays HLS natively in
+    // recent versions and Firefox not at all, so play it through hls.js
+    // (MSE) like the video player does; native HLS is the fallback.
+    let disposed = false;
+    const useHls = !isGaplessHandoff && stream.mode === "hls";
+    if (!isGaplessHandoff && !useHls) {
       audio.src = stream.url;
     }
 
@@ -567,7 +614,12 @@ export function MiniPlayer() {
       // round trip. Then advance the queue; the stream effect re-sources and
       // rebinds on the active element as before.
       const ready = prefetchRef.current;
-      if (upcoming && ready && ready.mediaFileId === upcoming.media_file_id) {
+      if (
+        upcoming &&
+        ready &&
+        ready.mediaFileId === upcoming.media_file_id &&
+        ready.stream.mode === "direct"
+      ) {
         try {
           audio.src = ready.stream.url;
           const p = audio.play();
@@ -600,13 +652,43 @@ export function MiniPlayer() {
       autoPlay = true;
     }
 
-    if (autoPlay && !isGaplessHandoff) {
+    const startPlayback = () => {
       const playPromise = audio.play();
       if (playPromise && typeof playPromise.catch === "function") {
         playPromise.catch(() => {
           // Autoplay can be blocked by the browser. The user can hit Play.
         });
       }
+    };
+
+    if (useHls) {
+      void import("hls.js").then(({ default: Hls }) => {
+        if (disposed) return;
+        if (!Hls.isSupported()) {
+          if (audio.canPlayType("application/vnd.apple.mpegurl")) {
+            audio.src = stream.url;
+            if (autoPlay) startPlayback();
+          } else {
+            setStreamError("This browser can't play transcoded audio.");
+          }
+          return;
+        }
+        detachHls(audio);
+        const hls = new Hls({ maxBufferLength: 30, enableWorker: true });
+        hlsByElRef.current.set(audio, hls);
+        hls.on(Hls.Events.ERROR, (_event, data) => {
+          if (disposed || !data.fatal) return;
+          detachHls(audio);
+          setStreamError(`Playback error: ${data.type}/${data.details}`);
+        });
+        hls.loadSource(stream.url);
+        hls.attachMedia(audio);
+        if (autoPlay) startPlayback();
+      }).catch(() => {
+        if (!disposed) setStreamError("Failed to load the audio player");
+      });
+    } else if (autoPlay && !isGaplessHandoff) {
+      startPlayback();
     }
 
     const send = (position: number) => {
@@ -634,6 +716,7 @@ export function MiniPlayer() {
     const heartbeat = window.setInterval(tick, HEARTBEAT_MS);
 
     return () => {
+      disposed = true;
       window.clearInterval(heartbeat);
       audio.removeEventListener("loadedmetadata", onLoadedMetadata);
       audio.removeEventListener("timeupdate", onTimeUpdate);
@@ -664,6 +747,7 @@ export function MiniPlayer() {
       } catch {
         // ignore
       }
+      detachHls(audio);
       audio.removeAttribute("src");
       try {
         audio.load();
@@ -671,7 +755,7 @@ export function MiniPlayer() {
         // ignore
       }
     };
-  }, [stream, next, setPlaying, currentItem?.track_id, currentItem?.duration_sec, currentItem?.media_file_id, maybePrefetchNext, getActive, getIdle, swapActive]);
+  }, [stream, next, setPlaying, currentItem?.track_id, currentItem?.duration_sec, currentItem?.media_file_id, maybePrefetchNext, getActive, getIdle, swapActive, detachHls]);
 
   // Media Session metadata. Drives lock-screen, OS media widgets, and
   // Bluetooth AVRCP on car head units (title, artist, album, artwork).
@@ -1266,13 +1350,13 @@ export function MiniPlayer() {
           next-track buffer. */}
       <audio
         id={activeKey === "A" ? "mh-dock-audio" : undefined}
-        ref={audioARef}
+        ref={setAudioA}
         preload="metadata"
         style={{ display: "none" }}
       />
       <audio
         id={activeKey === "B" ? "mh-dock-audio" : undefined}
-        ref={audioBRef}
+        ref={setAudioB}
         preload="metadata"
         style={{ display: "none" }}
       />
