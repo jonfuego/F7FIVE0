@@ -19,6 +19,7 @@ import EditOverridesModal, {
 import { AuthShell } from "@/components/AuthShell";
 import { Grid, GridEmpty } from "@/components/Grid";
 import { apiGet, ApiError } from "@/lib/client-api";
+import { loadOverride } from "@/lib/overrides";
 import {
   colorForTitle,
   formatDuration,
@@ -44,6 +45,7 @@ export default function MusicVideoReleasePage() {
   const [reloadTick, setReloadTick] = useState(0);
   const [editInitial, setEditInitial] = useState<EditInitial | null>(null);
   const [editLoading, setEditLoading] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -90,15 +92,17 @@ export default function MusicVideoReleasePage() {
   const openEdit = useCallback(async () => {
     if (!data) return;
     setEditLoading(true);
+    setEditError(null);
     try {
-      const res = await fetch(
-        `/api/admin/override/music_video_release/${data.id}`,
-        { cache: "no-store" },
-      );
-      if (!res.ok) return;
-      const body = (await res.json()) as OverrideOut;
+      // apiGet refreshes an expired session once and retries; anything
+      // still failing is shown next to the button instead of nothing.
+      const res = await loadOverride<OverrideOut>(apiGet, "music_video_release", data.id);
+      if (!res.ok) {
+        setEditError(res.error);
+        return;
+      }
       setEditInitial({
-        ...body,
+        ...res.data,
         algorithmic_sort_hint: algorithmicSortHint(data.title),
       });
     } finally {
@@ -133,6 +137,7 @@ export default function MusicVideoReleasePage() {
           isAdmin={isAdmin}
           onEdit={openEdit}
           editBusy={editLoading}
+          editError={editError}
         />
       )}
       {editInitial && data ? (
@@ -155,12 +160,14 @@ function ReleaseHero({
   isAdmin,
   onEdit,
   editBusy,
+  editError,
 }: {
   detail: MusicVideoReleaseDetail;
   artistId: string;
   isAdmin: boolean;
   onEdit: () => void;
   editBusy: boolean;
+  editError: string | null;
 }) {
   const tint: CSSProperties = {
     ["--pg" as never]: colorForTitle(detail.title),
@@ -208,6 +215,14 @@ function ReleaseHero({
               >
                 {editBusy ? "Loading..." : "Edit"}
               </button>
+            ) : null}
+            {isAdmin && editError ? (
+              <span
+                role="alert"
+                style={{ color: "var(--danger)", fontFamily: "var(--mono)", fontSize: 12, marginLeft: 8 }}
+              >
+                {editError}
+              </span>
             ) : null}
           </div>
           <h1>{detail.title}</h1>

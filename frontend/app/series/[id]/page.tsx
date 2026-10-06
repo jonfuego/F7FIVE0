@@ -15,6 +15,7 @@ import { AuthShell } from "@/components/AuthShell";
 import { Backdrop } from "@/components/Backdrop";
 import { MarkWatchedButton } from "@/components/MarkWatchedButton";
 import { apiGet, apiPost, ApiError } from "@/lib/client-api";
+import { loadOverride } from "@/lib/overrides";
 import {
   colorForTitle,
   formatBytes,
@@ -38,6 +39,7 @@ export default function SeriesDetailPage() {
   const [reloadTick, setReloadTick] = useState(0);
   const [editInitial, setEditInitial] = useState<EditInitial | null>(null);
   const [editLoading, setEditLoading] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -82,14 +84,17 @@ export default function SeriesDetailPage() {
   const openEdit = useCallback(async () => {
     if (!series) return;
     setEditLoading(true);
+    setEditError(null);
     try {
-      const res = await fetch(`/api/admin/override/series/${series.id}`, {
-        cache: "no-store",
-      });
-      if (!res.ok) return;
-      const body = (await res.json()) as OverrideOut;
+      // apiGet refreshes an expired session once and retries; anything
+      // still failing is shown next to the button instead of nothing.
+      const res = await loadOverride<OverrideOut>(apiGet, "series", series.id);
+      if (!res.ok) {
+        setEditError(res.error);
+        return;
+      }
       setEditInitial({
-        ...body,
+        ...res.data,
         algorithmic_sort_hint: algorithmicSortHint(series.title),
       });
     } finally {
@@ -123,6 +128,7 @@ export default function SeriesDetailPage() {
           isAdmin={isAdmin}
           onEdit={openEdit}
           editBusy={editLoading}
+          editError={editError}
         />
       )}
       {editInitial && series ? (
@@ -144,11 +150,13 @@ function SeriesHero({
   isAdmin,
   onEdit,
   editBusy,
+  editError,
 }: {
   series: SeriesDetail;
   isAdmin: boolean;
   onEdit: () => void;
   editBusy: boolean;
+  editError: string | null;
 }) {
   const tint: CSSProperties = {
     ["--pg" as never]: colorForTitle(series.title),
@@ -205,6 +213,14 @@ function SeriesHero({
               >
                 {editBusy ? "Loading..." : "Edit"}
               </button>
+            ) : null}
+            {isAdmin && editError ? (
+              <span
+                role="alert"
+                style={{ color: "var(--danger)", fontFamily: "var(--mono)", fontSize: 12, marginLeft: 8 }}
+              >
+                {editError}
+              </span>
             ) : null}
           </div>
           <h1>{series.title}</h1>
