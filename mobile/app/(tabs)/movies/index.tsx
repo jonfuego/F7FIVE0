@@ -100,7 +100,7 @@ export default function MoviesHome(): React.ReactElement {
       storageKey="hub:video"
       sections={[
         { key: "all", label: "All", title: "Movies & Shows", render: (select) => <VideoAll select={select} /> },
-        { key: "movies", label: "Movies", title: "The Cinema", render: () => <MoviesLibrary /> },
+        { key: "movies", label: "Movies", title: "Movies", render: () => <MoviesLibrary /> },
         { key: "shows", label: "TV Shows", title: "Television", render: () => <ShowsLibrary /> },
         { key: "videos", label: "Music Videos", title: "Music Videos", render: () => <MusicVideosLibrary /> },
       ]}
