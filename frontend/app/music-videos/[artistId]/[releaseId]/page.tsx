@@ -17,6 +17,7 @@ import EditOverridesModal, {
   algorithmicSortHint,
 } from "@/components/EditOverridesModal";
 import { AuthShell } from "@/components/AuthShell";
+import { BackButton } from "@/components/BackButton";
 import { Grid, GridEmpty } from "@/components/Grid";
 import { apiGet, ApiError } from "@/lib/client-api";
 import { loadOverride } from "@/lib/overrides";
@@ -196,6 +197,7 @@ function ReleaseHero({
     <section className="detail" style={tint}>
       <div className="backdrop" />
       <div className="body">
+        <BackButton href={`/music-videos/${artistId}`} />
         <div className="poster-card album">
           <div className="keyart-mini" />
           {detail.cover_path ? (
@@ -235,11 +237,6 @@ function ReleaseHero({
             ) : <span>{detail.artist_name}</span>}
           </div>
           {meta ? <MetaRow text={meta} /> : null}
-          <div className="ctas">
-            <Link className="btn ghost" href={`/music-videos/${artistId}`}>
-              ← Back
-            </Link>
-          </div>
 
           <div
             className="tracks"

@@ -6,10 +6,10 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
-import Link from "next/link";
 import { notFound, useParams } from "next/navigation";
 import { ArtOverrideModal, ArtKind, ArtRole } from "@/components/ArtOverrideModal";
 import { AuthShell } from "@/components/AuthShell";
+import { BackButton } from "@/components/BackButton";
 import { Grid, GridEmpty } from "@/components/Grid";
 import { MediaCard } from "@/components/MediaCard";
 import { apiGet, ApiError } from "@/lib/client-api";
@@ -159,6 +159,7 @@ function ArtistHero({
     <section className="detail" style={tint}>
       <div className="backdrop" />
       <div className="body">
+        <BackButton href="/music-videos" />
         <div className="poster-card album">
           <div className="keyart-mini" />
           {detail.image_path ? (
@@ -188,11 +189,6 @@ function ArtistHero({
         <div className="info">
           <h1>{detail.name}</h1>
           {meta ? <MetaRow text={meta} /> : null}
-          <div className="ctas">
-            <Link className="btn ghost" href="/music-videos">
-              ← Back
-            </Link>
-          </div>
 
           <div
             className="tracks"

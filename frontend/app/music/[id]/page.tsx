@@ -10,6 +10,7 @@ import type { CSSProperties } from "react";
 import Link from "next/link";
 import { notFound, useParams } from "next/navigation";
 import { AuthShell } from "@/components/AuthShell";
+import { BackButton } from "@/components/BackButton";
 import { apiGet, ApiError } from "@/lib/client-api";
 import {
   colorForTitle,
@@ -104,6 +105,7 @@ function AlbumHero({ album }: { album: AlbumDetail }) {
     <section className="detail" style={tint}>
       <div className="backdrop" />
       <div className="body">
+        <BackButton href="/music" />
         <div className="poster-card album">
           <div className="keyart-mini" />
           {album.cover_path ? (
@@ -166,9 +168,6 @@ function AlbumHero({ album }: { album: AlbumDetail }) {
                 Not on disk
               </button>
             )}
-            <Link className="btn ghost" href="/music">
-              ← Back
-            </Link>
           </div>
 
           <div className="tracks">

@@ -12,6 +12,7 @@ import EditOverridesModal, {
   algorithmicSortHint,
 } from "@/components/EditOverridesModal";
 import { AuthShell } from "@/components/AuthShell";
+import { BackButton } from "@/components/BackButton";
 import { Backdrop } from "@/components/Backdrop";
 import { MarkWatchedButton } from "@/components/MarkWatchedButton";
 import { apiGet, ApiError } from "@/lib/client-api";
@@ -189,6 +190,7 @@ function MovieHero({
         <Backdrop src={movie.backdrop_path} alt="" />
       </div>
       <div className="body">
+        <BackButton href="/movies" />
         <div className="poster-card">
           <div className="keyart-mini" />
           {movie.poster_path ? (
@@ -235,9 +237,6 @@ function MovieHero({
             {primary ? (
               <FileWatchedButton fileId={primary.id} />
             ) : null}
-            <Link className="btn ghost" href="/movies">
-              ← Back
-            </Link>
           </div>
           {directors.length ? (
             <div className="credit-line">
