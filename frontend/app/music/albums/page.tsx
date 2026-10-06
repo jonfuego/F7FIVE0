@@ -3,7 +3,7 @@
 
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { CSSProperties } from "react";
 import Link from "next/link";
@@ -15,10 +15,20 @@ import { Grid, GridEmpty } from "@/components/Grid";
 import { apiGet } from "@/lib/client-api";
 import { colorForTitle, hueFromString } from "@/lib/format";
 import type { Album, OverrideOut } from "@/lib/types";
+import { useViewPref } from "@/lib/use-view-pref";
 
 type EditInitial = OverrideOut & { algorithmic_sort_hint: string };
 
 export default function MusicAlbumsPage() {
+  // Saved view: being on Albums makes it the Music browse tab (stored on the
+  // server per user), once per visit.
+  const [browse, setBrowse, browseLoaded] = useViewPref("music.browse");
+  const markedRef = useRef(false);
+  useEffect(() => {
+    if (!browseLoaded || markedRef.current) return;
+    markedRef.current = true;
+    if (browse !== "albums") setBrowse("albums");
+  }, [browseLoaded, browse, setBrowse]);
   const [albums, setAlbums] = useState<Album[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -91,9 +101,9 @@ export default function MusicAlbumsPage() {
 
       <div className="filter-bar">
         <span className="lbl">Browse</span>
-        <Link href="/music" className="chip">Artists</Link>
+        <Link href="/music" className="chip" onClick={() => setBrowse("artists")}>Artists</Link>
         <span className="chip on">Albums</span>
-        <Link href="/music/songs" className="chip">Songs</Link>
+        <Link href="/music/songs" className="chip" onClick={() => setBrowse("songs")}>Songs</Link>
       </div>
 
       {error ? (

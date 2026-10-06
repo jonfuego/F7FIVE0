@@ -16,7 +16,8 @@ import { SortFilterBar } from "@/ui/SortFilterBar";
 import { TrackRow } from "@/ui/TrackRow";
 import { toggleDir } from "@/ui/sortFilter";
 import { useAlphaRail } from "@/ui/useAlphaRail";
-import { useSortFilter } from "@/ui/useSortFilter";
+import { useViewPref } from "@/state/viewPrefs";
+import { isSortFilterState, sortFilterInitial, useSortFilter } from "@/ui/useSortFilter";
 import type { SongRow } from "@/api/types";
 
 const SONG_SORTS: SortOption<SongRow>[] = [
@@ -42,7 +43,9 @@ export function SongsLibrary(): React.ReactElement {
       { key: "long", label: "8+ min", predicate: (s) => (s.duration_sec ?? 0) >= 480 },
     ];
   }, [dl.items]);
-  const sf = useSortFilter("songs", songs.data ?? [], SONG_SORTS, filters);
+  // Saved view (server, per user): this screen's sort and filter.
+  const sortView = useViewPref("sort:songs", sortFilterInitial(SONG_SORTS), isSortFilterState);
+  const sf = useSortFilter(sortView, songs.data ?? [], SONG_SORTS, filters);
   const { listRef, active, onSelect } = useAlphaRail(sf.items, (s) => s.title);
 
   return (

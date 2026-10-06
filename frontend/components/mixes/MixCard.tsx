@@ -32,6 +32,10 @@ export type MixCardProps = {
   buildUrl: (input?: PickerInput) => string | null;
   picker?: PickerSpec;
   index: number;
+  /** Picker values used last time for this mix (saved view), and where to
+   * save them after a successful play or add. */
+  savedValues?: PickerInput;
+  onSaveValues?: (values: PickerInput) => void;
 };
 
 type PickerInput = Record<string, string>;
@@ -52,12 +56,19 @@ export function MixCard({
   buildUrl,
   picker,
   index,
+  savedValues,
+  onSaveValues,
 }: MixCardProps) {
   const { playAlbum, addToQueue } = useQueue();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerValues, setPickerValues] = useState<PickerInput>({});
+  // Opening the picker starts from the values used last time (a saved view).
+  const openPicker = useCallback(() => {
+    setPickerValues((cur) => (Object.keys(cur).length === 0 && savedValues ? { ...savedValues } : cur));
+    setPickerOpen(true);
+  }, [savedValues]);
 
   const fetchItems = useCallback(
     async (input?: PickerInput): Promise<QueueItem[] | null> => {
@@ -93,27 +104,29 @@ export function MixCard({
 
   const onPlay = useCallback(async () => {
     if (picker && !pickerOpen) {
-      setPickerOpen(true);
+      openPicker();
       return;
     }
     const items = await fetchItems(picker ? pickerValues : undefined);
     if (items) {
+      if (picker) onSaveValues?.(pickerValues);
       playAlbum(items, { shuffle: false });
       setPickerOpen(false);
     }
-  }, [fetchItems, picker, pickerOpen, pickerValues, playAlbum]);
+  }, [fetchItems, picker, pickerOpen, pickerValues, playAlbum, openPicker, onSaveValues]);
 
   const onAdd = useCallback(async () => {
     if (picker && !pickerOpen) {
-      setPickerOpen(true);
+      openPicker();
       return;
     }
     const items = await fetchItems(picker ? pickerValues : undefined);
     if (items) {
+      if (picker) onSaveValues?.(pickerValues);
       addToQueue(items);
       setPickerOpen(false);
     }
-  }, [addToQueue, fetchItems, picker, pickerOpen, pickerValues]);
+  }, [addToQueue, fetchItems, picker, pickerOpen, pickerValues, openPicker, onSaveValues]);
 
   return (
     <div className="playbill" data-kind={kind} role="group" aria-label={title}>

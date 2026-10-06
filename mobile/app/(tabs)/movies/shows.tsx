@@ -14,7 +14,8 @@ import { toggleDir } from "@/ui/sortFilter";
 import { SortFilterBar } from "@/ui/SortFilterBar";
 import { useAlphaRail } from "@/ui/useAlphaRail";
 import { useGrid } from "@/ui/useGrid";
-import { useSortFilter } from "@/ui/useSortFilter";
+import { useViewPref } from "@/state/viewPrefs";
+import { isSortFilterState, sortFilterInitial, useSortFilter } from "@/ui/useSortFilter";
 
 const SHOW_SORTS: SortOption<Series>[] = [
   { key: "title", label: "Title", value: (s) => s.title },
@@ -48,7 +49,9 @@ export function ShowsLibrary(): React.ReactElement {
     ];
   }, [watchingIds]);
 
-  const sf = useSortFilter("shows", shows.data ?? [], SHOW_SORTS, filters);
+  // Saved view (server, per user): this screen's sort and filter.
+  const sortView = useViewPref("sort:shows", sortFilterInitial(SHOW_SORTS), isSortFilterState);
+  const sf = useSortFilter(sortView, shows.data ?? [], SHOW_SORTS, filters);
   const { listRef, active, onSelect } = useAlphaRail(sf.items, (s) => s.title, columns);
 
   return (

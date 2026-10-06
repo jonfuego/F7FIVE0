@@ -14,7 +14,8 @@ import { SortFilterBar } from "@/ui/SortFilterBar";
 import { Tile } from "@/ui/Tile";
 import { useAlphaRail } from "@/ui/useAlphaRail";
 import { useGrid } from "@/ui/useGrid";
-import { useSortFilter } from "@/ui/useSortFilter";
+import { useViewPref } from "@/state/viewPrefs";
+import { isSortFilterState, sortFilterInitial, useSortFilter } from "@/ui/useSortFilter";
 
 const ARTIST_SORTS: SortOption<Artist>[] = [
   { key: "name", label: "Name", value: (a) => a.name },
@@ -33,7 +34,9 @@ export function ArtistsLibrary(): React.ReactElement {
   const artists = useArtists();
   const router = useRouter();
   const { columns, itemWidth } = useGrid();
-  const sf = useSortFilter("artists", artists.data ?? [], ARTIST_SORTS, ARTIST_FILTERS);
+  // Saved view (server, per user): this screen's sort and filter.
+  const sortView = useViewPref("sort:artists", sortFilterInitial(ARTIST_SORTS), isSortFilterState);
+  const sf = useSortFilter(sortView, artists.data ?? [], ARTIST_SORTS, ARTIST_FILTERS);
   const { listRef, active, onSelect } = useAlphaRail(sf.items, (a) => a.name, columns);
 
   return (

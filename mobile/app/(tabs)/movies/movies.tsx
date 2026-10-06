@@ -15,8 +15,8 @@ import { toggleDir } from "@/ui/sortFilter";
 import { SortFilterBar } from "@/ui/SortFilterBar";
 import { useAlphaRail } from "@/ui/useAlphaRail";
 import { useGrid } from "@/ui/useGrid";
-import { useSetting } from "@/state/settings";
-import { useSortFilter } from "@/ui/useSortFilter";
+import { useViewPref } from "@/state/viewPrefs";
+import { isSortFilterState, sortFilterInitial, useSortFilter } from "@/ui/useSortFilter";
 
 const MOVIE_SORTS: SortOption<Movie>[] = [
   { key: "title", label: "Title", value: (m) => m.title },
@@ -28,6 +28,10 @@ const MOVIE_SORTS: SortOption<Movie>[] = [
 
 const ALL_GENRES = "__all__";
 
+function isGenre(v: unknown): v is string {
+  return typeof v === "string" && v.length > 0 && v.length <= 64;
+}
+
 /** Movies: genre chips (like the PWA), status + sort, and a 4-per-row
  * poster grid with watched checks and resume bars. Rendered as a page and
  * inline under the Movies & Shows hub's Movies chip. */
@@ -36,7 +40,8 @@ export function MoviesLibrary(): React.ReactElement {
   const router = useRouter();
   const progress = useAllProgress();
   const { columns, itemWidth } = useGrid();
-  const [genre, setGenre] = useSetting<string>("genre:movies", ALL_GENRES);
+  // Saved view (server, per user): the genre chip.
+  const [genre, setGenre] = useViewPref("genre:movies", ALL_GENRES, isGenre);
   const genres = useMemo(() => {
     const set = new Set<string>();
     for (const m of movies.data ?? []) for (const g of m.genres ?? []) set.add(g);
@@ -67,7 +72,9 @@ export function MoviesLibrary(): React.ReactElement {
     () => (genre === ALL_GENRES ? movies.data ?? [] : (movies.data ?? []).filter((m) => (m.genres ?? []).includes(genre))),
     [movies.data, genre],
   );
-  const sf = useSortFilter("movies", inGenre, MOVIE_SORTS, filters);
+  // Saved view (server, per user): this screen's sort and filter.
+  const sortView = useViewPref("sort:movies", sortFilterInitial(MOVIE_SORTS), isSortFilterState);
+  const sf = useSortFilter(sortView, inGenre, MOVIE_SORTS, filters);
   const { listRef, active, onSelect } = useAlphaRail(sf.items, (m) => m.title, columns);
 
   return (

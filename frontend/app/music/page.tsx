@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { AuthShell } from "@/components/AuthShell";
 import EditOverridesModal, { algorithmicSortHint } from "@/components/EditOverridesModal";
 import { AlphaRail, alphaLetterOf } from "@/components/AlphaRail";
@@ -16,6 +17,7 @@ import { apiGet } from "@/lib/client-api";
 import { colorForTitle, hueFromString } from "@/lib/format";
 import { useQueue, type QueueItem } from "@/lib/queue";
 import { useScrollRestoration } from "@/lib/scroll-restoration";
+import { useViewPref } from "@/lib/use-view-pref";
 import type { MusicArtist, OverrideOut } from "@/lib/types";
 
 type EditInitial = OverrideOut & { algorithmic_sort_hint: string };
@@ -23,6 +25,14 @@ type EditInitial = OverrideOut & { algorithmic_sort_hint: string };
 export default function MusicPage() {
   useScrollRestoration();
   const [artists, setArtists] = useState<MusicArtist[] | null>(null);
+  // Saved view: the Music browse tab (Artists / Albums / Songs) is stored on
+  // the server per user. Opening Music goes back to the tab you last picked.
+  const router = useRouter();
+  const [browse, setBrowse, browseLoaded] = useViewPref("music.browse");
+  useEffect(() => {
+    if (!browseLoaded || browse === "artists") return;
+    router.replace(browse === "albums" ? "/music/albums" : "/music/songs");
+  }, [browseLoaded, browse, router]);
   const [error, setError] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [reloadTick, setReloadTick] = useState(0);
@@ -100,8 +110,8 @@ export default function MusicPage() {
       <div className="filter-bar">
         <span className="lbl">Browse</span>
         <span className="chip on">Artists</span>
-        <Link href="/music/albums" className="chip">Albums</Link>
-        <Link href="/music/songs" className="chip">Songs</Link>
+        <Link href="/music/albums" className="chip" onClick={() => setBrowse("albums")}>Albums</Link>
+        <Link href="/music/songs" className="chip" onClick={() => setBrowse("songs")}>Songs</Link>
       </div>
 
       {error ? (

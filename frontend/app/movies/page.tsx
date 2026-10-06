@@ -15,17 +15,27 @@ import { MediaCard } from "@/components/MediaCard";
 import { apiGet } from "@/lib/client-api";
 import { pickProgressFor, statusForFile, useProgressMap } from "@/lib/progress";
 import { useScrollRestoration } from "@/lib/scroll-restoration";
+import { useViewPref } from "@/lib/use-view-pref";
 import type { Movie, OverrideOut } from "@/lib/types";
 
 type EditInitial = OverrideOut & { algorithmic_sort_hint: string };
 
 const PAGE_LIMIT = 20000;
 
+const MOVIE_SORTS = [
+  { key: "title", label: "Title" },
+  { key: "year", label: "Year" },
+  { key: "rating", label: "Rating" },
+] as const;
+
 export default function MoviesPage() {
   useScrollRestoration();
   const [movies, setMovies] = useState<Movie[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [genre, setGenre] = useState<string>("All");
+  // Genre and sort are saved views: stored on the server per user, so they
+  // follow you across web, phone and TV (lib/use-view-pref.ts).
+  const [genre, setGenre] = useViewPref("movies.genre");
+  const [sort, setSort] = useViewPref("movies.sort");
   const [isAdmin, setIsAdmin] = useState(false);
   const [reloadTick, setReloadTick] = useState(0);
   const [editTarget, setEditTarget] = useState<Movie | null>(null);
@@ -100,11 +110,20 @@ export default function MoviesPage() {
     return ["All", ...Array.from(set).sort()];
   }, [movies]);
 
+  // A saved genre the library no longer has falls back to All.
+  const activeGenre = genres.includes(genre) ? genre : "All";
   const filtered = useMemo(() => {
     if (!movies) return null;
-    if (genre === "All") return movies;
-    return movies.filter((m) => Array.isArray(m.genres) && m.genres.includes(genre));
-  }, [movies, genre]);
+    const inGenre =
+      activeGenre === "All"
+        ? movies
+        : movies.filter((m) => Array.isArray(m.genres) && m.genres.includes(activeGenre));
+    if (sort === "title") return inGenre;
+    const out = inGenre.slice();
+    if (sort === "year") out.sort((a, b) => (b.year ?? -1) - (a.year ?? -1));
+    if (sort === "rating") out.sort((a, b) => (b.tmdb_rating ?? -1) - (a.tmdb_rating ?? -1));
+    return out;
+  }, [movies, activeGenre, sort]);
 
   return (
     <AuthShell>
@@ -116,10 +135,23 @@ export default function MoviesPage() {
           <button
             key={g}
             type="button"
-            className={`chip ${genre === g ? "on" : ""}`}
+            className={`chip ${activeGenre === g ? "on" : ""}`}
             onClick={() => setGenre(g)}
           >
             {g}
+          </button>
+        ))}
+      </div>
+      <div className="filter-bar">
+        <span className="lbl">Sort</span>
+        {MOVIE_SORTS.map((o) => (
+          <button
+            key={o.key}
+            type="button"
+            className={`chip ${sort === o.key ? "on" : ""}`}
+            onClick={() => setSort(o.key)}
+          >
+            {o.label}
           </button>
         ))}
       </div>

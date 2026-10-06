@@ -2,7 +2,6 @@ import React from "react";
 import { StyleSheet, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { useSetting } from "@/state/settings";
 import { colors } from "@/state/theme";
 import { ChipBar, type ChipOption } from "./ChipBar";
 import { PageTitle } from "./PageTitle";
@@ -14,8 +13,10 @@ export interface HubSection extends ChipOption {
 }
 
 interface HubScreenProps {
-  /** Settings key the selected chip is remembered under. */
-  storageKey: string;
+  /** The selected chip and its setter. The hub route keeps it as a saved
+   * view (useViewPref) so the chip follows the user across devices. */
+  selected: string;
+  onSelect: (key: string) => void;
   sections: HubSection[];
   /** The marquee header (the route passes <MarqueeHeader />). */
   header: React.ReactNode;
@@ -24,9 +25,9 @@ interface HubScreenProps {
 /** Tab root for Music and Movies & Shows, laid out like the PWA's library
  * pages: F7FIVE0 marquee, a big Bebas title, a BROWSE chip row, then either the
  * "All" rails or the chosen grid inline (no plain list of links). The chosen
- * chip is remembered per hub. */
-export function HubScreen({ storageKey, sections, header }: HubScreenProps): React.ReactElement {
-  const [selected, setSelected] = useSetting<string>(storageKey, sections[0].key);
+ * chip is a saved view owned by the route. */
+export function HubScreen({ selected, onSelect, sections, header }: HubScreenProps): React.ReactElement {
+  const setSelected = onSelect;
   const current = sections.find((s) => s.key === selected) ?? sections[0];
   return (
     <SafeAreaView style={styles.safe} edges={["top", "left", "right"]}>

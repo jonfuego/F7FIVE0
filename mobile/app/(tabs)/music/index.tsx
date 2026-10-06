@@ -6,6 +6,7 @@ import { fetchMixSongs, MIXES, useAlbums, useArtists } from "@/api/queries";
 import { usePlayer } from "@/player/PlayerProvider";
 import { useApi } from "@/state/auth";
 import { colors, fonts, radius, spacing } from "@/state/theme";
+import { useViewPref } from "@/state/viewPrefs";
 import { HubScreen } from "@/ui/HubScreen";
 import { MarqueeHeader } from "@/ui/MarqueeHeader";
 import { Rail } from "@/ui/Rail";
@@ -102,13 +103,21 @@ function MusicAll({ select }: { select: (key: string) => void }): React.ReactEle
   );
 }
 
+const MUSIC_TABS = ["all", "artists", "albums", "songs", "mixes"];
+function isMusicTab(v: unknown): v is string {
+  return typeof v === "string" && MUSIC_TABS.includes(v);
+}
+
 /** Music tab: web-style BROWSE chips (All / Artists / Albums / Songs / Mixes).
- * "All" shows shelves; each other chip shows that library inline. */
+ * "All" shows shelves; each other chip shows that library inline. The chosen
+ * chip is a saved view on the server, per user. */
 export default function MusicHome(): React.ReactElement {
+  const [tab, setTab] = useViewPref("hub:music", "all", isMusicTab);
   return (
     <HubScreen
       header={<MarqueeHeader />}
-      storageKey="hub:music"
+      selected={tab}
+      onSelect={setTab}
       sections={[
         { key: "all", label: "All", title: "Music", render: (select) => <MusicAll select={select} /> },
         { key: "artists", label: "Artists", title: "Music", render: () => <ArtistsLibrary /> },

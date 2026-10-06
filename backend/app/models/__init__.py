@@ -41,4 +41,7 @@ from app.models.audio_analysis import (  # noqa: F401
 # Small Admin-page settings (TMDB key, reminder state)
 from app.models.app_setting import AppSetting  # noqa: F401
 
+# Saved library views, per user
+from app.models.view_pref import UserViewPref  # noqa: F401
+
 __all__ = ["Base"]

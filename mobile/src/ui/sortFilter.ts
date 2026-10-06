@@ -1,7 +1,7 @@
 /** Pure sort/filter primitives for library screens (crit 39). No native imports
  * so they unit test in Node. Each screen defines its sort options and (optional)
  * filter options; these functions apply a chosen sort/direction/filter to a list.
- * The chosen values are persisted per-screen by useSortFilter via useSetting. */
+ * The chosen values are saved views per screen (useViewPref, server per user). */
 
 export type SortDir = "asc" | "desc";
 
