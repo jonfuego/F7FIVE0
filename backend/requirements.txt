@@ -1,6 +1,14 @@
-# Loose pins so Python 3.14 (cp314) gets prebuilt wheels.
-# Tighten to exact versions once Phase 0 is stable.
-fastapi>=0.115,<0.120
+# Direct dependency ranges. The exact, hash-pinned resolution the build and
+# installer consume lives in requirements.lock (regenerate with pip-compile
+# --generate-hashes; see CLAUDE.md "Backend dependency lock").
+#
+# SEC-P0-1 (audit 2026-10-06): FastAPI/Starlette moved past the advisories
+# that capped the old pins. fastapi<0.120 and pillow<12 blocked the fixes, so
+# those caps are gone. starlette is floored at 1.3.1, the first release
+# carrying the Host/URL, Range-header DoS, and Windows StaticFiles fixes the
+# audit named. pillow is floored at 12.3.0 for the 2026 decoder advisories.
+fastapi>=0.142,<0.143
+starlette>=1.3.1,<2
 uvicorn[standard]>=0.32,<0.40
 pydantic[email]>=2.10,<3
 pydantic-settings>=2.6,<3
@@ -13,6 +21,6 @@ httpx>=0.27,<0.29
 apscheduler>=3.10.4,<4
 python-dotenv>=1.0.1,<2
 python-multipart>=0.0.12,<1
-pillow>=10.4,<12
+pillow>=12.3.0,<13
 mutagen>=1.47,<2
 webauthn>=2.0,<3

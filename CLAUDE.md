@@ -73,6 +73,20 @@ INSTALL.md for the operator view.
 - Config comes from `.env` at the install root via pydantic-settings. New
   settings need a default, an `.env.example` entry, and (if setup should
   write it) a line in `install.ps1`.
+- Backend dependency lock (SEC-P0-1): `backend/requirements.txt` holds loose
+  direct ranges; `backend/requirements.lock` is the exact, hash-pinned
+  resolution CI and the installer consume with `pip install --require-hashes`.
+  Never install the backend from `requirements.txt` in CI or Setup. To bump a
+  dependency: edit `requirements.txt`, then regenerate the lock with
+  `pip-compile --generate-hashes --output-file requirements.lock
+  requirements.txt` (run pip-tools from a throwaway venv or `pipx`/`uvx`, never
+  add it to the runtime deps), targeting Python 3.12 (the CI/Setup runtime),
+  then run pytest. CI runs `pip-audit` against the lock through
+  `scripts/pip_audit_gate.py`; any advisory it finds must be fixed or listed
+  (with a reason and an expiry on or before 2027-01-06) in
+  `backend/pip-audit-exceptions.txt`, or CI fails. Every `Image.open` in
+  `backend/app` must pass an explicit `formats=` allowlist so Pillow never
+  selects a parser outside JPEG/PNG/WEBP.
 - Setup installs for home use only and never waits on a person. Remote access
   is set up afterwards from Admin > Remote access: the API writes
   `data/remote-access/request.json` and starts the `F7FIVE0-RemoteAccess`

@@ -19,10 +19,21 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: backend/requirements.txt
-      - run: pip install -r backend/requirements.txt pytest
+          cache-dependency-path: backend/requirements.lock
+      # Install the hashed lock: --require-hashes refuses any dist whose hash
+      # is not pinned, so a tampered or substituted wheel fails the build.
+      - run: pip install --require-hashes -r backend/requirements.lock
+        working-directory: backend
+      - run: pip install pytest
       - run: python -m pytest -q
         working-directory: backend
+      # Supply-chain gate: audit the lock and fail on any advisory not listed
+      # (and unexpired) in backend/pip-audit-exceptions.txt. pip-audit runs
+      # from an isolated pipx install, never from the runtime deps.
+      - name: pip-audit (lock)
+        run: |
+          pipx install pip-audit
+          python scripts/pip_audit_gate.py
 
   web:
     runs-on: ubuntu-latest
