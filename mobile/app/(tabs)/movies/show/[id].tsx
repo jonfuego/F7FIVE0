@@ -1,5 +1,5 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { Circle, CircleCheck, Play } from "lucide-react-native";
+import { ChevronRight, Circle, CircleCheck, Play } from "lucide-react-native";
 import React, { useEffect, useMemo, useState } from "react";
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 
@@ -17,6 +17,7 @@ import { EpisodeFileMenu } from "@/ui/EpisodeFileMenu";
 import { Icon } from "@/ui/Icon";
 import { QueryState } from "@/ui/QueryState";
 import { Screen } from "@/ui/Screen";
+import { groupSeasons, seasonRoute, seasonTitle } from "@/ui/seasons";
 
 /** Show detail: poster, synopsis, season picker, episode list with
  * server-backed watched checks, and a Plex-style primary button that plays the
@@ -67,17 +68,11 @@ export default function ShowDetailScreen(): React.ReactElement {
     invalidateWatchState();
   };
 
-  const seasons = useMemo(() => {
-    const map = new Map<number, Episode[]>();
-    for (const ep of series.data?.episodes ?? []) {
-      const list = map.get(ep.season_number) ?? [];
-      list.push(ep);
-      map.set(ep.season_number, list);
-    }
-    for (const list of map.values()) list.sort((a, b) => a.episode_number - b.episode_number);
-    // Specials (season 0) go last.
-    return [...map.entries()].sort(([a], [b]) => (a === 0 ? 1 : b === 0 ? -1 : a - b));
-  }, [series.data]);
+  // Specials (season 0) go last.
+  const seasons = useMemo<[number, Episode[]][]>(
+    () => groupSeasons(series.data?.episodes ?? []),
+    [series.data],
+  );
 
   const current = season ?? seasons[0]?.[0] ?? null;
   const episodes = seasons.find(([n]) => n === current)?.[1] ?? [];
@@ -150,6 +145,20 @@ export default function ShowDetailScreen(): React.ReactElement {
                   </Pressable>
                 ))}
               </ScrollView>
+            ) : null}
+
+            {current !== null ? (
+              <Pressable
+                accessibilityRole="link"
+                accessibilityLabel={`Open ${seasonTitle(current)}`}
+                onPress={() => router.push(seasonRoute(s.id, current))}
+                style={({ pressed }) => [styles.seasonHead, pressed && styles.pressed]}
+              >
+                <Text style={styles.seasonHeadText}>
+                  {seasonTitle(current)} · {episodes.length} ep{episodes.length === 1 ? "" : "s"}
+                </Text>
+                <Icon icon={ChevronRight} size={18} color={colors.hiveText} />
+              </Pressable>
             ) : null}
 
             {episodes.map((ep) => {
@@ -241,6 +250,15 @@ const styles = StyleSheet.create({
   synopsisTitle: { fontSize: 12, fontWeight: "700", letterSpacing: 1.5, textTransform: "uppercase", color: colors.hiveText },
   synopsisText: { ...typography.body, color: colors.textMuted, lineHeight: 22 },
   chips: { gap: spacing.sm, paddingBottom: spacing.md },
+  seasonHead: {
+    minHeight: MIN_TOUCH,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+  seasonHeadText: { fontSize: 12, fontWeight: "700", letterSpacing: 1.5, textTransform: "uppercase", color: colors.hiveText },
   chip: {
     minHeight: MIN_TOUCH,
     paddingHorizontal: spacing.lg,
