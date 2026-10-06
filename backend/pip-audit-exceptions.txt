@@ -1,0 +1,19 @@
+# pip-audit exceptions for the backend lock (backend/requirements.lock).
+#
+# A finding here is a known advisory we have reviewed and chosen to accept
+# for now (no fix available, or the vulnerable code path does not ship/run in
+# F7FIVE0). Anything NOT listed here fails the CI pip-audit gate.
+#
+# One per line:
+#   ADVISORY_ID | reason | EXPIRY (YYYY-MM-DD)
+# Example:
+#   GHSA-xxxx-yyyy-zzzz | no fix yet; parser not reachable from our code | 2026-12-01
+#
+# Rules enforced by scripts/pip_audit_gate.py:
+#   - EXPIRY must be on or before 2027-01-06.
+#   - An expired exception fails the gate (forces a re-review).
+#   - A finding not listed here fails the gate.
+#
+# As of 2026-10-06, after the SEC-P0-1 upgrade (FastAPI 0.142 / Starlette 1.7
+# / Pillow 12.3), pip-audit reports zero advisories against the lock, so there
+# are no active exceptions.

@@ -509,7 +509,15 @@ def _decode_and_classify(data: bytes) -> str:
     return the canonical file extension. Raises ArtValidationError with
     a 415 if the format isn't one we accept."""
     try:
-        with Image.open(io.BytesIO(data)) as img:
+        # SEC-P0-1: constrain Pillow to the parsers we actually accept.
+        # Without an explicit allowlist Pillow picks a parser from the bytes
+        # first and only then do we check img.format, so a hostile PSD / FITS /
+        # font / etc. payload could reach a vulnerable decoder even though we
+        # ultimately store only JPEG/PNG/WEBP. formats= makes Pillow refuse to
+        # even try any parser outside the allowlist.
+        with Image.open(
+            io.BytesIO(data), formats=tuple(_ALLOWED_FORMATS)
+        ) as img:
             # `img.format` is populated during open(); `verify()` is
             # destructive, so call it last.
             fmt = (img.format or "").upper()

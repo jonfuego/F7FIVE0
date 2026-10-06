@@ -6,7 +6,7 @@
   Produces installer\dist\ with this layout (the same layout install.ps1
   installs into C:\F7FIVE0):
 
-    backend\     FastAPI source + requirements.txt (no venv, no tests)
+    backend\     FastAPI source + requirements.txt + requirements.lock (no venv, no tests)
     web\         Next.js standalone bundle, ready for `node server.js`
     installer\   install.ps1 / uninstall.ps1 / remote-access.ps1 / common.ps1
     android\     F7FIVE0-<version>.apk (+ -armv7) and .sha256 files, when

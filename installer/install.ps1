@@ -717,7 +717,10 @@ if (-not (Test-Path $VenvPy)) {
     if ($LASTEXITCODE -ne 0) { Fail "could not create the Python virtual environment" }
 }
 & $VenvPy -m pip install --disable-pip-version-check -q --upgrade pip
-& $VenvPy -m pip install --disable-pip-version-check -q -r (Join-Path $BackendDir "requirements.txt")
+# Install the hash-pinned lock (SEC-P0-1): --require-hashes refuses any dist
+# whose SHA-256 is not pinned, so a swapped or tampered wheel fails the
+# install rather than running with SYSTEM/service authority.
+& $VenvPy -m pip install --disable-pip-version-check -q --require-hashes -r (Join-Path $BackendDir "requirements.lock")
 if ($LASTEXITCODE -ne 0) { Fail "pip install failed ($LASTEXITCODE)" }
 # Compile now: a -ServiceUser account can't write __pycache__ in backend\.
 & $VenvPy -m compileall -q (Join-Path $BackendDir "app") | Out-Null
