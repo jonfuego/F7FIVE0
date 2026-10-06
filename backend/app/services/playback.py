@@ -82,7 +82,7 @@ def is_audio_only(mf: MediaFile) -> bool:
     as a silent-video file and routes it into the NVENC transcoder (which then
     fails because the input has no real video).
     """
-    return (mf.container or "").lower() in _AUDIO_CONTAINERS
+    return (getattr(mf, "container", None) or "").lower() in _AUDIO_CONTAINERS
 
 
 def can_direct_play(mf: MediaFile) -> tuple[bool, str]:

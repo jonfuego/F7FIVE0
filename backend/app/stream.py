@@ -39,7 +39,12 @@ from app.db import SessionLocal
 from app.models.media_file import MediaFile, ScanState
 from app.models.transcode import TranscodeSession
 from app.services import transcode_cache, transcoder
-from app.services.playback import pick_variants, single_rung_for_cpu
+from app.services.playback import (
+    VARIANT_LADDER,
+    is_audio_only,
+    pick_variants,
+    single_rung_for_cpu,
+)
 from app.services.range_response import ensure_under_roots, serve_file_range
 from app.services.security import verify_stream_url_params
 from app.services.track_opts import TrackOptsError, parse_token
@@ -236,7 +241,12 @@ def _variants_for(mf: MediaFile, o: str):
 
     Without NVENC the master playlist carries a single rung (see
     playback.single_rung_for_cpu) so no player can start a second encode by
-    switching quality on its own."""
+    switching quality on its own.
+
+    Audio-only sources get one rung (the top rung's AAC bitrate; the label is
+    only a cache key), since there is no picture to scale."""
+    if is_audio_only(mf):
+        return (VARIANT_LADDER[0],)
     variants = pick_variants(mf)
     max_h = parse_token(o).max_height
     if not settings.nvenc_enabled:
@@ -320,6 +330,7 @@ def hls_master(
     body = transcoder.build_master_playlist(
         mf.id, variants,
         signed_query=_signed_query(uid, mf.id, exp, sig, t, o),
+        audio_only=is_audio_only(mf),
     )
     return PlainTextResponse(
         content=body,
@@ -368,6 +379,7 @@ def hls_variant_playlist(
         source_path=source,
         offset_bucket=t,
         opts=o,
+        audio_only=is_audio_only(mf),
     )
 
     # Wait for ffmpeg to write the index. Early in a cold start ffmpeg has
@@ -516,6 +528,7 @@ def hls_segment(
             seek_offset_sec=resume_offset_sec,
             playlist_name="index.part.m3u8",
             opts=o,
+            audio_only=is_audio_only(mf),
         )
 
     # Wait for the segment to be complete, not merely present: ffmpeg creates
