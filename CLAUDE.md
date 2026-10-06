@@ -106,6 +106,15 @@ INSTALL.md for the operator view.
   `/api/client/android-app*`); the app reads it back with
   `mobile/modules/f7five0-stamp`. Pair id 0x46374635 is fixed: installed apps
   look for it. `/download/android` (web) only redirects to a signed link.
+- Saved library views (which Music browse tab, movie genre and sort, TV
+  filter, Music Videos order, Mixes picker values; on the app the hub chips,
+  sort/filter and genre) live on the server, per user, in `user_view_prefs`:
+  `GET /api/view-prefs` and `PUT /api/view-prefs/{key}` (web through the
+  library BFF at `/api/library/view-prefs`). Web pages use `useViewPref` from
+  `frontend/lib/use-view-pref.ts` (keys, defaults and allowed values in
+  `lib/view-prefs.ts`); the app uses `useViewPref` from
+  `mobile/src/state/viewPrefs.ts`. Don't keep view state only in
+  localStorage or AsyncStorage; the app's AsyncStorage copy is a cache.
 - Admin-only account creation. No self-serve sign-up.
 - Writing style for docs, comments, and commits: plain and direct, no em
   dashes.

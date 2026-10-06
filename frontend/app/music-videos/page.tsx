@@ -16,12 +16,15 @@ import { apiGet } from "@/lib/client-api";
 import { colorForTitle, hueFromString } from "@/lib/format";
 import { useScrollRestoration } from "@/lib/scroll-restoration";
 import type { MusicVideoArtist, OverrideOut } from "@/lib/types";
+import { useViewPref } from "@/lib/use-view-pref";
 
 type EditInitial = OverrideOut & { algorithmic_sort_hint: string };
 
 export default function MusicVideosPage() {
   useScrollRestoration();
   const [artists, setArtists] = useState<MusicVideoArtist[] | null>(null);
+  // Saved view: artist order, stored on the server per user.
+  const [mvSort, setMvSort] = useViewPref("musicvideos.sort");
   const [error, setError] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [reloadTick, setReloadTick] = useState(0);
@@ -90,8 +93,11 @@ export default function MusicVideosPage() {
 
   const filtered = useMemo(() => {
     if (!artists) return null;
+    if (mvSort === "videos") {
+      return artists.slice().sort((a, b) => b.video_count - a.video_count || a.name.localeCompare(b.name));
+    }
     return artists;
-  }, [artists]);
+  }, [artists, mvSort]);
 
   return (
     <AuthShell>
@@ -100,6 +106,23 @@ export default function MusicVideosPage() {
       <div className="filter-bar">
         <span className="lbl">Browse</span>
         <span className="chip on">Artists</span>
+      </div>
+      <div className="filter-bar">
+        <span className="lbl">Sort</span>
+        <button
+          type="button"
+          className={`chip ${mvSort === "name" ? "on" : ""}`}
+          onClick={() => setMvSort("name")}
+        >
+          Name
+        </button>
+        <button
+          type="button"
+          className={`chip ${mvSort === "videos" ? "on" : ""}`}
+          onClick={() => setMvSort("videos")}
+        >
+          Most videos
+        </button>
       </div>
 
       {error ? (

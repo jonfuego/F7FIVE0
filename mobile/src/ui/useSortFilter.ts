@@ -1,6 +1,5 @@
 import { useMemo } from "react";
 
-import { useSetting } from "@/state/settings";
 import { applySortFilter, type FilterOption, type SortDir, type SortOption } from "./sortFilter";
 
 export interface SortFilterState {
@@ -18,23 +17,41 @@ export interface UseSortFilterResult<T> {
   setFilterKey: (key: string | null) => void;
 }
 
-/** Per-screen sort/filter with persistence (crit 39). Choices are stored under
- * `sort:<screen>` via useSetting (AsyncStorage, no tokens). Pass the screen's
- * sort options, optional filter options, and the raw list; get back the
- * sorted/filtered list plus setters wired to persistence. */
-export function useSortFilter<T>(
-  screen: string,
-  items: T[],
+/** The starting sort/filter for a screen: its first sort, ascending, no filter. */
+export function sortFilterInitial<T>(
   sorts: SortOption<T>[],
-  filters?: FilterOption<T>[],
   defaults?: Partial<SortFilterState>,
-): UseSortFilterResult<T> {
-  const initial: SortFilterState = {
+): SortFilterState {
+  return {
     sortKey: defaults?.sortKey ?? sorts[0]?.key ?? "",
     dir: defaults?.dir ?? "asc",
     filterKey: defaults?.filterKey ?? null,
   };
-  const [state, setState] = useSetting<SortFilterState>(`sort:${screen}`, initial);
+}
+
+/** Validator for a saved sort/filter view (drops anything malformed). */
+export function isSortFilterState(v: unknown): v is SortFilterState {
+  if (!v || typeof v !== "object") return false;
+  const o = v as Record<string, unknown>;
+  return (
+    typeof o.sortKey === "string" &&
+    (o.dir === "asc" || o.dir === "desc") &&
+    (o.filterKey === null || typeof o.filterKey === "string")
+  );
+}
+
+/** Per-screen sort/filter. The state is a saved view the screen gets from
+ * useViewPref (`sort:<screen>`, stored on the server per user so it follows
+ * you across phone, web and TV). Pass that [state, setState], the screen's
+ * sort options, optional filter options, and the raw list; get back the
+ * sorted/filtered list plus setters. */
+export function useSortFilter<T>(
+  view: [SortFilterState, (s: SortFilterState) => void],
+  items: T[],
+  sorts: SortOption<T>[],
+  filters?: FilterOption<T>[],
+): UseSortFilterResult<T> {
+  const [state, setState] = view;
 
   const sorted = useMemo(
     () =>

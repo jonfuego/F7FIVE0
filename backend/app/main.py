@@ -24,6 +24,7 @@ from app.api import live as live_routes
 from app.api import media_files as media_files_routes
 from app.api import passkeys as passkeys_routes
 from app.api import queue as queue_routes
+from app.api import view_prefs as view_prefs_routes
 from app.api import remote_access as remote_access_routes
 from app.api import tracks as tracks_routes
 from app.api import requests as requests_routes
@@ -128,6 +129,7 @@ app.include_router(sessions_routes.router, prefix="/api/sessions", tags=["sessio
 app.include_router(client_routes.router, prefix="/api/client", tags=["client"])
 app.include_router(library_routes.router, prefix="/api", tags=["library"])
 app.include_router(queue_routes.router, prefix="/api", tags=["library", "queue"])
+app.include_router(view_prefs_routes.router, prefix="/api", tags=["library", "view-prefs"])
 app.include_router(requests_routes.router, prefix="/api/requests", tags=["requests"])
 app.include_router(auto_playlist_routes.router, prefix="/api", tags=["library", "auto-playlist"])
 # Phase 2 smart-audio + track-selection read endpoints.

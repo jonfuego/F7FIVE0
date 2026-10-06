@@ -15,6 +15,7 @@ import { formatDuration } from "@/lib/format";
 import { songRowToQueueItem, useQueue, type QueueItem } from "@/lib/queue";
 import { useScrollRestoration } from "@/lib/scroll-restoration";
 import type { SongRow } from "@/lib/types";
+import { useViewPref } from "@/lib/use-view-pref";
 
 const DEBOUNCE_MS = 200;
 const FETCH_LIMIT = 2000;
@@ -43,6 +44,15 @@ function SongsShell() {
 
 function SongsPageInner() {
   useScrollRestoration();
+  // Saved view: being on Songs makes it the Music browse tab (stored on the
+  // server per user), once per visit.
+  const [browse, setBrowse, browseLoaded] = useViewPref("music.browse");
+  const markedRef = useRef(false);
+  useEffect(() => {
+    if (!browseLoaded || markedRef.current) return;
+    markedRef.current = true;
+    if (browse !== "songs") setBrowse("songs");
+  }, [browseLoaded, browse, setBrowse]);
   const router = useRouter();
   const params = useSearchParams();
   const initialQ = params.get("q") ?? "";
@@ -99,8 +109,8 @@ function SongsPageInner() {
 
       <div className="filter-bar">
         <span className="lbl">Browse</span>
-        <Link href="/music" className="chip">Artists</Link>
-        <Link href="/music/albums" className="chip">Albums</Link>
+        <Link href="/music" className="chip" onClick={() => setBrowse("artists")}>Artists</Link>
+        <Link href="/music/albums" className="chip" onClick={() => setBrowse("albums")}>Albums</Link>
         <span className="chip on">Songs</span>
       </div>
 

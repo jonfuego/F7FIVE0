@@ -4,6 +4,7 @@ import { ScrollView, StyleSheet } from "react-native";
 
 import { useContinueWatching, useMovies, useMusicVideoArtists, useShows } from "@/api/queries";
 import { ContinueWatchingCard } from "@/ui/ContinueWatchingCard";
+import { useViewPref } from "@/state/viewPrefs";
 import { HubScreen } from "@/ui/HubScreen";
 import { MarqueeHeader } from "@/ui/MarqueeHeader";
 import { PosterCard } from "@/ui/PosterCard";
@@ -91,13 +92,21 @@ function VideoAll({ select }: { select: (key: string) => void }): React.ReactEle
   );
 }
 
+const VIDEO_TABS = ["all", "movies", "shows", "videos"];
+function isVideoTab(v: unknown): v is string {
+  return typeof v === "string" && VIDEO_TABS.includes(v);
+}
+
 /** Movies & Shows tab: web-style BROWSE chips (All / Movies / TV Shows / Music
- * Videos) with the PWA's page titles (THE CINEMA, TELEVISION, MUSIC VIDEOS). */
+ * Videos) with the PWA's page titles (MOVIES, TELEVISION, MUSIC VIDEOS). The
+ * chosen chip is a saved view on the server, per user. */
 export default function MoviesHome(): React.ReactElement {
+  const [tab, setTab] = useViewPref("hub:video", "all", isVideoTab);
   return (
     <HubScreen
       header={<MarqueeHeader />}
-      storageKey="hub:video"
+      selected={tab}
+      onSelect={setTab}
       sections={[
         { key: "all", label: "All", title: "Movies & Shows", render: (select) => <VideoAll select={select} /> },
         { key: "movies", label: "Movies", title: "Movies", render: () => <MoviesLibrary /> },

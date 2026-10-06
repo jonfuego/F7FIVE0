@@ -14,7 +14,8 @@ import { SortFilterBar } from "@/ui/SortFilterBar";
 import { Tile } from "@/ui/Tile";
 import { useAlphaRail } from "@/ui/useAlphaRail";
 import { useGrid } from "@/ui/useGrid";
-import { useSortFilter } from "@/ui/useSortFilter";
+import { useViewPref } from "@/state/viewPrefs";
+import { isSortFilterState, sortFilterInitial, useSortFilter } from "@/ui/useSortFilter";
 
 const ALBUM_SORTS: SortOption<Album>[] = [
   { key: "title", label: "Title", value: (a) => a.title },
@@ -38,7 +39,9 @@ export function AlbumsLibrary(): React.ReactElement {
   const albums = useAlbums();
   const router = useRouter();
   const { columns, itemWidth } = useGrid();
-  const sf = useSortFilter("albums", albums.data ?? [], ALBUM_SORTS, ALBUM_FILTERS);
+  // Saved view (server, per user): this screen's sort and filter.
+  const sortView = useViewPref("sort:albums", sortFilterInitial(ALBUM_SORTS), isSortFilterState);
+  const sf = useSortFilter(sortView, albums.data ?? [], ALBUM_SORTS, ALBUM_FILTERS);
   const { listRef, active, onSelect } = useAlphaRail(sf.items, (a) => a.title, columns);
 
   return (

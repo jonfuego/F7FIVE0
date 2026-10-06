@@ -15,6 +15,7 @@ import { Grid, GridEmpty } from "@/components/Grid";
 import { MediaCard } from "@/components/MediaCard";
 import { apiGet } from "@/lib/client-api";
 import { useScrollRestoration } from "@/lib/scroll-restoration";
+import { useViewPref } from "@/lib/use-view-pref";
 import type { Series, OverrideOut } from "@/lib/types";
 
 type EditInitial = OverrideOut & { algorithmic_sort_hint: string };
@@ -27,7 +28,8 @@ export default function SeriesPage() {
   useScrollRestoration();
   const [series, setSeries] = useState<Series[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [status, setStatus] = useState<Status>("All");
+  // Saved view: stored on the server per user (lib/use-view-pref.ts).
+  const [status, setStatus] = useViewPref("tv.status");
   const [isAdmin, setIsAdmin] = useState(false);
   const [reloadTick, setReloadTick] = useState(0);
   const [editTarget, setEditTarget] = useState<Series | null>(null);

@@ -12,7 +12,8 @@ import type { FilterOption, SortOption } from "@/ui/sortFilter";
 import { toggleDir } from "@/ui/sortFilter";
 import { SortFilterBar } from "@/ui/SortFilterBar";
 import { Tile } from "@/ui/Tile";
-import { useSortFilter } from "@/ui/useSortFilter";
+import { useViewPref } from "@/state/viewPrefs";
+import { isSortFilterState, sortFilterInitial, useSortFilter } from "@/ui/useSortFilter";
 
 const MV_SORTS: SortOption<MusicVideoArtist>[] = [
   { key: "name", label: "Name", value: (a) => a.name },
@@ -31,7 +32,9 @@ export function MusicVideosLibrary(): React.ReactElement {
   const artists = useMusicVideoArtists();
   const router = useRouter();
   const { columns, itemWidth } = useGrid(false);
-  const sf = useSortFilter("music-videos", artists.data ?? [], MV_SORTS, MV_FILTERS);
+  // Saved view (server, per user): this screen's sort and filter.
+  const sortView = useViewPref("sort:music-videos", sortFilterInitial(MV_SORTS), isSortFilterState);
+  const sf = useSortFilter(sortView, artists.data ?? [], MV_SORTS, MV_FILTERS);
 
   return (
     <View style={libraryBody.pad}>
