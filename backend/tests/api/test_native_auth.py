@@ -174,7 +174,7 @@ def test_browser_and_pwa_ttls_unchanged(api):
         settings.jwt_refresh_ttl_days * 86400
     )
 
-    # PWA: body client_type=pwa keeps the long PWA window.
+    # PWA: body client_type=pwa gets the 90-day PWA window (SEC-P1-3).
     pwa = client.post(
         "/api/auth/login",
         json={"username": "pwa-user", "password": PASSWORD, "client_type": "pwa"},

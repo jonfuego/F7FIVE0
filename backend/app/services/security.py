@@ -87,10 +87,15 @@ def hash_refresh_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
-# Effectively-persistent refresh TTL for installed PWAs. Browser sessions
-# stay on the configured 30-day sliding window; PWA shells get this so the
-# home-screen icon never re-prompts for credentials.
-PWA_REFRESH_DAYS = 3650  # ~10 years
+# Installed-PWA refresh TTL. SEC-P1-3: a client-supplied client_type=pwa used
+# to buy a ~10-year window, so a single leaked refresh token was good for a
+# decade. PWA now matches native: a 90-day *sliding* window, re-stamped and
+# rotated on every refresh (see api/auth.py refresh). An installed PWA that is
+# opened at least once every 90 days never re-prompts; one left untouched for
+# 90 days signs in again. Existing longer-lived PWA sessions are capped to 90
+# days the next time they refresh, because refresh re-stamps expires_at to
+# now + refresh_days_for(client_type).
+PWA_REFRESH_DAYS = 90
 
 # Native clients (phones and TVs) use a 90-day *sliding* window: every
 # successful refresh issues a new token with a fresh 90-day expiry, so a
