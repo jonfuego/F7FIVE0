@@ -56,11 +56,13 @@ from webauthn.helpers.structs import (
     UserVerificationRequirement,
 )
 
-from app.api.auth import (
-    _issue_tokens, _log_auth_event, _login_clear, _login_record_failure,
-    _login_throttle, _throttle_key,
-)
+from app.api.auth import _client_ip, _issue_tokens, _log_auth_event
 from app.api.deps import current_user, get_db
+from app.services import login_throttle
+
+# Passkey logins don't carry a username up front (the credential resolves the
+# user), so they share one throttle bucket under this synthetic account name.
+_PASSKEY_THROTTLE_USER = "\x00passkey"
 from app.api.schemas import (
     PasskeyLoginVerifyRequest, PasskeyOut, PasskeyRegisterVerifyRequest,
     PasskeyRenameRequest, TokenPair,
@@ -276,22 +278,31 @@ def login_verify(
     db: Annotated[Session, Depends(get_db)],
 ) -> TokenPair:
     """Verify an assertion and issue tokens. Uses the shared login throttle."""
-    throttle_key = _throttle_key(request, "passkey")
-    _login_throttle(throttle_key)
+    client_ip = _client_ip(request)
+    retry = login_throttle.retry_after_for(
+        db, username=_PASSKEY_THROTTLE_USER, client_ip=client_ip,
+    )
+    if retry is not None:
+        login_throttle.record_failure(db, username=_PASSKEY_THROTTLE_USER, client_ip=client_ip)
+        db.commit()
+        raise HTTPException(
+            status_code=429, detail="too_many_attempts",
+            headers={"Retry-After": str(retry)},
+        )
 
     challenge_b64 = _challenge_from_credential(body.credential)
     _consume_challenge(db, challenge=challenge_b64, kind="login", user_id=None)
 
     raw_id = body.credential.get("id") or body.credential.get("rawId")
     if not raw_id or not isinstance(raw_id, str):
-        _fail_login(db, throttle_key, request, user_id=None)
+        _fail_login(db, client_ip, request, user_id=None)
         raise HTTPException(status_code=400, detail="invalid_credential")
 
     cred = db.scalar(
         select(WebAuthnCredential).where(WebAuthnCredential.credential_id == raw_id)
     )
     if cred is None:
-        _fail_login(db, throttle_key, request, user_id=None)
+        _fail_login(db, client_ip, request, user_id=None)
         raise HTTPException(status_code=401, detail="unknown_passkey")
 
     try:
@@ -306,22 +317,22 @@ def login_verify(
         )
     except InvalidAuthenticationResponse as exc:
         log.info("passkey assertion rejected: %s", exc)
-        _fail_login(db, throttle_key, request, user_id=cred.user_id)
+        _fail_login(db, client_ip, request, user_id=cred.user_id)
         raise HTTPException(status_code=401, detail="passkey_verification_failed")
 
     # Sign-count regression: a real (non-zero) counter that goes backwards
     # signals a cloned authenticator. Many platform authenticators report 0
     # every time; only enforce when the stored counter is non-zero.
     if cred.sign_count > 0 and verified.new_sign_count <= cred.sign_count:
-        _fail_login(db, throttle_key, request, user_id=cred.user_id)
+        _fail_login(db, client_ip, request, user_id=cred.user_id)
         raise HTTPException(status_code=401, detail="sign_count_regression")
 
     user = db.get(User, cred.user_id)
     if user is None or not user.is_active:
-        _fail_login(db, throttle_key, request, user_id=cred.user_id)
+        _fail_login(db, client_ip, request, user_id=cred.user_id)
         raise HTTPException(status_code=401, detail="inactive_or_unknown_user")
 
-    _login_clear(throttle_key)
+    login_throttle.clear(db, username=_PASSKEY_THROTTLE_USER, client_ip=client_ip)
     cred.sign_count = int(verified.new_sign_count or 0)
     cred.last_used_at = _now()
 
@@ -341,10 +352,10 @@ def login_verify(
     return tokens
 
 
-def _fail_login(db: Session, throttle_key, request: Request,
+def _fail_login(db: Session, client_ip, request: Request,
                 *, user_id: Optional[uuid.UUID]) -> None:
     """Record a failed passkey login (throttle + audit) and commit."""
-    _login_record_failure(throttle_key)
+    login_throttle.record_failure(db, username=_PASSKEY_THROTTLE_USER, client_ip=client_ip)
     _log_auth_event(db, user_id=user_id, event="passkey_login_failed", request=request)
     db.commit()
 
