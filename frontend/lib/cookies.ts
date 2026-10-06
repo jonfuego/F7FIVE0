@@ -12,6 +12,7 @@
 
 import { headers } from "next/headers";
 import type { NextResponse } from "next/server";
+import { requestProto } from "@/lib/origin";
 import { ACCESS_COOKIE, REFRESH_COOKIE } from "@/lib/server-env";
 
 const IS_PROD = process.env.NODE_ENV === "production";
@@ -30,8 +31,8 @@ async function isSecureRequest(): Promise<boolean> {
   if (mode === "false") return false;
   if (!IS_PROD) return false;
   try {
-    const proto = ((await headers()).get("x-forwarded-proto") ?? "").split(",")[0].trim();
-    return proto === "https";
+    // Only trust a sanitised http/https value (SEC-P1-1); never a forged scheme.
+    return requestProto(await headers()) === "https";
   } catch {
     return IS_PROD;
   }

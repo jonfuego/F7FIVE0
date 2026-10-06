@@ -37,21 +37,36 @@ def test_requests_disabled_without_arr(client, monkeypatch):
 
 def test_base_url_uses_public_scheme_for_public_host(monkeypatch):
     """Tailscale Funnel terminates HTTPS without X-Forwarded-Proto; links on
-    the public address must still be https."""
+    the public address must still be https. SEC-P1-1: the forwarded host is
+    honoured only from a trusted peer (here loopback) and only if it passes the
+    allowlist; an unknown public host is refused and falls back to PUBLIC_URL."""
     from starlette.requests import Request as StarletteRequest
 
     from app.api.stream import _base_url
 
     def req(headers):
-        scope = {"type": "http", "scheme": "http", "path": "/", "headers": [(k.encode(), v.encode()) for k, v in headers.items()]}
+        # client is loopback -> a trusted proxy peer.
+        scope = {
+            "type": "http", "scheme": "http", "path": "/",
+            "client": ("127.0.0.1", 1234),
+            "headers": [(k.encode(), v.encode()) for k, v in headers.items()],
+        }
         return StarletteRequest(scope)
 
     monkeypatch.setattr(settings, "public_url", "https://f7five0.tail1234.ts.net")
+    monkeypatch.setattr(settings, "home_url", "")
     assert _base_url(req({"host": "f7five0.tail1234.ts.net"})) == "https://f7five0.tail1234.ts.net"
-    # LAN access keeps plain http.
+    # LAN access (a private literal) keeps plain http.
     assert _base_url(req({"host": "192.168.1.20:3001"})) == "http://192.168.1.20:3001"
-    # An explicit forwarded proto on other hosts is still honored.
-    assert _base_url(req({"host": "media.example.com", "x-forwarded-proto": "https"})) == "https://media.example.com"
+    # An unknown public host is not in the allowlist, so it is refused and the
+    # configured PUBLIC_URL is used instead of the spoofable header.
+    assert _base_url(req({"host": "media.example.com", "x-forwarded-proto": "https"})) == "https://f7five0.tail1234.ts.net"
+    # A forwarded host from an untrusted peer is ignored entirely.
+    untrusted = StarletteRequest({
+        "type": "http", "scheme": "http", "path": "/", "client": ("8.8.8.8", 1),
+        "headers": [(b"host", b"evil.com"), (b"x-forwarded-proto", b"https")],
+    })
+    assert _base_url(untrusted) == "https://f7five0.tail1234.ts.net"
 
 
 def test_features_transcode_hardware(client, monkeypatch):

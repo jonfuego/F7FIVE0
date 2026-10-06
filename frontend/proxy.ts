@@ -38,6 +38,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { ACCESS_COOKIE, REFRESH_COOKIE } from "@/lib/server-env";
+import { siteOriginFromHeaders } from "@/lib/origin";
 
 const API_ORIGIN = process.env.API_ORIGIN ?? "http://127.0.0.1:8001";
 const STREAM_ORIGIN = process.env.STREAM_ORIGIN ?? "http://127.0.0.1:8002";
@@ -132,13 +133,10 @@ export function proxy(req: NextRequest) {
   // Cloning req.nextUrl carries Next's bind address (HOSTNAME=127.0.0.1,
   // PORT=3001) and its port persists even when we overwrite .host, which
   // produces a Location like https://media.example.com:3001/login that
-  // the tunnel will not serve. Trust the Host and X-Forwarded-Proto
-  // headers the tunnel forwards and construct a clean URL.
-  const hostHeader = req.headers.get("host") ?? req.nextUrl.host;
-  const protoHeader =
-    req.headers.get("x-forwarded-proto") ??
-    req.nextUrl.protocol.replace(":", "");
-  const url = new URL(`${protoHeader}://${hostHeader}`);
+  // the tunnel will not serve. The shared helper sanitises and allowlists
+  // the forwarded Host / X-Forwarded-Proto so a forged header can't redirect
+  // off-site or inject into the Location (SEC-P1-1).
+  const url = new URL(siteOriginFromHeaders(req.headers));
   url.pathname = "/login";
   // Round-trip the original destination so we can bounce back after login.
   // Skip for API routes; those don't benefit from the redirect hint.

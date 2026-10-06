@@ -226,6 +226,9 @@ def _png() -> bytes:
 def test_stream_start_returns_signed_absolute_art_url(client, db_session, tmp_path, monkeypatch):
     from app.models.user import User
     monkeypatch.setattr(settings, "art_root", tmp_path)
+    # SEC-P1-1: the absolute origin comes from the configured PUBLIC_URL, not a
+    # spoofable Host header from an untrusted peer.
+    monkeypatch.setattr(settings, "public_url", "https://api.example.com")
     owner = User(username="art-owner", display_name="O", password_hash="x",
                  role="member", is_active=True)
     db_session.add(owner)
@@ -448,11 +451,13 @@ def test_library_lists_expose_created_at(client, db_session):
 # Signed download URL (criterion 42/43: downloads never depend on a bearer
 # that can expire mid-transfer)
 # ---------------------------------------------------------------------------
-def test_download_url_signed_and_fetchable_without_bearer(client, db_session, tmp_path):
+def test_download_url_signed_and_fetchable_without_bearer(client, db_session, tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
     from app.api.deps import get_db
     from app.main import app
 
+    # SEC-P1-1: absolute origin comes from PUBLIC_URL, not a spoofable Host.
+    monkeypatch.setattr(settings, "public_url", "https://api.example.com")
     p = tmp_path / "song.flac"
     p.write_bytes(b"fLaC-bytes")
     mf = MediaFile(kind=MediaKind.track, ref_id=uuid.uuid4(), path=str(p),

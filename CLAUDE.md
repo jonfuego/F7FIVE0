@@ -55,10 +55,22 @@ INSTALL.md for the operator view.
   gateway, non-BFF `/api/*` to the API, and BFF paths to the API when the
   request carries a Bearer token or a signed `sig` query (native app).
   Users expose one port (3001) or one tunnel hostname.
-- Backend builds absolute URLs from `X-Forwarded-Host` / `X-Forwarded-Proto`
-  (see `api/stream.py:_base_url`). Session cookies are `Secure` only when
-  the request arrived over HTTPS (`lib/cookies.ts`), so plain-HTTP LAN
-  installs can sign in.
+- Trusted proxies (SEC-P1-1). Forwarded headers (`CF-Connecting-IP`,
+  `X-Forwarded-For`, `X-Forwarded-Host`, `X-Forwarded-Proto`) are honoured
+  only when the direct peer is a trusted proxy: loopback is always trusted,
+  plus any IP/CIDR in `TRUSTED_PROXIES` (the front door runs on this host over
+  loopback, so Setup writes loopback and the default is fine). The one helper
+  is `app/services/trusted_proxy.py`: `real_client_ip` drives the audit log and
+  the login throttle (a direct LAN caller can't spoof its IP), and
+  `forwarded_origin` feeds `api/stream.py:_base_url`, which accepts a forwarded
+  host only from a trusted peer AND only if it passes the allowlist (the
+  configured public/home host, loopback, or a private LAN literal), else falls
+  back to `PUBLIC_URL`, then loopback. So a hostile `X-Forwarded-Host` never
+  lands in a signed URL. On the web side, `frontend/lib/origin.ts` is the
+  matching helper: redirects (`proxy.ts`, `app/download/android/route.ts`) and
+  the cookie `Secure` flag (`lib/cookies.ts`) build origins through it instead
+  of trusting a raw browser `Host` / `X-Forwarded-Proto`. Session cookies are
+  still `Secure` only over real HTTPS, so plain-HTTP LAN installs can sign in.
 - Libraries: when a `*_API_KEY` for Radarr/Sonarr/Lidarr is set, that app
   owns the library (`services/sync.py`). Otherwise `services/scan_library.py`
   scans `LIBRARY_ROOT_*` folders. Never let both write the same library.

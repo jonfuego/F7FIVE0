@@ -679,6 +679,11 @@ $want = [ordered]@{
     "STREAM_PORT"             = "$StreamPort"
     "WEB_PORT"                = "$WebPort"
     "F7FIVE0_DOWNLOADS_DIR"   = Join-Path $DataDir "downloads"
+    # SEC-P1-1: only the local front door may set forwarding headers. The Next
+    # proxy and any tunnel run on this host over loopback, so loopback is the
+    # whole trusted set for a normal install. Add a LAN proxy IP/CIDR here only
+    # if one actually fronts the services.
+    "TRUSTED_PROXIES"         = "127.0.0.1,::1"
 }
 $lines = New-Object System.Collections.Generic.List[string]
 if (-not (Test-Path $EnvFile)) {

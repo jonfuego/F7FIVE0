@@ -13,6 +13,7 @@ from sqlalchemy import text
 
 from app.config import settings
 from app.db import engine
+from app.services.trusted_proxy import real_client_ip
 from app import scheduler
 from app.api import admin as admin_routes
 from app.api import art as art_routes
@@ -82,12 +83,10 @@ if settings.environment == "development":
 
 @app.middleware("http")
 async def client_ip_middleware(request: Request, call_next):
-    """Extract real client IP from CF-Connecting-IP when behind the tunnel."""
-    cf_ip = request.headers.get("cf-connecting-ip")
-    if cf_ip:
-        request.state.client_ip = cf_ip
-    else:
-        request.state.client_ip = request.client.host if request.client else "unknown"
+    """Resolve the real client IP, trusting CF-Connecting-IP / X-Forwarded-For
+    only from a trusted proxy peer (SEC-P1-1). The audit log and login throttle
+    read request.state.client_ip, so a direct LAN caller cannot forge it."""
+    request.state.client_ip = real_client_ip(request)
     return await call_next(request)
 
 
