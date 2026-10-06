@@ -283,6 +283,12 @@ export function Player({
           // Gateway caps concurrent transcodes, so a small buffer ahead
           // keeps memory modest.
           maxBufferLength: 30,
+          // Drop what has already played. hls.js keeps the whole back buffer
+          // by default (backBufferLength Infinity), so a long movie piled up
+          // every played segment in the SourceBuffer until Chrome's own quota
+          // kicked in: about 590 s of 1080p and 326 MB more browser memory
+          // after 10 minutes on the dev PC.
+          backBufferLength: 30,
           enableWorker: true,
           // Don't fetch a level playlist until we've pinned one: each level
           // request starts an ffmpeg on the server.
