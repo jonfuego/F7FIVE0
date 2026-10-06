@@ -24,6 +24,7 @@ import { useQueue, type QueueItem } from "@/lib/queue";
 import type { MediaMarker, Progress, StreamStart, StreamStartRequest } from "@/lib/types";
 import { loadFeatures } from "@/lib/features";
 import { prefHeight, readQualityPref, writeQualityPref } from "@/lib/quality";
+import { browserClientCaps } from "@/lib/playback-caps";
 
 const AUDIO_CONTAINERS = new Set([
   "mp3", "m4a", "aac", "wav", "flac", "ogg", "oga", "opus", "wma",
@@ -333,6 +334,8 @@ export default function WatchPage() {
       try {
         const body: StreamStartRequest = { file_id: mediaFileId };
         if (resume.resumeSec > 0) body.resume_sec = resume.resumeSec;
+        const caps = browserClientCaps();
+        if (caps) body.client_caps = caps;
         if (quality) {
           const features = await loadFeatures();
           if (!features.transcode?.hardware) {

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import date, datetime
-from typing import Optional, Union
+from typing import Annotated, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -559,6 +559,19 @@ class SearchResultOut(BaseModel):
 
 
 # ---- Streaming -------------------------------------------------------------
+_CapName = Annotated[str, Field(pattern=r"^[a-z0-9.-]{1,16}$")]
+
+
+class ClientCapsIn(BaseModel):
+    """What the client says it plays as-is (web: from `canPlayType`).
+    Short lowercase names: containers like mp4 / mkv / webm, video codecs
+    like h264 / hevc / vp9 / av1, audio codecs like aac / mp3 / opus."""
+
+    containers: list[_CapName] = Field(default_factory=list, max_length=16)
+    video_codecs: list[_CapName] = Field(default_factory=list, max_length=16)
+    audio_codecs: list[_CapName] = Field(default_factory=list, max_length=16)
+
+
 class StreamStartRequest(BaseModel):
     file_id: uuid.UUID
     # Optional resume offset in seconds. The API quantizes this to a bucket
@@ -589,6 +602,12 @@ class StreamStartRequest(BaseModel):
     # native app). Cast starts are logged (`stream_start purpose=cast`) so the
     # smoke check can count them; no other behavior changes.
     purpose: str = Field(default="play", pattern="^(play|cast)$")
+
+    # Optional client capability report. When present, a file whose
+    # container and codecs the client reported direct-plays instead of being
+    # transcoded. Omitted (older clients, the app, cast) keeps the built-in
+    # direct-play list.
+    client_caps: Optional[ClientCapsIn] = None
 
     @field_validator("subtitle")
     @classmethod

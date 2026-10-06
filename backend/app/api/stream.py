@@ -203,8 +203,18 @@ def stream_start(
             mf.kind.value, mf.id,
         )
 
-    decision = playback.decide(mf)
+    caps = None
+    if body.client_caps is not None and body.purpose != "cast":
+        caps = playback.ClientCaps.from_lists(
+            body.client_caps.containers,
+            body.client_caps.video_codecs,
+            body.client_caps.audio_codecs,
+        )
+    decision = playback.decide(mf, caps)
     mode = decision.mode
+    if decision.mode == "hls" and not playback.is_audio_only(mf):
+        log.info("stream_start transcode media_file_id=%s reason=%s caps=%s",
+                 mf.id, decision.reason, "yes" if caps else "no")
 
     # Track selection (spec section I). Only video can carry a pick: an
     # alternate audio track or a burned image subtitle forces an HLS remux
@@ -232,6 +242,20 @@ def stream_start(
             keep_source_height=not settings.nvenc_enabled,
         )
         opts_token = opts.to_token()
+        # A quality pick at or above the source height is not a cap. On a
+        # CPU-only server it is kept so an HLS stream encodes at that height,
+        # but it must not turn a file the client can play as-is into a
+        # transcode.
+        if (
+            opts_token
+            and decision.mode == "direct"
+            and opts.audio_index is None
+            and opts.burn_sub_index is None
+            and opts.max_height is not None
+            and mf.height
+            and opts.max_height >= mf.height
+        ):
+            opts_token = ""
         if opts_token:
             mode = "hls"
 

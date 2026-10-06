@@ -9,8 +9,8 @@ v1. Direct-play is a narrow allow-list; everything else falls back to HLS.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Optional
+from dataclasses import dataclass, field
+from typing import Iterable, Optional
 
 from app.models.media_file import MediaFile, ScanState
 
@@ -37,6 +37,40 @@ _DIRECT_PLAY_AUDIO_CONTAINERS = {"mp3", "m4a", "aac", "wav", "flac", "ogg"}
 # that plays on Safari, Chrome, Firefox, iOS, Android without a transcode.
 _DIRECT_PLAY_VIDEO = {"h264", "avc1"}
 _DIRECT_PLAY_AUDIO = {"aac", "mp4a", "mp3"}
+
+
+# Codec names a client may report, mapped onto the names the scanner stores.
+_CODEC_ALIASES = {"avc1": "h264", "avc": "h264", "hvc1": "hevc", "hev1": "hevc",
+                  "h265": "hevc", "mp4a": "aac", "ac-3": "ac3", "ec-3": "eac3"}
+_CONTAINER_ALIASES = {"matroska": "mkv"}
+
+
+def _norm_codec(name: Optional[str]) -> str:
+    n = (name or "").strip().lower()
+    return _CODEC_ALIASES.get(n, n)
+
+
+@dataclass(frozen=True)
+class ClientCaps:
+    """What a client says it plays as-is: containers and codecs, as the web
+    player learns them from `canPlayType`. Only widens the built-in direct-play
+    list; a client that reports nothing gets the old decision."""
+
+    containers: frozenset = field(default_factory=frozenset)
+    video_codecs: frozenset = field(default_factory=frozenset)
+    audio_codecs: frozenset = field(default_factory=frozenset)
+
+    @classmethod
+    def from_lists(cls, containers: Iterable[str] = (), video_codecs: Iterable[str] = (),
+                   audio_codecs: Iterable[str] = ()) -> "ClientCaps":
+        def c(x: str) -> str:
+            n = x.strip().lower()
+            return _CONTAINER_ALIASES.get(n, n)
+        return cls(
+            containers=frozenset(c(x) for x in containers),
+            video_codecs=frozenset(_norm_codec(x) for x in video_codecs),
+            audio_codecs=frozenset(_norm_codec(x) for x in audio_codecs),
+        )
 
 
 @dataclass(frozen=True)
@@ -85,8 +119,14 @@ def is_audio_only(mf: MediaFile) -> bool:
     return (getattr(mf, "container", None) or "").lower() in _AUDIO_CONTAINERS
 
 
-def can_direct_play(mf: MediaFile) -> tuple[bool, str]:
-    """Return (ok, reason). Reason populated whether ok or not."""
+def can_direct_play(mf: MediaFile, caps: Optional[ClientCaps] = None) -> tuple[bool, str]:
+    """Return (ok, reason). Reason populated whether ok or not.
+
+    `caps` is what the client reported it can play. Without it the narrow
+    built-in list applies (H.264 + AAC/MP3 in MP4). With it, a container or
+    codec the client reported also direct-plays: Chrome plays H.264 + AAC in
+    Matroska, so an MKV no longer gets re-encoded (and on a CPU-only server
+    scaled down to 720p) when the browser could have played the file."""
     if mf.scan_state != ScanState.ready:
         return False, f"scan_state={mf.scan_state.value}"
     container = (mf.container or "").lower()
@@ -102,16 +142,19 @@ def can_direct_play(mf: MediaFile) -> tuple[bool, str]:
             return True, "direct_ok_audio"
         return False, f"audio_container={container or 'unknown'}"
 
-    if container not in _DIRECT_PLAY_CONTAINERS:
+    reported = caps or ClientCaps()
+    if container not in _DIRECT_PLAY_CONTAINERS and container not in reported.containers:
         return False, f"container={container or 'unknown'}"
-    vcodec = (mf.video_codec or "").lower()
-    if vcodec and vcodec not in _DIRECT_PLAY_VIDEO:
+    vcodec = _norm_codec(mf.video_codec)
+    if vcodec and vcodec not in _DIRECT_PLAY_VIDEO and vcodec not in reported.video_codecs:
         return False, f"video_codec={vcodec}"
-    acodec = (mf.audio_codec or "").lower()
-    if acodec and acodec not in _DIRECT_PLAY_AUDIO:
+    acodec = _norm_codec(mf.audio_codec)
+    if acodec and acodec not in _DIRECT_PLAY_AUDIO and acodec not in reported.audio_codecs:
         return False, f"audio_codec={acodec}"
     # Music videos with no audio codec still pass here; the browser will
     # render silently if the file genuinely lacks audio.
+    if container not in _DIRECT_PLAY_CONTAINERS:
+        return True, "direct_ok_client_caps"
     return True, "direct_ok"
 
 
@@ -153,8 +196,8 @@ def single_rung_for_cpu(
     return (min(variants, key=lambda v: v.height),)
 
 
-def decide(mf: MediaFile) -> PlaybackDecision:
-    ok, reason = can_direct_play(mf)
+def decide(mf: MediaFile, caps: Optional[ClientCaps] = None) -> PlaybackDecision:
+    ok, reason = can_direct_play(mf, caps)
     if ok:
         return PlaybackDecision(mode="direct", variant="original", reason=reason)
     return PlaybackDecision(mode="hls", variant=None, reason=reason)
