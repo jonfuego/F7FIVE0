@@ -152,17 +152,14 @@ def api(db_session):
         yield db_session
 
     app.dependency_overrides[get_db] = _override_db
-    # The in-memory throttle is module-global; start clean so prior tests in
-    # the session don't leak failure counts into these.
-    from app.api import auth as auth_module
-    auth_module._login_failures.clear()
+    # The throttle state is the login_attempts table, wiped per test by the
+    # db_session teardown, so there is nothing to reset here.
     client = TestClient(app)
     try:
         yield client, db_session
     finally:
         client.close()
         app.dependency_overrides.clear()
-        auth_module._login_failures.clear()
 
 
 def _make_user(db):

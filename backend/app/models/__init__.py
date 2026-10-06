@@ -7,6 +7,7 @@ from app.db import Base
 
 # Identity
 from app.models.user import User, Session as UserSession, AuthEvent  # noqa: F401
+from app.models.login_attempt import LoginAttempt  # noqa: F401
 from app.models.webauthn import WebAuthnCredential, WebAuthnChallenge  # noqa: F401
 
 # Libraries + canonical metadata

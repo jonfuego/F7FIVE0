@@ -52,11 +52,9 @@ def _passkeys_on(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _reset_login_throttle():
-    """The login throttle is in-process module state shared across tests; clear
-    it so one test's failed-login attempts can't trip another's 429."""
-    auth_module._login_failures.clear()
+    """The login throttle is now durable (the login_attempts table), which the
+    db_session teardown wipes between tests, so no manual reset is needed."""
     yield
-    auth_module._login_failures.clear()
 
 
 @pytest.fixture()

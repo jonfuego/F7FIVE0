@@ -9,7 +9,6 @@ Token model:
 from __future__ import annotations
 
 import secrets
-import time
 import uuid
 from datetime import datetime, timezone
 from typing import Annotated, Optional
@@ -19,6 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import current_user, get_db, require_admin
+from app.services import login_throttle
 from app.api.schemas import (
     LoginRequest, LogoutRequest, PasswordChangeRequest, PasswordResetRequest,
     ProfileUpdateRequest, RefreshRequest, TokenPair, UserCreateRequest, UserOut,
@@ -59,51 +59,16 @@ _DUMMY_HASH = hash_password(secrets.token_urlsafe(32))
 
 
 # ---------------------------------------------------------------------------
-# Login throttle
+# Login throttle (SEC-P1-4)
 # ---------------------------------------------------------------------------
-# In-process failed-login counter keyed on (client_ip, username). The tunnel
-# routes /api/auth/* straight to the API, which is a single uvicorn worker
-# today, so in-memory state is authoritative. If the API ever scales to
-# multiple workers this moves to the DB (auth_events already has the data).
-_THROTTLE_MAX_FAILURES = 5
-_THROTTLE_WINDOW_SEC = 15 * 60
-_THROTTLE_RETRY_AFTER = 60
-_login_failures: dict[tuple[str, str], list[float]] = {}
-
-
-def _throttle_key(request: Request, username: str) -> tuple[str, str]:
-    ip = getattr(request.state, "client_ip", None) or "unknown"
-    return (ip, username.lower())
-
-
-def _login_throttle(key: tuple[str, str]) -> None:
-    """Raise 429 if `key` has hit the failure ceiling inside the window.
-
-    Prunes timestamps older than the window on every call, so the map can't
-    grow without bound for a key that stops failing. Called before the
-    password check; recording happens only on an actual failure.
-    """
-    now = time.monotonic()
-    cutoff = now - _THROTTLE_WINDOW_SEC
-    hits = [t for t in _login_failures.get(key, ()) if t > cutoff]
-    if hits:
-        _login_failures[key] = hits
-    else:
-        _login_failures.pop(key, None)
-    if len(hits) >= _THROTTLE_MAX_FAILURES:
-        raise HTTPException(
-            status_code=429,
-            detail="too_many_attempts",
-            headers={"Retry-After": str(_THROTTLE_RETRY_AFTER)},
-        )
-
-
-def _login_record_failure(key: tuple[str, str]) -> None:
-    _login_failures.setdefault(key, []).append(time.monotonic())
-
-
-def _login_clear(key: tuple[str, str]) -> None:
-    _login_failures.pop(key, None)
+# Durable, proxy-aware throttle in app/services/login_throttle.py. State lives
+# in the login_attempts table, so it survives a restart and would coordinate
+# across workers. The client IP comes from request.state.client_ip, which is
+# honoured only from a trusted proxy peer (SEC-P1-1), so per-IP limits can't be
+# dodged with a spoofed header.
+def _client_ip(request: Request) -> Optional[str]:
+    ip = getattr(request.state, "client_ip", None)
+    return ip if ip and ip != "unknown" else None
 
 
 def _log_auth_event(
@@ -176,22 +141,34 @@ def login(
     request: Request,
     db: Annotated[Session, Depends(get_db)],
 ) -> TokenPair:
-    throttle_key = _throttle_key(request, body.username)
-    _login_throttle(throttle_key)
+    username = body.username.lower()
+    client_ip = _client_ip(request)
 
-    user = db.scalar(select(User).where(User.username == body.username.lower()))
+    # Durable throttle: block before touching the password check if this
+    # account/IP is over any limit. A blocked attempt is itself recorded, so
+    # continued hammering escalates the Retry-After.
+    retry = login_throttle.retry_after_for(db, username=username, client_ip=client_ip)
+    if retry is not None:
+        login_throttle.record_failure(db, username=username, client_ip=client_ip)
+        db.commit()
+        raise HTTPException(
+            status_code=429, detail="too_many_attempts",
+            headers={"Retry-After": str(retry)},
+        )
+
+    user = db.scalar(select(User).where(User.username == username))
     # Always run verify to keep timing consistent for unknown-vs-wrong-password.
     # _DUMMY_HASH is a valid bcrypt hash of random bytes that nothing will match.
     ok = verify_password(body.password, user.password_hash if user else _DUMMY_HASH)
 
     if not user or not ok or not user.is_active:
-        _login_record_failure(throttle_key)
+        login_throttle.record_failure(db, username=username, client_ip=client_ip)
         _log_auth_event(db, user_id=user.id if user else None,
                         event="login_failed", request=request)
         db.commit()
         raise HTTPException(status_code=401, detail="invalid_credentials")
 
-    _login_clear(throttle_key)
+    login_throttle.clear(db, username=username, client_ip=client_ip)
     # Client type: the body wins (native 2.0 clients send it explicitly);
     # the legacy x-client-type header is the fallback for the web/PWA client.
     # Anything unrecognized collapses to "browser" so its 30-day behavior is
