@@ -29,6 +29,7 @@ from app.services.playback import Variant
 from app.services.security import (
     sign_stream_url_params, verify_art_url_params, verify_stream_url_params,
 )
+from tests.conftest import make_active_session
 from app.services.track_opts import (
     TrackOpts, TrackOptsError, parse_token, resolve_track_opts,
 )
@@ -140,15 +141,18 @@ def test_out_dir_separates_options():
 
 
 def test_signature_binds_options():
-    uid, mid = uuid.uuid4(), uuid.uuid4()
-    p = sign_stream_url_params(uid, mid, offset_bucket=0, opts="a2")
+    uid, mid, sid = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    p = sign_stream_url_params(uid, mid, sid, offset_bucket=0, opts="a2")
     assert p["o"] == "a2"
-    assert verify_stream_url_params(str(uid), str(mid), p["exp"], p["sig"], 0, "a2")
-    assert not verify_stream_url_params(str(uid), str(mid), p["exp"], p["sig"], 0, "a3")
-    assert not verify_stream_url_params(str(uid), str(mid), p["exp"], p["sig"], 0, "")
-    plain = sign_stream_url_params(uid, mid)
+    assert p["sid"] == str(sid)
+    assert verify_stream_url_params(str(uid), str(mid), p["exp"], p["sig"], str(sid), 0, "a2")
+    assert not verify_stream_url_params(str(uid), str(mid), p["exp"], p["sig"], str(sid), 0, "a3")
+    assert not verify_stream_url_params(str(uid), str(mid), p["exp"], p["sig"], str(sid), 0, "")
+    # A sig minted for one session must not validate under a different sid.
+    assert not verify_stream_url_params(str(uid), str(mid), p["exp"], p["sig"], str(uuid.uuid4()), 0, "a2")
+    plain = sign_stream_url_params(uid, mid, sid)
     assert "o" not in plain
-    assert verify_stream_url_params(str(uid), str(mid), plain["exp"], plain["sig"], 0)
+    assert verify_stream_url_params(str(uid), str(mid), plain["exp"], plain["sig"], str(sid), 0)
 
 
 # ---------------------------------------------------------------------------
@@ -196,7 +200,7 @@ def test_stream_start_alt_audio_forces_hls_with_signed_opts(client, h264_movie, 
     q = _q(body["url"])
     assert q["o"] == "a2" and body["track_opts"] == "a2"
     assert verify_stream_url_params(q["uid"], str(h264_movie.id), int(q["exp"]),
-                                    q["sig"], int(q["t"]), q["o"])
+                                    q["sig"], q["sid"], int(q["t"]), q["o"])
 
 
 def test_stream_start_quality_and_burn(client, h264_movie, probe):
@@ -258,7 +262,7 @@ def test_stream_start_returns_signed_absolute_art_url(client, db_session, tmp_pa
     art = r.json()["art_url"]
     assert art.startswith(f"https://api.example.com/api/art/album/{album.id}/cover?")
     q = _q(art)
-    assert verify_art_url_params("album", album.id, "cover", q["uid"], int(q["exp"]), q["sig"])
+    assert verify_art_url_params("album", album.id, "cover", q["uid"], q["sid"], int(q["exp"]), q["sig"])
 
 
 def test_stream_start_art_url_null_without_art(client, h264_movie):
@@ -298,25 +302,50 @@ def hevc_1080(db_session, tmp_path):
     return mf
 
 
-def test_gateway_master_capped_and_propagates_opts(gateway, hevc_1080):
-    uid = uuid.uuid4()
-    p = sign_stream_url_params(uid, hevc_1080.id, opts="a2-q720")
+def test_gateway_master_capped_and_propagates_opts(gateway, hevc_1080, db_session):
+    sess = make_active_session(db_session)[1]
+    p = sign_stream_url_params(sess.user_id, hevc_1080.id, sess.id, opts="a2-q720")
     r = gateway.get(f"/stream/hls/{hevc_1080.id}/master.m3u8", params={
         "uid": p["uid"], "exp": p["exp"], "sig": p["sig"], "t": 0, "o": "a2-q720",
+        "sid": p["sid"],
     })
     assert r.status_code == 200, r.text
     uris = [l for l in r.text.splitlines() if l.startswith("/stream/")]
     assert uris and all("o=a2-q720" in u for u in uris)
+    # the propagated sub-URLs carry the session id so sub-fetches stay bound
+    assert all(f"sid={p['sid']}" in u for u in uris)
     assert not any("/high/" in u for u in uris)
 
 
-def test_gateway_rejects_opts_not_in_signature(gateway, hevc_1080):
-    uid = uuid.uuid4()
-    p = sign_stream_url_params(uid, hevc_1080.id)
+def test_gateway_rejects_opts_not_in_signature(gateway, hevc_1080, db_session):
+    sess = make_active_session(db_session)[1]
+    p = sign_stream_url_params(sess.user_id, hevc_1080.id, sess.id)
     r = gateway.get(f"/stream/hls/{hevc_1080.id}/master.m3u8", params={
         "uid": p["uid"], "exp": p["exp"], "sig": p["sig"], "t": 0, "o": "a2",
+        "sid": p["sid"],
     })
     assert r.status_code == 401
+
+
+def test_gateway_rejects_revoked_session(gateway, hevc_1080, db_session):
+    # SEC-P1-2: a valid signature whose session was revoked (real logout) 403s.
+    user, sess = make_active_session(db_session, revoked=True)
+    p = sign_stream_url_params(user.id, hevc_1080.id, sess.id)
+    r = gateway.get(f"/stream/hls/{hevc_1080.id}/master.m3u8", params={
+        "uid": p["uid"], "exp": p["exp"], "sig": p["sig"], "t": 0, "sid": p["sid"],
+    })
+    assert r.status_code == 403
+
+
+def test_gateway_tolerates_rotated_session(gateway, hevc_1080, db_session):
+    # SEC-P1-2: a session revoked by token *rotation* keeps authorizing its
+    # already-issued URLs so a long movie survives a refresh.
+    user, sess = make_active_session(db_session, rotated=True)
+    p = sign_stream_url_params(user.id, hevc_1080.id, sess.id)
+    r = gateway.get(f"/stream/hls/{hevc_1080.id}/master.m3u8", params={
+        "uid": p["uid"], "exp": p["exp"], "sig": p["sig"], "t": 0, "sid": p["sid"],
+    })
+    assert r.status_code == 200, r.text
 
 
 # ---------------------------------------------------------------------------

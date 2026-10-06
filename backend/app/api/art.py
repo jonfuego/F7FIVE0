@@ -37,6 +37,7 @@ from app.services import art as art_service
 from app.services import art_search as art_search_service
 from app.services import security as security_service
 from app.services.arr._base import ArrClientError
+from app.services.signed_urls import session_authorizes
 
 
 # ---------------------------------------------------------------------------
@@ -339,21 +340,23 @@ def serve_art(
     uid: Optional[str] = None,
     exp: Optional[int] = None,
     sig: Optional[str] = None,
+    sid: Optional[str] = None,
 ) -> FileResponse:
     """Stream the override's on-disk file. 404 if no override exists.
 
     Accepts either a bearer token (unchanged) or a short-lived HMAC-signed
-    query (`uid`/`exp`/`sig`, bound to this exact art path) so a header-less
-    client (the Android media notification) can load the image.
+    query (`uid`/`sid`/`exp`/`sig`, bound to this exact art path and the
+    issuing session) so a header-less client (the Android media notification)
+    can load the image.
     """
     if user is None:
         # No bearer. A valid signed query is the only other way in. A signature
         # that is present but bad or expired is a hard 401; it never falls
         # through to an unauthenticated read.
         if not (
-            uid is not None and exp is not None and sig is not None
+            uid is not None and exp is not None and sig is not None and sid is not None
             and security_service.verify_art_url_params(
-                entity_kind, entity_id, role, uid, exp, sig,
+                entity_kind, entity_id, role, uid, sid, exp, sig,
             )
         ):
             raise HTTPException(
@@ -361,6 +364,9 @@ def serve_art(
                 detail="art_auth_required",
                 headers={"WWW-Authenticate": "Bearer"},
             )
+        # SEC-P1-2: signature good; the issuing session must still be live.
+        if not session_authorizes(db, sid):
+            raise HTTPException(status_code=403, detail="session_revoked")
     try:
         art_service.validate_kind_role(entity_kind, role)
     except art_service.ArtValidationError as exc:

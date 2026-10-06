@@ -22,6 +22,7 @@ from app.services.security import sign_stream_url_params
 from app.stream import _allowed_roots
 from app.stream import app as stream_app
 from app.stream import get_db as stream_get_db
+from tests.conftest import make_active_session
 
 
 # ---------------------------------------------------------------------------
@@ -163,8 +164,9 @@ def _mk_media(db_session, path) -> MediaFile:
     return mf
 
 
-def _signed(mf) -> str:
-    params = sign_stream_url_params(uuid.uuid4(), mf.id)
+def _signed(mf, sess) -> str:
+    # SEC-P1-2: the signed URL is bound to a live session.
+    params = sign_stream_url_params(sess.user_id, mf.id, sess.id)
     q = "&".join(f"{k}={v}" for k, v in params.items())
     return f"/stream/direct/{mf.id}?{q}"
 
@@ -183,7 +185,8 @@ def test_direct_play_fails_closed_with_no_roots(stream_client, db_session, tmp_p
     p = tmp_path / "x.mp4"
     p.write_bytes(b"\x00" * 16)
     mf = _mk_media(db_session, p)
-    resp = stream_client.get(_signed(mf), headers={"Range": "bytes=0-7"})
+    sess = make_active_session(db_session)[1]
+    resp = stream_client.get(_signed(mf, sess), headers={"Range": "bytes=0-7"})
     assert resp.status_code == 403
 
 
@@ -195,5 +198,6 @@ def test_direct_play_allowed_when_under_configured_root(stream_client, db_sessio
     p = tmp_path / "x.mp4"
     p.write_bytes(b"\x00" * 16)
     mf = _mk_media(db_session, p)
-    resp = stream_client.get(_signed(mf), headers={"Range": "bytes=0-7"})
+    sess = make_active_session(db_session)[1]
+    resp = stream_client.get(_signed(mf, sess), headers={"Range": "bytes=0-7"})
     assert resp.status_code == 206

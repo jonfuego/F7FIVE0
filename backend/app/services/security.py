@@ -132,28 +132,32 @@ def refresh_expires_at(client_type: str = "browser") -> datetime:
 # were intended to use; any URL issued before this change has a different
 # payload and will fail verification, which is the desired behavior on
 # rolling restart (clients refresh the page to get a new URL).
-def _stream_payload(uid: str, mid: str, exp: int, offset_bucket: int,
+def _stream_payload(uid: str, mid: str, exp: int, offset_bucket: int, sid: str,
                     opts: str = "") -> str:
-    """HMAC payload for a stream URL. The track-options token (`o`) is appended
-    only when present, so option-less URLs sign exactly as they always have."""
-    base = f"{uid}:{mid}:{exp}:{offset_bucket}"
+    """HMAC payload for a stream URL. SEC-P1-2: the issuing session id (`sid`)
+    is bound in so revoking that session kills the URL. The track-options token
+    (`o`) is appended only when present."""
+    base = f"{uid}:{mid}:{exp}:{offset_bucket}:{sid}"
     return f"{base}:{opts}" if opts else base
 
 
 def sign_stream_url_params(user_id: uuid.UUID, media_file_id: uuid.UUID,
+                           session_id: uuid.UUID,
                            ttl_hours: Optional[int] = None,
                            offset_bucket: int = 0,
                            opts: str = "") -> dict:
     """Return a dict of query params the Stream Gateway validates.
 
     Callers attach these to playback URLs. Gateway recomputes the sig and
-    compares in constant time. `offset_bucket` is the quantized seek offset
-    in seconds (see `OFFSET_BUCKET_SEC` in app.api.stream). Direct-play
-    callers pass 0; HLS callers pass the bucketed resume point.
+    compares in constant time, then checks the issuing session is still live
+    (SEC-P1-2). `offset_bucket` is the quantized seek offset in seconds (see
+    `OFFSET_BUCKET_SEC` in app.api.stream). Direct-play callers pass 0; HLS
+    callers pass the bucketed resume point.
     """
     hours = ttl_hours if ttl_hours is not None else settings.stream_url_ttl_hours
     exp = int((datetime.now(timezone.utc) + timedelta(hours=hours)).timestamp())
-    payload = _stream_payload(str(user_id), str(media_file_id), exp, offset_bucket, opts)
+    payload = _stream_payload(str(user_id), str(media_file_id), exp,
+                              offset_bucket, str(session_id), opts)
     sig = hmac.new(
         settings.stream_hmac_secret.encode("utf-8"),
         payload.encode("utf-8"),
@@ -165,17 +169,18 @@ def sign_stream_url_params(user_id: uuid.UUID, media_file_id: uuid.UUID,
         "exp": exp,
         "sig": sig,
         "t": offset_bucket,
+        "sid": str(session_id),
     }
     if opts:
         params["o"] = opts
     return params
 
 
-def verify_stream_url_params(uid: str, mid: str, exp: int, sig: str,
+def verify_stream_url_params(uid: str, mid: str, exp: int, sig: str, sid: str,
                              offset_bucket: int = 0, opts: str = "") -> bool:
     if exp < int(datetime.now(timezone.utc).timestamp()):
         return False
-    payload = _stream_payload(uid, mid, exp, offset_bucket, opts)
+    payload = _stream_payload(uid, mid, exp, offset_bucket, sid, opts)
     expected = hmac.new(
         settings.stream_hmac_secret.encode("utf-8"),
         payload.encode("utf-8"),
@@ -195,17 +200,18 @@ def verify_stream_url_params(uid: str, mid: str, exp: int, sig: str,
 # same `stream_hmac_secret` as the stream signer since both are the same class
 # of short-lived, HMAC-gated, header-free URL. Verification is constant-time.
 def sign_art_url_params(entity_kind: str, entity_id: uuid.UUID, role: str,
-                        user_id: uuid.UUID,
+                        user_id: uuid.UUID, session_id: uuid.UUID,
                         ttl_hours: Optional[int] = None) -> dict:
     """Return the query params the /api/art read endpoint validates.
 
     Callers attach these to an art URL so a header-less client (the Android
     media notification) can load the image. The endpoint recomputes the sig
-    over the same path + exp and compares in constant time.
+    over the same path + session + exp and compares in constant time, then
+    checks the issuing session is still live (SEC-P1-2).
     """
     hours = ttl_hours if ttl_hours is not None else settings.stream_url_ttl_hours
     exp = int((datetime.now(timezone.utc) + timedelta(hours=hours)).timestamp())
-    payload = f"{entity_kind}:{entity_id}:{role}:{user_id}:{exp}"
+    payload = f"{entity_kind}:{entity_id}:{role}:{user_id}:{session_id}:{exp}"
     sig = hmac.new(
         settings.stream_hmac_secret.encode("utf-8"),
         payload.encode("utf-8"),
@@ -213,22 +219,24 @@ def sign_art_url_params(entity_kind: str, entity_id: uuid.UUID, role: str,
     ).hexdigest()
     return {
         "uid": str(user_id),
+        "sid": str(session_id),
         "exp": exp,
         "sig": sig,
     }
 
 
 def verify_art_url_params(entity_kind: str, entity_id: uuid.UUID, role: str,
-                          uid: str, exp: int, sig: str) -> bool:
+                          uid: str, sid: str, exp: int, sig: str) -> bool:
     """Constant-time check of an art signature. False on expiry or tamper.
 
-    The path (entity_kind/entity_id/role) is passed straight from the request
-    so the signature is bound to the image it was minted for; a valid sig for a
-    different image fails here.
+    The path (entity_kind/entity_id/role) and the session id are passed
+    straight from the request so the signature is bound to the image and the
+    issuing session it was minted for; a valid sig for a different image fails
+    here.
     """
     if exp < int(datetime.now(timezone.utc).timestamp()):
         return False
-    payload = f"{entity_kind}:{entity_id}:{role}:{uid}:{exp}"
+    payload = f"{entity_kind}:{entity_id}:{role}:{uid}:{sid}:{exp}"
     expected = hmac.new(
         settings.stream_hmac_secret.encode("utf-8"),
         payload.encode("utf-8"),
@@ -238,16 +246,16 @@ def verify_art_url_params(entity_kind: str, entity_id: uuid.UUID, role: str,
 
 
 def build_signed_art_url(base: str, entity_kind: str, entity_id: uuid.UUID,
-                         role: str, user_id: uuid.UUID,
+                         role: str, user_id: uuid.UUID, session_id: uuid.UUID,
                          ttl_hours: Optional[int] = None) -> str:
     """Mint an absolute, signed art URL a header-less client can load.
 
     `base` is the origin (e.g. "https://media.example.com"); a trailing
     slash is tolerated. Returns
-    `{base}/api/art/{kind}/{id}/{role}?uid=...&exp=...&sig=...`.
+    `{base}/api/art/{kind}/{id}/{role}?uid=...&sid=...&exp=...&sig=...`.
     """
     params = sign_art_url_params(
-        entity_kind, entity_id, role, user_id, ttl_hours=ttl_hours,
+        entity_kind, entity_id, role, user_id, session_id, ttl_hours=ttl_hours,
     )
     query = urlencode(params)
     root = base.rstrip("/")
@@ -266,18 +274,18 @@ def build_signed_art_url(base: str, entity_kind: str, entity_id: uuid.UUID,
 # replayed against another. Reuses `stream_hmac_secret` (same class of
 # short-lived HMAC-gated URL). Verification is constant-time.
 def sign_media_url_params(media_file_id: uuid.UUID, action: str, extra: str,
-                          user_id: uuid.UUID,
+                          user_id: uuid.UUID, session_id: uuid.UUID,
                           ttl_hours: Optional[int] = None) -> dict:
     """Return the query params a signed media endpoint validates.
 
     `action` is a short verb ("subtitle" / "download"); `extra` discriminates
     within the action (the subtitle stream index as a string, or the download
-    quality). Both are folded into the HMAC payload so the signature is bound
-    to the exact resource.
+    quality). Both, plus the issuing session id (SEC-P1-2), are folded into the
+    HMAC payload so the signature is bound to the exact resource and session.
     """
     hours = ttl_hours if ttl_hours is not None else settings.stream_url_ttl_hours
     exp = int((datetime.now(timezone.utc) + timedelta(hours=hours)).timestamp())
-    payload = f"{media_file_id}:{action}:{extra}:{user_id}:{exp}"
+    payload = f"{media_file_id}:{action}:{extra}:{user_id}:{session_id}:{exp}"
     sig = hmac.new(
         settings.stream_hmac_secret.encode("utf-8"),
         payload.encode("utf-8"),
@@ -285,22 +293,23 @@ def sign_media_url_params(media_file_id: uuid.UUID, action: str, extra: str,
     ).hexdigest()
     return {
         "uid": str(user_id),
+        "sid": str(session_id),
         "exp": exp,
         "sig": sig,
     }
 
 
 def verify_media_url_params(media_file_id: uuid.UUID, action: str, extra: str,
-                            uid: str, exp: int, sig: str) -> bool:
+                            uid: str, sid: str, exp: int, sig: str) -> bool:
     """Constant-time check of a media signature. False on expiry or tamper.
 
-    The `media_file_id`, `action`, and `extra` come straight from the request
-    so a valid signature for a different file / action / stream / quality
-    fails here.
+    The `media_file_id`, `action`, `extra`, and session id come straight from
+    the request so a valid signature for a different file / action / stream /
+    quality / session fails here.
     """
     if exp < int(datetime.now(timezone.utc).timestamp()):
         return False
-    payload = f"{media_file_id}:{action}:{extra}:{uid}:{exp}"
+    payload = f"{media_file_id}:{action}:{extra}:{uid}:{sid}:{exp}"
     expected = hmac.new(
         settings.stream_hmac_secret.encode("utf-8"),
         payload.encode("utf-8"),
@@ -341,14 +350,16 @@ def verify_app_download_params(abi: str, uid: str, exp: int, sig: str) -> bool:
 
 def build_signed_subtitle_url(base: str, media_file_id: uuid.UUID,
                               stream_index: int, user_id: uuid.UUID,
+                              session_id: uuid.UUID,
                               ttl_hours: Optional[int] = None) -> str:
     """Absolute signed WebVTT subtitle URL a header-less player can load.
 
     Returns
-    `{base}/api/media-files/{id}/subtitles/{index}.vtt?uid=...&exp=...&sig=...`.
+    `{base}/api/media-files/{id}/subtitles/{index}.vtt?uid=...&sid=...&exp=...&sig=...`.
     """
     params = sign_media_url_params(
-        media_file_id, "subtitle", str(stream_index), user_id, ttl_hours=ttl_hours,
+        media_file_id, "subtitle", str(stream_index), user_id, session_id,
+        ttl_hours=ttl_hours,
     )
     query = urlencode(params)
     root = base.rstrip("/")
@@ -360,14 +371,16 @@ def build_signed_subtitle_url(base: str, media_file_id: uuid.UUID,
 
 def build_signed_download_url(base: str, media_file_id: uuid.UUID,
                               quality: str, user_id: uuid.UUID,
+                              session_id: uuid.UUID,
                               ttl_hours: Optional[int] = None) -> str:
     """Absolute signed download URL a header-less downloader can fetch.
 
     Returns
-    `{base}/api/media-files/{id}/download?quality=...&uid=...&exp=...&sig=...`.
+    `{base}/api/media-files/{id}/download?quality=...&uid=...&sid=...&exp=...&sig=...`.
     """
     params = sign_media_url_params(
-        media_file_id, "download", quality, user_id, ttl_hours=ttl_hours,
+        media_file_id, "download", quality, user_id, session_id,
+        ttl_hours=ttl_hours,
     )
     query = urlencode({"quality": quality, **params})
     root = base.rstrip("/")

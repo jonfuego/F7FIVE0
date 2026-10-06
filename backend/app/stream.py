@@ -48,6 +48,7 @@ from app.services.playback import (
 )
 from app.services.range_response import ensure_under_roots, serve_file_range
 from app.services.security import verify_stream_url_params
+from app.services.signed_urls import session_authorizes
 from app.services.trusted_proxy import real_client_ip
 from app.services.track_opts import TrackOptsError, parse_token
 
@@ -239,13 +240,16 @@ def verified_media_file(
     sig: Annotated[str, Query()],
     t: Annotated[int, Query()] = 0,
     o: Annotated[str, Query()] = "",
+    sid: Annotated[str, Query()] = "",
 ) -> MediaFile:
     """Validate the signed URL and return the `MediaFile` row.
 
-    Raises 401 on bad signature, 410 on missing, 409 on not-ready, 404 on
-    unknown id. The HMAC check is done first so bad sigs never produce a DB
-    lookup latency signal. `t` is the HLS resume offset bucket (seconds);
-    it participates in the HMAC payload so it can't be retargeted.
+    Raises 401 on bad signature, 403 on a revoked/expired session, 410 on
+    missing, 409 on not-ready, 404 on unknown id. The HMAC check is done first
+    so bad sigs never produce a DB lookup latency signal (SEC-P1-2: HMAC before
+    DB). `t` is the HLS resume offset bucket (seconds); it and the issuing
+    session id both participate in the HMAC payload so neither can be
+    retargeted.
     """
     if t < 0:
         raise HTTPException(status_code=401, detail="bad_stream_signature")
@@ -253,9 +257,13 @@ def verified_media_file(
         parse_token(o)
     except TrackOptsError:
         raise HTTPException(status_code=401, detail="bad_stream_signature")
-    if not verify_stream_url_params(uid, str(media_file_id), exp, sig,
+    if not verify_stream_url_params(uid, str(media_file_id), exp, sig, sid,
                                     offset_bucket=t, opts=o):
         raise HTTPException(status_code=401, detail="bad_stream_signature")
+    # SEC-P1-2: the signature checked out; now the issuing session must still be
+    # live. This is the first DB touch, so a bad signature never reaches it.
+    if not session_authorizes(db, sid):
+        raise HTTPException(status_code=403, detail="session_revoked")
 
     mf = db.get(MediaFile, media_file_id)
     if mf is None:
@@ -267,9 +275,10 @@ def verified_media_file(
     return mf
 
 
-def _signed_query(uid: str, mid: uuid.UUID, exp: int, sig: str, t: int = 0,
-                  o: str = "") -> str:
-    params = {"uid": uid, "mid": str(mid), "exp": exp, "sig": sig, "t": t}
+def _signed_query(uid: str, mid: uuid.UUID, exp: int, sig: str, sid: str,
+                  t: int = 0, o: str = "") -> str:
+    params = {"uid": uid, "mid": str(mid), "exp": exp, "sig": sig, "t": t,
+              "sid": sid}
     if o:
         params["o"] = o
     return urlencode(params)
@@ -368,11 +377,12 @@ def hls_master(
     sig: Annotated[str, Query()],
     t: Annotated[int, Query()] = 0,
     o: Annotated[str, Query()] = "",
+    sid: Annotated[str, Query()] = "",
 ) -> PlainTextResponse:
     variants = _variants_for(mf, o)
     body = transcoder.build_master_playlist(
         mf.id, variants,
-        signed_query=_signed_query(uid, mf.id, exp, sig, t, o),
+        signed_query=_signed_query(uid, mf.id, exp, sig, sid, t, o),
         audio_only=is_audio_only(mf),
     )
     return PlainTextResponse(
@@ -399,6 +409,7 @@ def hls_variant_playlist(
     db: Annotated[Session, Depends(get_db)],
     t: Annotated[int, Query()] = 0,
     o: Annotated[str, Query()] = "",
+    sid: Annotated[str, Query()] = "",
 ) -> PlainTextResponse:
     if not _VARIANT_LABEL_RE.match(variant):
         raise HTTPException(status_code=404, detail="unknown_variant")
@@ -448,7 +459,7 @@ def hls_variant_playlist(
         output_duration = 0.0
     rewritten = transcoder.rewrite_variant_playlist(
         body, mf.id, variant,
-        signed_query=_signed_query(uid, mf.id, exp, sig, t, o),
+        signed_query=_signed_query(uid, mf.id, exp, sig, sid, t, o),
         duration_sec=output_duration,
     )
     return PlainTextResponse(

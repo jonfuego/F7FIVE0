@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import sys
 import uuid
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 # Required env vars for app.config.Settings. Set BEFORE importing the app.
@@ -119,12 +120,57 @@ def db_session(engine) -> Session:
                 conn.execute(table.delete())
 
 
+def make_active_session(db, user=None, *, client_type="browser",
+                        revoked=False, rotated=False, expired=False):
+    """Create a user (if not given) and a sessions row, returning (user, session).
+
+    SEC-P1-2: signed URLs carry the issuing session id and the serve side checks
+    the session is live, so tests that mint and then fetch a signed URL need a
+    real session. `rotated` stamps revoked_at AND rotated_at (a token refresh,
+    still authorizes its URLs); `revoked` stamps revoked_at only (a real
+    logout/revoke, dead); `expired` sets expires_at in the past.
+    """
+    from app.models.user import Session as UserSession, User
+
+    if user is None:
+        user = User(
+            username=f"u-{uuid.uuid4().hex[:8]}", display_name="U",
+            password_hash="x", role="member", is_active=True,
+        )
+        db.add(user)
+        db.flush()
+    now = datetime.now(timezone.utc)
+    sess = UserSession(
+        user_id=user.id,
+        refresh_token_hash=uuid.uuid4().hex,
+        client_type=client_type,
+        last_seen_at=now,
+        expires_at=(now - timedelta(hours=1)) if expired else (now + timedelta(days=30)),
+    )
+    if rotated:
+        sess.revoked_at = now
+        sess.rotated_at = now
+    elif revoked:
+        sess.revoked_at = now
+    db.add(sess)
+    db.commit()
+    return user, sess
+
+
+@pytest.fixture()
+def active_session(db_session: Session):
+    """Factory: active_session(**flags) -> (user, session). See make_active_session."""
+    def _make(**kw):
+        return make_active_session(db_session, **kw)
+    return _make
+
+
 @pytest.fixture()
 def client(db_session: Session):
     """FastAPI TestClient with a synthetic admin and the test session."""
     from fastapi.testclient import TestClient
 
-    from app.api.deps import current_user, get_db, require_admin
+    from app.api.deps import current_session_id, current_user, get_db, require_admin
     from app.main import app
     from app.models.user import User
 
@@ -136,6 +182,12 @@ def client(db_session: Session):
         role="admin",
         is_active=True,
     )
+    # Persist the admin + an active session so mint endpoints have a real
+    # session id (SEC-P1-2) and a signed URL minted here survives the serve-side
+    # session check.
+    db_session.add(fake_admin)
+    db_session.flush()
+    _admin_session = make_active_session(db_session, user=fake_admin)[1]
 
     def _override_db():
         try:
@@ -149,6 +201,7 @@ def client(db_session: Session):
     app.dependency_overrides[get_db] = _override_db
     app.dependency_overrides[current_user] = _override_user
     app.dependency_overrides[require_admin] = _override_user
+    app.dependency_overrides[current_session_id] = lambda: _admin_session.id
     # Skip the lifespan startup/shutdown: it would dispose the engine on
     # exit and kill the StaticPool connection the db_session fixture is
     # still bound to.

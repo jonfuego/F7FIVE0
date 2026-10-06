@@ -50,7 +50,12 @@ class Settings(BaseSettings):
     jwt_access_ttl_minutes: int = 15
     jwt_refresh_ttl_days: int = 30
     stream_hmac_secret: str
-    stream_url_ttl_hours: int = 8
+    # SEC-P1-2: signed stream/art/subtitle/download URLs expire after this many
+    # hours and are bound to the issuing session. Kept short (4h) so a leaked
+    # link has a small window; long playback and casting survive because a
+    # session revoked by token *rotation* still authorizes its already-issued
+    # URLs (see app/services/signed_urls.py and CLAUDE.md).
+    stream_url_ttl_hours: int = 4
 
     # WebAuthn / passkeys. Passkeys only work over HTTPS, so they are on only
     # when an RP id resolves: WEBAUTHN_RP_ID if set, otherwise the host of an

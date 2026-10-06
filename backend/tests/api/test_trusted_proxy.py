@@ -237,9 +237,14 @@ def test_spoofed_forwarded_host_not_in_signed_url(api):
     db.add(mf)
     db.commit()
 
-    # Authenticate as this user via a dependency override on current_user.
+    # Authenticate as this user via dependency overrides on current_user and
+    # current_session_id (stream/start binds the signed URL to the session).
+    from app.api.deps import current_session_id as sid_dep
     from app.api.deps import current_user as current_user_dep
+    from tests.conftest import make_active_session
+    sess = make_active_session(db, user=user)[1]
     app.dependency_overrides[current_user_dep] = lambda: user
+    app.dependency_overrides[sid_dep] = lambda: sess.id
     try:
         resp = client.post(
             "/api/stream/start",
@@ -248,6 +253,7 @@ def test_spoofed_forwarded_host_not_in_signed_url(api):
         )
     finally:
         app.dependency_overrides.pop(current_user_dep, None)
+        app.dependency_overrides.pop(sid_dep, None)
 
     assert resp.status_code == 200, resp.text
     url = resp.json()["url"]

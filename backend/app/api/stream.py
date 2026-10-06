@@ -17,7 +17,7 @@ from urllib.parse import urlencode, urlsplit
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
-from app.api.deps import current_user, get_db
+from app.api.deps import current_session_id, current_user, get_db
 from app.api.schemas import StreamStartRequest, StreamStartResponse
 from app.config import settings
 from app.models.art import ENTITY_ALBUM, ENTITY_MOVIE, ENTITY_SERIES, ROLE_COVER, ROLE_POSTER
@@ -63,7 +63,7 @@ def _local_art_path(db: Session, mf: MediaFile) -> Optional[str]:
     return None
 
 
-def _signed_art_url(request: Request, user_id: uuid.UUID,
+def _signed_art_url(request: Request, user_id: uuid.UUID, session_id: uuid.UUID,
                     cover_path: Optional[str]) -> Optional[str]:
     """Absolute, HMAC-signed art URL for a header-less loader (the Android
     media notification / lock screen). None when there is no local art path.
@@ -76,7 +76,7 @@ def _signed_art_url(request: Request, user_id: uuid.UUID,
     try:
         return build_signed_art_url(
             _base_url(request), m.group("kind"), uuid.UUID(m.group("id")),
-            m.group("role"), user_id,
+            m.group("role"), user_id, session_id,
         )
     except Exception:
         log.exception("could not sign art url for %s", cover_path)
@@ -184,6 +184,7 @@ def stream_start(
     body: StreamStartRequest,
     request: Request,
     user: Annotated[User, Depends(current_user)],
+    session_id: Annotated[uuid.UUID, Depends(current_session_id)],
     db: Annotated[Session, Depends(get_db)],
 ) -> StreamStartResponse:
     mf = db.get(MediaFile, body.file_id)
@@ -278,13 +279,14 @@ def stream_start(
         max(0, body.resume_sec) if (mode == "hls" and body.resume_sec) else 0
     )
     seek_within = requested_sec - bucket  # 0..OFFSET_BUCKET_SEC-1 for HLS
-    params = sign_stream_url_params(user.id, mf.id, offset_bucket=bucket,
-                                    opts=opts_token)
+    params = sign_stream_url_params(user.id, mf.id, session_id,
+                                    offset_bucket=bucket, opts=opts_token)
     q = {
         "uid": params["uid"],
         "exp": params["exp"],
         "sig": params["sig"],
         "t": params["t"],
+        "sid": params["sid"],
     }
     if opts_token:
         q["o"] = opts_token
@@ -314,7 +316,7 @@ def stream_start(
         width=mf.width,
         height=mf.height,
         cover_path=cover_path,
-        art_url=_signed_art_url(request, user.id, _local_art_path(db, mf)),
+        art_url=_signed_art_url(request, user.id, session_id, _local_art_path(db, mf)),
         artist_name=artist_name,
         album_title=album_title,
         # Echo the Phase 2 track-selection choices back. `quality` defaults to

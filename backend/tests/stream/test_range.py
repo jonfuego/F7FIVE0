@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 from app.models.media_file import MediaFile, MediaKind, ScanState
 from app.services.security import sign_stream_url_params
 from app.stream import app as stream_app, get_db as stream_get_db
+from tests.conftest import make_active_session
 
 
 FILE_BYTES = bytes(range(256)) * 8  # 2048 deterministic bytes
@@ -58,15 +59,20 @@ def client(db_session):
         stream_app.dependency_overrides.clear()
 
 
-def _signed_url(mf) -> str:
-    uid = str(uuid.uuid4())
-    params = sign_stream_url_params(uuid.UUID(uid), mf.id)
+@pytest.fixture()
+def session(db_session):
+    # SEC-P1-2: the signed URL is bound to a live session.
+    return make_active_session(db_session)[1]
+
+
+def _signed_url(mf, sess) -> str:
+    params = sign_stream_url_params(sess.user_id, mf.id, sess.id)
     q = "&".join(f"{k}={v}" for k, v in params.items())
     return f"/stream/direct/{mf.id}?{q}"
 
 
-def test_direct_play_range_returns_206(client, media_file):
-    url = _signed_url(media_file)
+def test_direct_play_range_returns_206(client, media_file, session):
+    url = _signed_url(media_file, session)
     resp = client.get(url, headers={"Range": "bytes=0-99"})
     assert resp.status_code == 206
     assert resp.headers["Content-Range"] == f"bytes 0-99/{len(FILE_BYTES)}"
@@ -76,16 +82,16 @@ def test_direct_play_range_returns_206(client, media_file):
     assert resp.content == FILE_BYTES[0:100]
 
 
-def test_direct_play_mid_range(client, media_file):
-    url = _signed_url(media_file)
+def test_direct_play_mid_range(client, media_file, session):
+    url = _signed_url(media_file, session)
     resp = client.get(url, headers={"Range": "bytes=100-199"})
     assert resp.status_code == 206
     assert resp.headers["Content-Range"] == f"bytes 100-199/{len(FILE_BYTES)}"
     assert resp.content == FILE_BYTES[100:200]
 
 
-def test_direct_play_full_request_advertises_ranges(client, media_file):
-    url = _signed_url(media_file)
+def test_direct_play_full_request_advertises_ranges(client, media_file, session):
+    url = _signed_url(media_file, session)
     resp = client.get(url)
     assert resp.status_code == 200
     assert resp.headers["Accept-Ranges"] == "bytes"
