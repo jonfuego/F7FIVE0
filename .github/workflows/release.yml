@@ -7,8 +7,12 @@ name: Release
 #      checks its .sha256, bundles it into F7FIVE0-Setup-1.0.0.exe and the
 #      zip, attaches those, and publishes the release. No APK = no release.
 #
-# The Android APK is NOT built or signed here. The release key never goes to
-# GitHub. Do not add signing secrets to this repo.
+# The Android APK is NOT built or signed here. The Android RELEASE KEY never
+# goes to GitHub: do not add the Android signing keystore, its password, or any
+# Play/upload key secret to this repo. (This rule is about the Android release
+# key only. The Setup.exe Authenticode step below is different: it signs through
+# SignPath using a SIGNPATH_API_TOKEN secret, no private key ever lands here,
+# and the step no-ops when that secret is absent.)
 #
 # Manual runs (test builds) take an optional release tag to borrow APKs from;
 # without one the build has no Android app.
@@ -85,9 +89,94 @@ jobs:
           # Tag builds must bundle the matching APK; manual test builds may skip it.
           $isTag = "${{ github.ref_type }}" -eq "tag"
           ./installer/build-dist.ps1 -Version "${{ steps.v.outputs.version }}" -Compile -ApkDir installer/apk -RequireApk:$isTag
+      # Authenticode signing for the Setup.exe, done through SignPath Foundation.
+      # No private key ever lands in this repo: SignPath holds the certificate and
+      # we hand it the artifact over its API. The step is gated on a boolean that
+      # the "SignPath available?" step derives from the SIGNPATH_API_TOKEN secret,
+      # because an if: cannot read a secret directly. With no secret configured the
+      # gate is false and signing is skipped cleanly, so the build still succeeds
+      # and ships an unsigned Setup.exe (Jon will enrol with SignPath and add the
+      # secret later).
+      - name: SignPath available?
+        id: signpath
+        shell: pwsh
+        env:
+          SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+        run: |
+          $available = -not [string]::IsNullOrWhiteSpace($env:SIGNPATH_API_TOKEN)
+          "available=$($available.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+          if (-not $available) {
+            Write-Host "::notice::SIGNPATH_API_TOKEN not configured; skipping Authenticode signing of Setup.exe."
+          }
+      - name: Sign Setup.exe (SignPath)
+        if: steps.signpath.outputs.available == 'true'
+        shell: pwsh
+        env:
+          SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+          SIGNPATH_ORGANIZATION_ID: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          SIGNPATH_PROJECT_SLUG: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          SIGNPATH_SIGNING_POLICY_SLUG: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+        run: |
+          $exe = Get-ChildItem installer/Output -Filter "F7FIVE0-Setup-*.exe" -File | Select-Object -First 1
+          if (-not $exe) { Write-Error "No Setup.exe found to sign in installer/Output"; exit 1 }
+          $org = if ($env:SIGNPATH_ORGANIZATION_ID) { $env:SIGNPATH_ORGANIZATION_ID } else { "f7five0" }
+          $project = if ($env:SIGNPATH_PROJECT_SLUG) { $env:SIGNPATH_PROJECT_SLUG } else { "f7five0" }
+          $policy = if ($env:SIGNPATH_SIGNING_POLICY_SLUG) { $env:SIGNPATH_SIGNING_POLICY_SLUG } else { "release-signing" }
+          $headers = @{ Authorization = "Bearer $env:SIGNPATH_API_TOKEN" }
+          $base = "https://app.signpath.io/api/v1/$org"
+          Write-Host "Submitting $($exe.Name) to SignPath (project=$project, policy=$policy)"
+          $form = @{
+            ProjectSlug         = $project
+            SigningPolicySlug   = $policy
+            Artifact            = $exe
+          }
+          $submit = Invoke-RestMethod -Method Post -Uri "$base/SigningRequests" -Headers $headers -Form $form
+          $id = $submit.signingRequestId
+          if (-not $id) { Write-Error "SignPath did not return a signing request id"; exit 1 }
+          Write-Host "SignPath signing request $id submitted; waiting for the signed artifact."
+          $deadline = (Get-Date).AddMinutes(20)
+          do {
+            Start-Sleep -Seconds 15
+            $status = Invoke-RestMethod -Method Get -Uri "$base/SigningRequests/$id" -Headers $headers
+            Write-Host "  status: $($status.status)"
+            if ($status.status -eq "Failed" -or $status.status -eq "Denied" -or $status.status -eq "Canceled") {
+              Write-Error "SignPath signing request $id ended as $($status.status)"; exit 1
+            }
+          } while ($status.status -ne "Completed" -and (Get-Date) -lt $deadline)
+          if ($status.status -ne "Completed") { Write-Error "SignPath signing request $id timed out"; exit 1 }
+          Invoke-RestMethod -Method Get -Uri "$base/SigningRequests/$id/SignedArtifact" -Headers $headers -OutFile $exe.FullName
+          $sig = Get-AuthenticodeSignature $exe.FullName
+          Write-Host "Signed $($exe.Name): $($sig.Status) ($($sig.SignerCertificate.Subject))"
       - name: Zip
         shell: pwsh
         run: Compress-Archive -Path installer/dist/* -DestinationPath "installer/Output/F7FIVE0-${{ steps.v.outputs.version }}.zip"
+      # CycloneDX SBOMs for the three shippable code trees. The tools run through
+      # pipx/npx so they are never added to requirements or package.json. The
+      # Python SBOM is built from the hash-pinned backend lock; the web and mobile
+      # SBOMs from their package-lock.json.
+      - name: SBOMs (CycloneDX)
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pipx
+          # cyclonedx-bom installs the "cyclonedx-py" console script, so run it by
+          # spec. Build the Python SBOM from the hash-pinned backend lock.
+          pipx run --spec cyclonedx-bom cyclonedx-py requirements backend/requirements.lock --output-format JSON --output-file installer/Output/sbom-backend.cdx.json
+          npx --yes @cyclonedx/cyclonedx-npm --package-lock-only --output-format json --output-file installer/Output/sbom-web.cdx.json frontend/package.json
+          npx --yes @cyclonedx/cyclonedx-npm --package-lock-only --output-format json --output-file installer/Output/sbom-mobile.cdx.json mobile/package.json
+          Get-ChildItem installer/Output -Filter "sbom-*.cdx.json" | Format-Table Name, Length
+      # SHA256SUMS over the shipped binaries (Setup.exe and the zip), written in
+      # the usual "<hash>  <name>" form so `sha256sum -c` and certutil both verify.
+      - name: Checksums
+        shell: pwsh
+        run: |
+          $out = "installer/Output"
+          $files = Get-ChildItem $out -File | Where-Object { $_.Extension -in ".exe", ".zip" } | Sort-Object Name
+          $lines = foreach ($f in $files) {
+            $hash = (Get-FileHash $f.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $($f.Name)"
+          }
+          Set-Content -Path (Join-Path $out "SHA256SUMS.txt") -Value $lines -Encoding ascii
+          Get-Content (Join-Path $out "SHA256SUMS.txt")
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: F7FIVE0-${{ steps.v.outputs.version }}

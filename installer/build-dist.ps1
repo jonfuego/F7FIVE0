@@ -106,6 +106,21 @@ if ($RequireApk -and -not (Test-Path (Join-Path $Dist "android\F7FIVE0-$Version.
     throw "No F7FIVE0-$Version.apk to bundle. The server and app ship as one version: run scripts\release-apk.ps1 -Version $Version first."
 }
 if (-not $hasPhone) { Write-Host "android: no APK bundled; the server will not offer the Android app." }
+
+# Checksums for the assembled payload. SHA256SUMS.txt lists every file under
+# dist\ in the usual "<hash>  <relative-path>" form (sha256sum -c and certutil
+# both verify it). We skip a pre-existing SHA256SUMS.txt so re-runs stay stable.
+$sumsFile = Join-Path $Dist "SHA256SUMS.txt"
+if (Test-Path $sumsFile) { Remove-Item -Force $sumsFile }
+$distFull = (Resolve-Path $Dist).Path
+$lines = @()
+foreach ($f in Get-ChildItem $Dist -Recurse -File | Sort-Object FullName) {
+    $rel = $f.FullName.Substring($distFull.Length).TrimStart('\', '/').Replace('\', '/')
+    $hash = (Get-FileHash $f.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+    $lines += "$hash  $rel"
+}
+Set-Content -Path $sumsFile -Value $lines -Encoding ASCII
+Write-Host "wrote $($lines.Count) checksums: $sumsFile"
 Write-Host "dist ready: $Dist"
 
 $iscc = @(
@@ -119,6 +134,14 @@ if ($iscc) {
     if (-not $numeric) { $numeric = "0.0.0" }
     & $iscc "/DAppVersion=$Version" "/DAppVersionNumeric=$numeric" (Join-Path $PSScriptRoot "F7FIVE0.iss")
     if ($LASTEXITCODE -ne 0) { throw "Inno Setup compile failed" }
+    # Checksum for the compiled Setup.exe, next to it in installer\Output.
+    $outDir = Join-Path $PSScriptRoot "Output"
+    $setup = Get-ChildItem $outDir -Filter "F7FIVE0-Setup-*.exe" -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime | Select-Object -Last 1
+    if ($setup) {
+        $h = (Get-FileHash $setup.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+        Set-Content -Path (Join-Path $outDir "SHA256SUMS.txt") -Value "$h  $($setup.Name)" -Encoding ASCII
+        Write-Host "wrote checksum for $($setup.Name)"
+    }
 } elseif ($Compile) {
     throw "Inno Setup 6 not found. Install it (winget install JRSoftware.InnoSetup) and re-run."
 } else {
