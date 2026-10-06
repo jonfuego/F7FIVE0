@@ -674,7 +674,9 @@ export function MiniPlayer() {
           return;
         }
         detachHls(audio);
-        const hls = new Hls({ maxBufferLength: 30, enableWorker: true });
+        // backBufferLength: keep only the last 30 s that played (the
+        // default keeps the whole track in the SourceBuffer).
+        const hls = new Hls({ maxBufferLength: 30, backBufferLength: 30, enableWorker: true });
         hlsByElRef.current.set(audio, hls);
         hls.on(Hls.Events.ERROR, (_event, data) => {
           if (disposed || !data.fatal) return;
