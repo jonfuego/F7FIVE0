@@ -814,16 +814,7 @@ function DockLinkedView({
           type="button"
           onClick={toggle}
           aria-label={paused ? "Play" : "Pause"}
-          style={{
-            width: 76,
-            height: 76,
-            borderRadius: "50%",
-            background: "var(--hive)",
-            color: "var(--on-hive)",
-            display: "grid",
-            placeItems: "center",
-            boxShadow: "0 0 24px transparent",
-          }}
+          className="np-audio-play"
         >
           {paused ? (
             <Icon icon={Play} size={28} fill />
