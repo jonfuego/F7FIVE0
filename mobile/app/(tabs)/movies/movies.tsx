@@ -28,7 +28,7 @@ const MOVIE_SORTS: SortOption<Movie>[] = [
 
 const ALL_GENRES = "__all__";
 
-/** The Cinema: genre chips (like the PWA), status + sort, and a 4-per-row
+/** Movies: genre chips (like the PWA), status + sort, and a 4-per-row
  * poster grid with watched checks and resume bars. Rendered as a page and
  * inline under the Movies & Shows hub's Movies chip. */
 export function MoviesLibrary(): React.ReactElement {
@@ -138,7 +138,7 @@ export function MoviesLibrary(): React.ReactElement {
 
 export default function MoviesScreen(): React.ReactElement {
   return (
-    <LibraryScreen title="The Cinema">
+    <LibraryScreen title="Movies">
       <MoviesLibrary />
     </LibraryScreen>
   );

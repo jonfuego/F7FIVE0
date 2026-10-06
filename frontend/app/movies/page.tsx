@@ -108,7 +108,7 @@ export default function MoviesPage() {
 
   return (
     <AuthShell>
-      <h1 className="page-title">The Cinema</h1>
+      <h1 className="page-title">Movies</h1>
 
       <div className="filter-bar">
         <span className="lbl">Genre</span>
