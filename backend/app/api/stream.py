@@ -30,6 +30,7 @@ from app.services import media_streams, playback
 from app.services.art import resolve_art
 from app.services.security import build_signed_art_url, sign_stream_url_params
 from app.services.track_opts import resolve_track_opts
+from app.services.trusted_proxy import forwarded_origin
 
 
 log = logging.getLogger("f7five0.api.stream")
@@ -102,24 +103,26 @@ def _quantize_offset(resume_sec: Optional[int]) -> int:
 def _base_url(request: Request) -> str:
     """Absolute base URL for gateway links, e.g. https://media.example.com.
 
-    Prefers `X-Forwarded-Host` / `X-Forwarded-Proto` (set by the web
-    server's proxy layer and by Cloudflare Tunnel) so links match the origin
-    the client actually used, whether that is https://media.example.com or
-    http://192.168.1.20:3001 on a LAN. Falls back to `Host` and the request
-    scheme when nothing is forwarded (local dev).
+    SEC-P1-1: the `X-Forwarded-Host` / `X-Forwarded-Proto` / `Host` chain is
+    honoured only when the direct peer is a trusted proxy and the host passes
+    the allowlist (the configured public/home host, loopback, or a private LAN
+    literal). That keeps LAN links (http://192.168.1.20:3101) working while a
+    hostile `X-Forwarded-Host` can never land in a signed URL. When nothing
+    trustworthy is forwarded, fall back to `PUBLIC_URL`, then loopback.
     """
-    def _first(name: str) -> str:
-        return (request.headers.get(name) or "").split(",")[0].strip()
-
-    host = _first("x-forwarded-host") or _first("host") or f"127.0.0.1:{settings.stream_port}"
-    proto = _first("x-forwarded-proto") or request.url.scheme or "http"
-    # Some front doors (Tailscale Funnel among them) terminate HTTPS without
-    # saying so. When the request arrived on the configured public address,
-    # trust its scheme so players never get http:// links on an https page.
-    public = urlsplit(settings.public_url or "")
-    if public.scheme and public.netloc and public.netloc.lower() == host.lower():
-        proto = public.scheme
-    return f"{proto}://{host}"
+    public = urlsplit((settings.public_url or "").strip())
+    host, proto = forwarded_origin(request)
+    if host:
+        # Some front doors (Tailscale Funnel) terminate HTTPS without setting
+        # X-Forwarded-Proto. When the request arrived on the configured public
+        # address, trust its scheme so players never get http:// links on an
+        # https page.
+        if public.scheme and public.netloc and public.netloc.lower() == host.lower():
+            proto = public.scheme
+        return f"{proto}://{host}"
+    if public.scheme in ("http", "https") and public.netloc:
+        return f"{public.scheme}://{public.netloc}"
+    return f"http://127.0.0.1:{settings.stream_port}"
 
 
 def _title_for(db: Session, mf: MediaFile) -> Optional[str]:

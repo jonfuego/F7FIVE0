@@ -205,6 +205,16 @@ class Settings(BaseSettings):
     # `\\nas\media\Movies\...`.
     path_rewrite_rules: str = ""
 
+    # SEC-P1-1: direct peers whose forwarding headers we trust. Comma list of
+    # IPs or CIDRs, on TOP of loopback, which is always trusted. The front door
+    # (Next proxy, cloudflared, Caddy, Tailscale) runs on this host and reaches
+    # the services over loopback, so the default empty value is correct for a
+    # normal install; Setup writes loopback explicitly. Only a request arriving
+    # from one of these peers has its CF-Connecting-IP / X-Forwarded-* honoured
+    # (app/services/trusted_proxy.py). A direct LAN client cannot spoof its IP
+    # or poison the host in a signed URL.
+    trusted_proxies: str = ""
+
     # Address people use away from home (Tailscale Funnel or Cloudflare
     # Tunnel), written by setup. Shown on the Account page as a QR code.
     public_url: str = ""

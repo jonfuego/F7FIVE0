@@ -48,6 +48,7 @@ from app.services.playback import (
 )
 from app.services.range_response import ensure_under_roots, serve_file_range
 from app.services.security import verify_stream_url_params
+from app.services.trusted_proxy import real_client_ip
 from app.services.track_opts import TrackOptsError, parse_token
 
 
@@ -170,8 +171,9 @@ app.add_middleware(
 
 @app.middleware("http")
 async def client_ip_middleware(request: Request, call_next):
-    cf_ip = request.headers.get("cf-connecting-ip")
-    request.state.client_ip = cf_ip or (request.client.host if request.client else "unknown")
+    # SEC-P1-1: honour CF-Connecting-IP / X-Forwarded-For only from a trusted
+    # proxy peer so a direct caller cannot spoof the IP we log.
+    request.state.client_ip = real_client_ip(request)
     return await call_next(request)
 
 

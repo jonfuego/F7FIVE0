@@ -108,7 +108,11 @@ def test_info_requires_auth(db_only, downloads):
     assert client.get("/api/client/android-app").status_code == 401
 
 
-def test_info_and_signed_download(api, downloads, user, tmp_path, db_only):
+def test_info_and_signed_download(api, downloads, user, tmp_path, db_only, monkeypatch):
+    # SEC-P1-1: a LAN client reaches the server through the loopback front door,
+    # which is a trusted proxy, so the forwarded LAN host is honoured. Simulate
+    # that trusted peer (the TestClient's default peer is untrusted).
+    monkeypatch.setattr("app.services.trusted_proxy.peer_is_trusted", lambda ip: True)
     _fake_signed_apk(downloads / "F7FIVE0-1.4.0.apk", [(0x7109871A, b"sig")])
     info = api.get("/api/client/android-app", headers={"host": "192.168.1.20:3001"}).json()
     assert info["available"] is True

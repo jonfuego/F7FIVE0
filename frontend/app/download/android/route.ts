@@ -17,6 +17,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { backend } from "@/lib/api";
 import { setSessionCookies } from "@/lib/cookies";
+import { siteOriginFromHeaders } from "@/lib/origin";
 import { ACCESS_COOKIE, REFRESH_COOKIE } from "@/lib/server-env";
 
 export const runtime = "nodejs";
@@ -116,10 +117,10 @@ export async function HEAD(req: NextRequest): Promise<Response> {
 export async function GET(req: NextRequest): Promise<Response> {
   const { info, status, tokens } = await lookup(req);
   if (status === 401) {
-    // Session gone: sign in, then come straight back here.
-    const host = req.headers.get("host") ?? req.nextUrl.host;
-    const proto = req.headers.get("x-forwarded-proto") ?? req.nextUrl.protocol.replace(":", "");
-    const login = new URL(`${proto}://${host}/login`);
+    // Session gone: sign in, then come straight back here. Origin is built
+    // through the shared sanitising helper (SEC-P1-1).
+    const login = new URL(siteOriginFromHeaders(req.headers));
+    login.pathname = "/login";
     login.searchParams.set("next", req.nextUrl.pathname + req.nextUrl.search);
     return NextResponse.redirect(login);
   }
