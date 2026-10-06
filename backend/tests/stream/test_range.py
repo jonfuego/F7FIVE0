@@ -22,7 +22,12 @@ FILE_BYTES = bytes(range(256)) * 8  # 2048 deterministic bytes
 
 
 @pytest.fixture()
-def media_file(db_session, tmp_path):
+def media_file(db_session, tmp_path, monkeypatch):
+    # SEC-P0-4: the gateway now fails closed, so the file must live under a
+    # configured root for direct play to be allowed.
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "stream_allowed_roots", str(tmp_path))
     p = tmp_path / "sample.mp4"
     p.write_bytes(FILE_BYTES)
     mf = MediaFile(

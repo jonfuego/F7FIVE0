@@ -126,16 +126,32 @@ def serve_file_range(
 
 
 def ensure_under_roots(path: Path, roots: list[Path]) -> Path:
-    """Resolve `path` and fail loudly if it escapes every library root.
+    """Resolve `path` and fail loudly if it escapes every allowed root.
 
-    Prevents a signed-URL forgery that tricks the gateway into reading
-    arbitrary files. Rejects symlinks that point outside the allow-list too.
+    Fail closed (SEC-P0-4): an empty `roots` list rejects everything, so a
+    gateway with no configured roots refuses to read any file rather than
+    serving arbitrary paths. Prevents a signed-URL forgery that tricks the
+    gateway into reading an unexpected file.
+
+    `resolve()` collapses `..` and follows symlinks/junctions, so a link that
+    points outside the roots is rejected by its real target. Containment is
+    compared through `os.path.normcase` + `normpath` so Windows drive-letter
+    and path casing (``C:\\`` vs ``c:\\``) and UNC roots (``\\\\nas\\media``)
+    match correctly instead of failing on a cosmetic difference.
     """
+    def _norm(p: Path) -> str:
+        # normpath collapses "..", normcase folds Windows case/sep, rstrip
+        # drops a trailing separator so a share/drive root ("\\\\nas\\media\\",
+        # "C:\\") compares the same as a plain folder.
+        s = os.path.normcase(os.path.normpath(str(p.resolve(strict=False))))
+        return s.rstrip(os.sep)
+
     resolved = path.resolve(strict=False)
+    rp = _norm(path)
     for root in roots:
-        try:
-            resolved.relative_to(root.resolve(strict=False))
-            return resolved
-        except ValueError:
+        rr = _norm(root)
+        if not rr or rr == ".":
             continue
+        if rp == rr or rp.startswith(rr + os.sep):
+            return resolved
     raise HTTPException(status_code=403, detail="path_outside_library_roots")
