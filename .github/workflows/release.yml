@@ -26,15 +26,22 @@ on:
         required: false
         default: ""
 
+# Least privilege at the top: read only. The publishing job below elevates
+# itself to contents: write because it uploads release assets and flips the
+# draft. Test builds (workflow_dispatch) never reach the publish step.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   windows-installer:
     runs-on: windows-latest
+    # Only this job touches a GitHub release (the "Attach and publish" step),
+    # so write is scoped here rather than at the workflow top level.
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
           cache: npm
@@ -81,7 +88,7 @@ jobs:
       - name: Zip
         shell: pwsh
         run: Compress-Archive -Path installer/dist/* -DestinationPath "installer/Output/F7FIVE0-${{ steps.v.outputs.version }}.zip"
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: F7FIVE0-${{ steps.v.outputs.version }}
           path: installer/Output/*
