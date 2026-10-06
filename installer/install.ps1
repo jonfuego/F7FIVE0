@@ -91,12 +91,6 @@ $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"   # Invoke-WebRequest is 10x faster without the bar
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-# Pinned downloads. Bump deliberately.
-$NodeVersion   = "22.14.0"
-$NodeZipUrl    = "https://nodejs.org/dist/v$NodeVersion/node-v$NodeVersion-win-x64.zip"
-$FfmpegZipUrl  = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
-$CloudflaredUrl = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe"
-$CaddyUrl      = "https://caddyserver.com/api/download?os=windows&arch=amd64"
 $PythonWingetId = "Python.Python.3.12"
 $PostgresWingetId = "PostgreSQL.PostgreSQL.16"
 $NssmWingetId  = "NSSM.NSSM"
@@ -123,6 +117,15 @@ function Step([string]$msg) {
 . (Join-Path $PSScriptRoot "common.ps1")
 # Every Warn during this run, repeated in the summary at the end.
 $script:Warnings = New-Object System.Collections.Generic.List[string]
+
+# Pinned downloads live in installer\downloads.manifest.psd1 (SEC-P0-2): exact
+# version, immutable URL, and SHA-256 per file. Get-DownloadSpec (common.ps1)
+# reads them; the Download helper verifies the hash. To bump a version, see
+# "Refreshing a pinned download" in CLAUDE.md. cloudflared and Caddy are only
+# downloaded by remote-access.ps1, so their specs are read there.
+$NodeSpec    = Get-DownloadSpec "node"
+$NodeVersion = $NodeSpec.Version
+$FfmpegSpec  = Get-DownloadSpec "ffmpeg"
 
 function Ask([string]$prompt, [string]$default = "") {
     if ($NonInteractive) { return $default }
@@ -395,7 +398,7 @@ $Node = Join-Path $NodeDir "node.exe"
 $nodeOk = (Test-Path $Node) -and ((& $Node --version) -eq "v$NodeVersion")
 if (-not $nodeOk) {
     $zip = Join-Path $env:TEMP "f7five0-node.zip"
-    Download $NodeZipUrl $zip
+    Download $NodeSpec.Url $zip $NodeSpec.Sha256 $NodeSpec.Publisher
     $unz = Join-Path $env:TEMP "f7five0-node"
     if (Test-Path $unz) { Remove-Item -Recurse -Force $unz }
     Expand-Archive -Path $zip -DestinationPath $unz -Force
@@ -410,7 +413,7 @@ $Ffmpeg = Join-Path $BinDir "ffmpeg.exe"
 $Ffprobe = Join-Path $BinDir "ffprobe.exe"
 if (-not ((Test-Path $Ffmpeg) -and (Test-Path $Ffprobe))) {
     $zip = Join-Path $env:TEMP "f7five0-ffmpeg.zip"
-    Download $FfmpegZipUrl $zip
+    Download $FfmpegSpec.Url $zip $FfmpegSpec.Sha256 $FfmpegSpec.Publisher
     $unz = Join-Path $env:TEMP "f7five0-ffmpeg"
     if (Test-Path $unz) { Remove-Item -Recurse -Force $unz }
     Expand-Archive -Path $zip -DestinationPath $unz -Force
