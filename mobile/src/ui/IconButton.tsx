@@ -19,6 +19,10 @@ interface IconButtonProps {
   /** Explicit control size in dp (width and height). Defaults to the MIN_TOUCH
    * box. Kept within the 44 to 56 dp range for the play control. */
   diameter?: number;
+  /** Outlined key: transparent, a 2 dp line-strong border and an ink icon at
+   * rest; the accent shows only while pressed or focused. The play/pause key
+   * on Now Playing and the mini player. */
+  outlined?: boolean;
 }
 
 /** Icon-only button. Always >= 44x44 dp and always has an accessibilityLabel
@@ -33,6 +37,7 @@ export function IconButton({
   fill,
   square,
   diameter,
+  outlined,
 }: IconButtonProps): React.ReactElement {
   return (
     <Pressable
@@ -44,6 +49,7 @@ export function IconButton({
       style={({ pressed, focused }) => [
         styles.btn,
         square && styles.square,
+        outlined && styles.outlined,
         diameter != null && {
           width: diameter,
           height: diameter,
@@ -51,11 +57,18 @@ export function IconButton({
           minHeight: diameter,
         },
         focused && styles.focused,
-        pressed && styles.pressed,
+        pressed && (outlined ? styles.outlinedPressed : styles.pressed),
         disabled && styles.disabled,
       ]}
     >
-      <Icon icon={icon} size={size} color={color} fill={fill} />
+      {({ pressed, focused }) => (
+        <Icon
+          icon={icon}
+          size={size}
+          color={outlined && (pressed || focused) ? colors.accent : color}
+          fill={fill}
+        />
+      )}
     </Pressable>
   );
 }
@@ -70,6 +83,8 @@ const styles = StyleSheet.create({
   },
   // Square play/pause control (crit: not radius.pill).
   square: { borderRadius: radius.md },
+  outlined: { backgroundColor: "transparent", borderWidth: 2, borderColor: colors.lineStrong },
+  outlinedPressed: { borderColor: colors.accent },
   pressed: { opacity: 0.6 },
   disabled: { opacity: 0.35 },
   // Visible focus ring for TV / keyboard D-pad navigation.

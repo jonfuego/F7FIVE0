@@ -1446,16 +1446,25 @@ button { border: 0; background: transparent; color: inherit; font: inherit; curs
   transition: background .15s var(--ease), color .15s var(--ease);
 }
 .np .controls .keys .k:hover { background: var(--surface-3); color: var(--ink); }
-/* Play key sits in line with the other transport keys (square, not a big round
-   button) so it stops dominating the row; the hive fill still sets it apart. */
+/* Play key: an outlined square key in line with the other transport keys.
+   No fill at rest; the hive red shows only on hover, focus and press. */
 .np .controls .keys .k.play {
   width: 48px; height: 48px;
   border-radius: var(--radius-2);
-  background: var(--hive);
-  color: var(--on-hive);
+  background: transparent;
+  border: 2px solid var(--line-strong);
+  color: var(--ink);
 }
-.np .controls .keys .k.play:hover {
-  background: var(--hive-hover);
+.np .controls .keys .k.play:hover,
+.np .controls .keys .k.play:focus-visible {
+  background: transparent;
+  border-color: var(--hive);
+  color: var(--hive-text);
+}
+.np .controls .keys .k.play:active {
+  background: var(--hive-press);
+  border-color: var(--hive-press);
+  color: var(--on-hive);
 }
 /* Volume slider sits inline with the transport keys. Fixed width so the play
    button stays centered; hidden on narrow viewports where the mute button
@@ -1714,12 +1723,48 @@ body[data-dock="1"] .shell > main {
   cursor: pointer;
 }
 .mini .right .icbtn:hover { background: var(--surface-3); color: var(--ink); }
-.mini .right .icbtn.play {
+/* Audio Now Playing (/watch for a track) play key: the same outlined square
+   key, 56 px. */
+.np-audio-play {
+  width: 56px; height: 56px;
+  display: grid; place-items: center;
   border-radius: var(--radius-2);
-  background: var(--hive);
+  background: transparent;
+  border: 2px solid var(--line-strong);
+  color: var(--ink);
+  cursor: pointer;
+}
+.np-audio-play:hover,
+.np-audio-play:focus-visible {
+  border-color: var(--hive);
+  color: var(--hive-text);
+}
+.np-audio-play:active {
+  background: var(--hive-press);
+  border-color: var(--hive-press);
   color: var(--on-hive);
 }
-.mini .right .icbtn.play:hover { background: var(--hive-hover); }
+/* Dock play key: same outlined square key as Now Playing, 44 px (56 px on
+   phones). No fill at rest; hive red only on hover, focus and press. */
+.mini .right .icbtn.play {
+  width: 44px; height: 44px;
+  flex-shrink: 0;
+  border-radius: var(--radius-2);
+  background: transparent;
+  border: 2px solid var(--line-strong);
+  color: var(--ink);
+}
+.mini .right .icbtn.play:hover,
+.mini .right .icbtn.play:focus-visible {
+  background: transparent;
+  border-color: var(--hive);
+  color: var(--hive-text);
+}
+.mini .right .icbtn.play:active {
+  background: var(--hive-press);
+  border-color: var(--hive-press);
+  color: var(--on-hive);
+}
 .mini .right .vol-slider {
   width: 84px;
   height: 4px;
@@ -1741,7 +1786,7 @@ body[data-dock="1"] .shell > main {
   .mini .right { gap: 8px; }
   .mini .right .icbtn { width: 56px; height: 56px; }
   .mini .right .icbtn svg { width: 28px; height: 28px; }
-  .mini .right .icbtn.play { width: 64px; height: 64px; }
+  .mini .right .icbtn.play { width: 56px; height: 56px; }
   .mini .right .icbtn.play svg { width: 26px; height: 26px; }
   .mini .right .source-badge { display: none; }
   .mini .left .body .t { font-size: 16px; }

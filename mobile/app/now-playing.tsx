@@ -201,11 +201,12 @@ export default function NowPlayingScreen(): React.ReactElement {
             void togglePlay();
           }}
           accessibilityLabel={isPlaying ? "Pause" : "Play"}
-          size={32}
+          size={28}
           diameter={56}
           square
+          outlined
           fill
-          color={colors.accent}
+          color={colors.text}
         />
         <IconButton
           icon={SkipForward}

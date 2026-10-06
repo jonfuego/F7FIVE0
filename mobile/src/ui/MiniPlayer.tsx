@@ -39,9 +39,10 @@ export function MiniPlayer(): React.ReactElement | null {
         icon={isPlaying ? Pause : Play}
         onPress={togglePlay}
         accessibilityLabel={isPlaying ? "Pause" : "Play"}
-        size={24}
+        size={22}
         diameter={48}
         square
+        outlined
         fill
       />
       <IconButton icon={SkipForward} onPress={next} accessibilityLabel="Next track" fill />
