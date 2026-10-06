@@ -13,14 +13,16 @@ import { colors, MIN_TOUCH, radius, spacing, typography } from "@/state/theme";
 import { Artwork } from "@/ui/Artwork";
 import { Backdrop } from "@/ui/Backdrop";
 import { DownloadButton } from "@/ui/DownloadButton";
+import { EpisodeFileMenu } from "@/ui/EpisodeFileMenu";
 import { Icon } from "@/ui/Icon";
 import { QueryState } from "@/ui/QueryState";
 import { Screen } from "@/ui/Screen";
 
-/** Show detail: poster, season picker, episode list with server-backed
- * watched checks, and a Plex-style primary button that plays the On Deck
- * episode (resume the in-progress one, else the next unwatched). Tapping an
- * episode plays its first media file; the watch route resumes saved progress. */
+/** Show detail: poster, synopsis, season picker, episode list with
+ * server-backed watched checks, and a Plex-style primary button that plays the
+ * On Deck episode (resume the in-progress one, else the next unwatched).
+ * Tapping an episode plays its first media file; the watch route resumes saved
+ * progress. Each episode's 3-dot menu has File info for that episode's file. */
 export default function ShowDetailScreen(): React.ReactElement {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
@@ -110,6 +112,11 @@ export default function ShowDetailScreen(): React.ReactElement {
               </View>
             </Backdrop>
 
+            <View style={styles.synopsis}>
+              <Text style={styles.synopsisTitle}>Synopsis</Text>
+              <Text style={styles.synopsisText}>{s.overview?.trim() ? s.overview : "No synopsis yet."}</Text>
+            </View>
+
             {onDeckEp && onDeckEp.media_files[0] ? (
               <Pressable
                 accessibilityRole="button"
@@ -182,6 +189,12 @@ export default function ShowDetailScreen(): React.ReactElement {
                       }}
                     />
                   ) : null}
+                  {ep.media_files[0] ? (
+                    <EpisodeFileMenu
+                      file={ep.media_files[0]}
+                      label={`S${ep.season_number}E${ep.episode_number} ${ep.title ?? `Episode ${ep.episode_number}`}`}
+                    />
+                  ) : null}
                   {fileId ? (
                     <Pressable
                       accessibilityRole="button"
@@ -224,6 +237,9 @@ const styles = StyleSheet.create({
   hero: { flexDirection: "row", gap: spacing.lg, marginBottom: spacing.lg },
   heroText: { flex: 1, justifyContent: "center", gap: spacing.xs },
   muted: { ...typography.caption, color: colors.textMuted },
+  synopsis: { marginBottom: spacing.lg, gap: spacing.xs },
+  synopsisTitle: { fontSize: 12, fontWeight: "700", letterSpacing: 1.5, textTransform: "uppercase", color: colors.hiveText },
+  synopsisText: { ...typography.body, color: colors.textMuted, lineHeight: 22 },
   chips: { gap: spacing.sm, paddingBottom: spacing.md },
   chip: {
     minHeight: MIN_TOUCH,

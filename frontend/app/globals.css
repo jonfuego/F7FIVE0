@@ -1317,6 +1317,80 @@ button { border: 0; background: transparent; color: inherit; font: inherit; curs
   border-radius: var(--radius-full); overflow: hidden;
 }
 .detail .ep .pb > div { height: 100%; background: var(--hive-mark); }
+/* Episode rows carry a 3-dot menu (components/EpisodeRow) after the runtime. */
+.detail .ep { grid-template-columns: 60px 1fr auto 44px; }
+.detail .ep-menu { position: relative; justify-self: end; }
+.detail .ep-menu-btn {
+  width: 44px; height: 44px;
+  display: grid; place-items: center;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-2);
+  color: var(--ink-3);
+  cursor: pointer;
+}
+.detail .ep-menu-btn:hover,
+.detail .ep-menu-btn:focus-visible { background: var(--surface-3); color: var(--ink); }
+.detail .ep-menu-pop {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  min-width: 160px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-1);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  z-index: 50;
+  overflow: hidden;
+}
+.detail .ep-menu-pop button {
+  display: block;
+  width: 100%;
+  padding: 10px 14px;
+  background: transparent;
+  border: none;
+  color: var(--ink);
+  text-align: left;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  cursor: pointer;
+}
+.detail .ep-menu-pop button:hover { background: var(--surface-3); }
+.detail .ep-info-scrim {
+  position: fixed; inset: 0;
+  background: var(--scrim);
+  z-index: 300;
+  display: grid; place-items: center;
+  padding: 16px;
+  cursor: default;
+}
+.detail .ep-info {
+  width: min(520px, 100%);
+  max-height: 90vh;
+  overflow: auto;
+  background: var(--surface-1);
+}
+.detail .ep-info-head { display: flex; align-items: center; justify-content: space-between; }
+.detail .ep-info-head h4 { margin: 0; }
+.detail .ep-info-head button {
+  width: 44px; height: 44px;
+  display: grid; place-items: center;
+  background: transparent; border: none;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.detail .ep-info-sub {
+  font-size: 13px;
+  color: var(--ink-2);
+  margin: 4px 0 12px;
+}
+.detail .card.synopsis p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--ink-2);
+  max-width: 70ch;
+}
 
 @media (max-width: 900px) {
   .detail > .body { grid-template-columns: 1fr; gap: 32px; padding: 32px 24px 60px; }
