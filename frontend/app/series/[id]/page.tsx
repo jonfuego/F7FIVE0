@@ -14,17 +14,14 @@ import EditOverridesModal, {
 import { AuthShell } from "@/components/AuthShell";
 import { BackButton } from "@/components/BackButton";
 import { Backdrop } from "@/components/Backdrop";
-import { MarkWatchedButton } from "@/components/MarkWatchedButton";
+import { EpisodeRow } from "@/components/EpisodeRow";
 import { apiGet, apiPost, ApiError } from "@/lib/client-api";
 import { loadOverride } from "@/lib/overrides";
 import {
   colorForTitle,
-  formatBytes,
-  formatDuration,
   hueFromString,
   joinMeta,
 } from "@/lib/format";
-import { useProgressMap } from "@/lib/progress";
 import type { Episode, MediaFile, Me, OverrideOut, SeriesDetail } from "@/lib/types";
 
 type Grouped = { season: number; episodes: Episode[] };
@@ -171,23 +168,6 @@ function SeriesHero({
     `${epCount} ${epCount === 1 ? "episode" : "episodes"}`,
   ]);
 
-  // Aggregate technical details from the first available episode's first file.
-  const sampleFile = useMemo(() => {
-    for (const e of series.episodes) {
-      if (e.media_files.length > 0) return e.media_files[0];
-    }
-    return null;
-  }, [series.episodes]);
-
-  const totalSize = useMemo(() => {
-    let bytes = 0;
-    for (const e of series.episodes) {
-      for (const f of e.media_files) {
-        if (f.size_bytes) bytes += f.size_bytes;
-      }
-    }
-    return bytes;
-  }, [series.episodes]);
 
   return (
     <section className="detail" style={tint}>
@@ -227,7 +207,6 @@ function SeriesHero({
           </div>
           <h1>{series.title}</h1>
           {meta ? <MetaRow text={meta} /> : null}
-          {series.overview ? <p className="blurb">{series.overview}</p> : null}
           <div className="ctas">
             {findFirstEpisodeFile(grouped) ? (
               <Link
@@ -244,22 +223,14 @@ function SeriesHero({
             <AdminRescanButton series={series} />
           </div>
 
-          {sampleFile ? (
-            // Mono technical block: codec, bitrate, container, file size,
-            // file path. font-sans is wired to var(--mono).
-            <div className="cards font-sans">
-              <div className="card">
-                <h4>File Information</h4>
-                <div className="row"><span>Codec</span><span>{sampleFile.video_codec?.toUpperCase() ?? "—"}</span></div>
-                <div className="row"><span>Bitrate</span><span>{sampleFile.bitrate_kbps ? `${(sampleFile.bitrate_kbps / 1000).toFixed(1)} Mbps` : "—"}</span></div>
-                <div className="row"><span>Container</span><span>{sampleFile.container?.toUpperCase() ?? "—"}</span></div>
-                <div className="row"><span>Resolution</span><span>{sampleFile.width && sampleFile.height ? `${sampleFile.width}×${sampleFile.height}` : "—"}</span></div>
-                <div className="row"><span>Audio</span><span>{sampleFile.audio_codec?.toUpperCase() ?? "—"}</span></div>
-                <div className="row"><span>File size</span><span>{formatBytes(totalSize)}</span></div>
-                <div className="row"><span>File path</span><span style={{ fontSize: 11 }}>{sampleFile.path}</span></div>
-              </div>
+          {/* Synopsis replaces the old series-wide file card. Each episode's
+              own file details are in its row's 3-dot menu (File info). */}
+          <div className="cards font-sans">
+            <div className="card synopsis">
+              <h4>Synopsis</h4>
+              <p>{series.overview?.trim() ? series.overview : "No synopsis yet."}</p>
             </div>
-          ) : null}
+          </div>
 
           {grouped.length === 0 ? (
             <div
@@ -324,68 +295,6 @@ function SeasonSection({
         ? group.episodes.map((ep) => <EpisodeRow key={ep.id} ep={ep} />)
         : null}
     </section>
-  );
-}
-
-function EpisodeRow({ ep }: { ep: Episode }) {
-  const primary = ep.media_files[0];
-  const progress = useProgressMap();
-  const row = primary ? progress?.get(primary.id) : undefined;
-  const [watched, setWatched] = useState<boolean | null>(null);
-  const effective = watched ?? Boolean(row?.completed_at);
-  useEffect(() => {
-    if (progress && watched === null && primary) {
-      setWatched(Boolean(row?.completed_at));
-    }
-  }, [progress, primary, row, watched]);
-
-  const pct =
-    row?.duration_sec && row.duration_sec > 0
-      ? Math.round((row.position_sec / row.duration_sec) * 100)
-      : null;
-
-  const rowContent = (
-    <>
-      <div className="num">{String(ep.episode_number).padStart(2, "0")}</div>
-      <div className="body">
-        <div className="t">{ep.title ?? `Episode ${ep.episode_number}`}</div>
-        {ep.overview ? <div className="s">{ep.overview}</div> : null}
-      </div>
-      <div className="right">
-        <div>{primary?.duration_sec ? formatDuration(primary.duration_sec) : "—"}</div>
-        {pct !== null && pct > 0 && pct < 100 ? (
-          <div className="pb">
-            <div style={{ width: `${pct}%` }} />
-          </div>
-        ) : null}
-        {effective ? (
-          <span style={{ color: "var(--hive-text)", fontSize: 10 }}>watched</span>
-        ) : null}
-      </div>
-    </>
-  );
-
-  if (!primary) {
-    return <div className="ep" style={{ opacity: 0.5 }}>{rowContent}</div>;
-  }
-
-  return (
-    <div className="ep">
-      <Link
-        href={`/watch/${primary.id}`}
-        style={{ display: "contents" }}
-        aria-label={`Play ${ep.title ?? `episode ${ep.episode_number}`}`}
-      >
-        {rowContent}
-      </Link>
-      <span style={{ display: "none" }}>
-        <MarkWatchedButton
-          mediaFileId={primary.id}
-          isWatched={effective}
-          onChanged={setWatched}
-        />
-      </span>
-    </div>
   );
 }
 

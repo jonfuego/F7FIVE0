@@ -7,6 +7,13 @@ export interface MediaFile {
   duration_sec?: number | null;
   video_codec?: string | null;
   audio_codec?: string | null;
+  /** File info fields (the API sends them on every media_files entry). */
+  path?: string | null;
+  size_bytes?: number | null;
+  audio_channels?: number | null;
+  width?: number | null;
+  height?: number | null;
+  bitrate_kbps?: number | null;
 }
 
 export interface SongRow {
