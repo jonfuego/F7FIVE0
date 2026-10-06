@@ -38,7 +38,8 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { ACCESS_COOKIE, REFRESH_COOKIE } from "@/lib/server-env";
-import { siteOriginFromHeaders } from "@/lib/origin";
+import { requestProto, siteOriginFromHeaders } from "@/lib/origin";
+import { isForbiddenCrossOrigin, securityHeaders } from "@/lib/security-headers";
 
 const API_ORIGIN = process.env.API_ORIGIN ?? "http://127.0.0.1:8001";
 const STREAM_ORIGIN = process.env.STREAM_ORIGIN ?? "http://127.0.0.1:8002";
@@ -117,17 +118,54 @@ const PUBLIC_FILES = new Set([
 export function proxy(req: NextRequest) {
   const { pathname, search } = req.nextUrl;
 
-  const backend = backendFor(req);
-  if (backend) return proxyTo(req, backend);
+  // SEC-P1-5: HSTS only when the request genuinely arrived over HTTPS (or the
+  // configured public address is https). Every response proxy() returns gets
+  // the security headers via secure().
+  const https =
+    requestProto(req.headers) === "https" ||
+    (process.env.PUBLIC_URL ?? "").startsWith("https://");
+  const secure = (res: NextResponse): NextResponse => {
+    for (const [k, v] of Object.entries(securityHeaders({ https }))) {
+      res.headers.set(k, v);
+    }
+    return res;
+  };
 
-  if (PUBLIC_FILES.has(pathname)) return NextResponse.next();
+  // SEC-P1-5: CSRF defense in depth. A cookie-authed, state-changing BFF call
+  // whose Origin is not ours is rejected before it reaches a route handler.
+  // siteOriginFromHeaders is the one sanitised definition of "us".
+  const selfOrigin = siteOriginFromHeaders(req.headers);
+  const hasBearer = (req.headers.get("authorization") ?? "")
+    .toLowerCase()
+    .startsWith("bearer ");
+  if (
+    isForbiddenCrossOrigin({
+      method: req.method,
+      pathname,
+      origin: req.headers.get("origin"),
+      selfOrigin,
+      hasBearer,
+    })
+  ) {
+    return secure(
+      new NextResponse(JSON.stringify({ detail: "bad_origin" }), {
+        status: 403,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+  }
+
+  const backend = backendFor(req);
+  if (backend) return secure(proxyTo(req, backend));
+
+  if (PUBLIC_FILES.has(pathname)) return secure(NextResponse.next());
   for (const prefix of PUBLIC_PREFIXES) {
-    if (pathname.startsWith(prefix)) return NextResponse.next();
+    if (pathname.startsWith(prefix)) return secure(NextResponse.next());
   }
 
   const hasSession =
     req.cookies.has(ACCESS_COOKIE) || req.cookies.has(REFRESH_COOKIE);
-  if (hasSession) return NextResponse.next();
+  if (hasSession) return secure(NextResponse.next());
 
   // Build the redirect target fresh from the incoming request's authority.
   // Cloning req.nextUrl carries Next's bind address (HOSTNAME=127.0.0.1,
@@ -143,7 +181,7 @@ export function proxy(req: NextRequest) {
   if (!pathname.startsWith("/api/")) {
     url.searchParams.set("next", pathname + (search || ""));
   }
-  return NextResponse.redirect(url);
+  return secure(NextResponse.redirect(url));
 }
 
 export const config = {
