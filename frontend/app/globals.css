@@ -987,6 +987,30 @@ button { border: 0; background: transparent; color: inherit; font: inherit; curs
   gap: 56px;
   align-items: start;
 }
+/* Back arrow (components/BackButton): first item in the detail grid, on its
+   own row, top left above the poster or art. Icon only. */
+.detail > .body > .back-arrow {
+  grid-column: 1 / -1;
+  justify-self: start;
+  margin-bottom: -32px;
+  width: 44px;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-1);
+  text-decoration: none;
+}
+.detail > .body > .back-arrow:hover,
+.detail > .body > .back-arrow:focus-visible {
+  border-color: var(--ink);
+}
+@media (max-width: 900px) {
+  .detail > .body > .back-arrow { margin-bottom: -16px; }
+}
 .detail .poster-card {
   width: 320px;
   aspect-ratio: 2/3;

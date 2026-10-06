@@ -7,12 +7,12 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
-import Link from "next/link";
 import { notFound, useParams } from "next/navigation";
 import EditOverridesModal, {
   algorithmicSortHint,
 } from "@/components/EditOverridesModal";
 import { AuthShell } from "@/components/AuthShell";
+import { BackButton } from "@/components/BackButton";
 import { AlbumTileMenu } from "@/components/AlbumTileMenu";
 import { Grid, GridEmpty } from "@/components/Grid";
 import { MediaCard } from "@/components/MediaCard";
@@ -177,6 +177,7 @@ function ArtistHero({
     <section className="detail" style={tint}>
       <div className="backdrop" />
       <div className="body">
+        <BackButton href="/music" />
         <div className="poster-card album">
           <div className="keyart-mini" />
           {detail.image_path ? (
@@ -212,11 +213,6 @@ function ArtistHero({
           <ArtistMixActions artistId={detail.id} />
           <AboutPanel bioText={detail.bio_text} bioSource={detail.bio_source} />
 
-          <div className="ctas" style={{ marginTop: 24 }}>
-            <Link className="btn ghost" href="/music">
-              ← Back
-            </Link>
-          </div>
 
           <div
             className="tracks"

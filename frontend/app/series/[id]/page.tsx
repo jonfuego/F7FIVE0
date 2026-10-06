@@ -12,6 +12,7 @@ import EditOverridesModal, {
   algorithmicSortHint,
 } from "@/components/EditOverridesModal";
 import { AuthShell } from "@/components/AuthShell";
+import { BackButton } from "@/components/BackButton";
 import { Backdrop } from "@/components/Backdrop";
 import { MarkWatchedButton } from "@/components/MarkWatchedButton";
 import { apiGet, apiPost, ApiError } from "@/lib/client-api";
@@ -194,6 +195,7 @@ function SeriesHero({
         <Backdrop src={series.backdrop_path} alt="" />
       </div>
       <div className="body">
+        <BackButton href="/series" />
         <div className="poster-card">
           <div className="keyart-mini" />
           {series.poster_path ? (
@@ -240,9 +242,6 @@ function SeriesHero({
               </button>
             )}
             <AdminRescanButton series={series} />
-            <Link className="btn ghost" href="/series">
-              ← Back
-            </Link>
           </div>
 
           {sampleFile ? (
