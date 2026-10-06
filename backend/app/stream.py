@@ -286,6 +286,12 @@ def direct_play(
     content_type: Optional[str] = None
     if container in {"mp4", "m4v", "mov"}:
         content_type = "video/mp4"
+    elif container == "mkv":
+        # Direct play of Matroska happens only when the client reported it can
+        # play it (stream/start client_caps).
+        content_type = "video/x-matroska"
+    elif container == "webm":
+        content_type = "video/webm"
     elif container == "mp3":
         content_type = "audio/mpeg"
     elif container == "m4a":

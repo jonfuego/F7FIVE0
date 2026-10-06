@@ -486,6 +486,13 @@ export type StreamStartRequest = {
   // Rendition ceiling. On CPU-only servers it picks the one rendition the
   // stream carries (default 720p).
   quality?: "original" | "1080p" | "720p" | "480p";
+  // What this browser plays as-is (lib/playback-caps.ts). Lets the server
+  // direct-play, for example, an H.264 + AAC MKV instead of transcoding it.
+  client_caps?: {
+    containers: string[];
+    video_codecs: string[];
+    audio_codecs: string[];
+  };
 };
 
 export type StreamStart = {
