@@ -1,12 +1,14 @@
 """Signed art URL support on the /api/art read endpoint.
 
 Android's media-notification artwork loader can't attach a bearer header, so
-the read endpoint also accepts a short-lived HMAC-signed query (uid/exp/sig)
-bound to the exact art path. These tests cover:
+the read endpoint also accepts a short-lived HMAC-signed query
+(uid/sid/exp/sig) bound to the exact art path and the issuing session. These
+tests cover:
 
 - signed URL with no bearer -> 200 + image content type
 - tampered signature -> 401
 - expired signature -> 401
+- revoked session -> 403 (SEC-P1-2)
 - bearer auth with no signature -> still 200 (unchanged)
 - the sign/verify helper round-trips and rejects tamper + expiry
 
@@ -30,14 +32,13 @@ from app.api.deps import get_db
 from app.config import settings
 from app.main import app
 from app.models.art import ENTITY_MOVIE, ROLE_POSTER
-from app.models.user import User
 from app.services import art as art_service
-from app.services import security as security_service
 from app.services.security import (
     build_signed_art_url,
     sign_art_url_params,
     verify_art_url_params,
 )
+from tests.conftest import make_active_session
 
 
 _PNG_1x1 = None
@@ -62,13 +63,11 @@ def art_root(tmp_path, monkeypatch):
 
 @pytest.fixture()
 def owner(db_session):
-    u = User(
-        username="art-user", display_name="Art User",
-        password_hash="x", role="member", is_active=True,
-    )
-    db_session.add(u)
-    db_session.commit()
-    return u
+    """A member user plus an active session (SEC-P1-2: signed URLs are bound to
+    the issuing session). `owner.sid` carries the session id for signing."""
+    user, sess = make_active_session(db_session)
+    user.sid = sess.id
+    return user
 
 
 @pytest.fixture()
@@ -119,7 +118,7 @@ def test_signed_url_without_bearer_returns_200_and_image(
     anon_client, override_row, owner,
 ):
     params = sign_art_url_params(
-        ENTITY_MOVIE, override_row, ROLE_POSTER, owner.id,
+        ENTITY_MOVIE, override_row, ROLE_POSTER, owner.id, owner.sid,
     )
     resp = anon_client.get(_art_path(override_row), params=params)
     assert resp.status_code == 200, resp.text
@@ -128,7 +127,7 @@ def test_signed_url_without_bearer_returns_200_and_image(
 
 def test_tampered_signature_returns_401(anon_client, override_row, owner):
     params = sign_art_url_params(
-        ENTITY_MOVIE, override_row, ROLE_POSTER, owner.id,
+        ENTITY_MOVIE, override_row, ROLE_POSTER, owner.id, owner.sid,
     )
     params["sig"] = params["sig"][:-1] + ("0" if params["sig"][-1] != "0" else "1")
     resp = anon_client.get(_art_path(override_row), params=params)
@@ -142,7 +141,7 @@ def test_signature_for_a_different_image_is_rejected(
     # the real one. The path binding must reject it.
     other_id = uuid.uuid4()
     params = sign_art_url_params(
-        ENTITY_MOVIE, other_id, ROLE_POSTER, owner.id,
+        ENTITY_MOVIE, other_id, ROLE_POSTER, owner.id, owner.sid,
     )
     resp = anon_client.get(_art_path(override_row), params=params)
     assert resp.status_code == 401, resp.text
@@ -152,10 +151,19 @@ def test_expired_signature_returns_401(anon_client, override_row, owner):
     # Build a signature whose exp is already in the past by signing over the
     # same payload the helper uses with a negative TTL.
     params = sign_art_url_params(
-        ENTITY_MOVIE, override_row, ROLE_POSTER, owner.id, ttl_hours=-1,
+        ENTITY_MOVIE, override_row, ROLE_POSTER, owner.id, owner.sid, ttl_hours=-1,
     )
     resp = anon_client.get(_art_path(override_row), params=params)
     assert resp.status_code == 401, resp.text
+
+
+def test_revoked_session_returns_403(anon_client, db_session, override_row):
+    # SEC-P1-2: a valid signature whose issuing session has been revoked (a real
+    # logout, rotated_at null) is refused even though the HMAC checks out.
+    user, sess = make_active_session(db_session, revoked=True)
+    params = sign_art_url_params(ENTITY_MOVIE, override_row, ROLE_POSTER, user.id, sess.id)
+    resp = anon_client.get(_art_path(override_row), params=params)
+    assert resp.status_code == 403, resp.text
 
 
 def test_no_bearer_and_no_signature_is_401(anon_client, override_row):
@@ -189,56 +197,72 @@ def test_bearer_auth_still_works_without_signature(
 def test_sign_verify_round_trip():
     entity_id = uuid.uuid4()
     user_id = uuid.uuid4()
-    params = sign_art_url_params(ENTITY_MOVIE, entity_id, ROLE_POSTER, user_id)
-    assert set(params) == {"uid", "exp", "sig"}
+    sid = uuid.uuid4()
+    params = sign_art_url_params(ENTITY_MOVIE, entity_id, ROLE_POSTER, user_id, sid)
+    assert set(params) == {"uid", "sid", "exp", "sig"}
     assert verify_art_url_params(
         ENTITY_MOVIE, entity_id, ROLE_POSTER,
-        params["uid"], params["exp"], params["sig"],
+        params["uid"], params["sid"], params["exp"], params["sig"],
     )
 
 
 def test_verify_rejects_tampered_sig():
     entity_id = uuid.uuid4()
     user_id = uuid.uuid4()
-    params = sign_art_url_params(ENTITY_MOVIE, entity_id, ROLE_POSTER, user_id)
+    sid = uuid.uuid4()
+    params = sign_art_url_params(ENTITY_MOVIE, entity_id, ROLE_POSTER, user_id, sid)
     bad = params["sig"][:-1] + ("0" if params["sig"][-1] != "0" else "1")
     assert not verify_art_url_params(
         ENTITY_MOVIE, entity_id, ROLE_POSTER,
-        params["uid"], params["exp"], bad,
+        params["uid"], params["sid"], params["exp"], bad,
     )
 
 
 def test_verify_rejects_different_path():
     entity_id = uuid.uuid4()
     user_id = uuid.uuid4()
-    params = sign_art_url_params(ENTITY_MOVIE, entity_id, ROLE_POSTER, user_id)
+    sid = uuid.uuid4()
+    params = sign_art_url_params(ENTITY_MOVIE, entity_id, ROLE_POSTER, user_id, sid)
     # Same sig, different role -> reject.
     assert not verify_art_url_params(
         ENTITY_MOVIE, entity_id, "backdrop",
-        params["uid"], params["exp"], params["sig"],
+        params["uid"], params["sid"], params["exp"], params["sig"],
+    )
+
+
+def test_verify_rejects_different_session():
+    entity_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    sid = uuid.uuid4()
+    params = sign_art_url_params(ENTITY_MOVIE, entity_id, ROLE_POSTER, user_id, sid)
+    assert not verify_art_url_params(
+        ENTITY_MOVIE, entity_id, ROLE_POSTER,
+        params["uid"], str(uuid.uuid4()), params["exp"], params["sig"],
     )
 
 
 def test_verify_rejects_expired():
     entity_id = uuid.uuid4()
     user_id = uuid.uuid4()
+    sid = uuid.uuid4()
     params = sign_art_url_params(
-        ENTITY_MOVIE, entity_id, ROLE_POSTER, user_id, ttl_hours=-1,
+        ENTITY_MOVIE, entity_id, ROLE_POSTER, user_id, sid, ttl_hours=-1,
     )
     assert params["exp"] < int(datetime.now(timezone.utc).timestamp())
     assert not verify_art_url_params(
         ENTITY_MOVIE, entity_id, ROLE_POSTER,
-        params["uid"], params["exp"], params["sig"],
+        params["uid"], params["sid"], params["exp"], params["sig"],
     )
 
 
 def test_build_signed_art_url_format():
     entity_id = uuid.uuid4()
     user_id = uuid.uuid4()
+    sid = uuid.uuid4()
     url = build_signed_art_url(
         "https://media.example.com/", ENTITY_MOVIE, entity_id, ROLE_POSTER,
-        user_id,
+        user_id, sid,
     )
     prefix = f"https://media.example.com/api/art/{ENTITY_MOVIE}/{entity_id}/{ROLE_POSTER}?"
     assert url.startswith(prefix)
-    assert "uid=" in url and "exp=" in url and "sig=" in url
+    assert "uid=" in url and "sid=" in url and "exp=" in url and "sig=" in url

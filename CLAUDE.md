@@ -40,6 +40,21 @@ INSTALL.md for the operator view.
   the folder grant does not inherit to files.
 - The stream gateway runs one uvicorn worker (in-process transcoder
   registry). It validates the HMAC signature before any DB lookup.
+- Session-bound signed URLs (SEC-P1-2). Stream, HLS, art, subtitle, and
+  download URLs are signed with the issuing session id (`sid`) and default to a
+  4-hour TTL (`STREAM_URL_TTL_HOURS`). Each serve path verifies the HMAC first
+  (no DB), then calls `app/services/signed_urls.py::session_authorizes`, which
+  rejects a URL whose session is expired or explicitly revoked. The one subtlety
+  is rotation: the web and native clients rotate their session on every ~15-min
+  access-token refresh (old row gets `revoked_at` AND `rotated_at`). A session
+  revoked *by rotation* still authorizes its already-issued URLs, so a 3-hour
+  movie and a cast session keep playing across refreshes with no re-mint; only a
+  real revoke (logout, password change, admin disable, reuse detection, all of
+  which leave `rotated_at` null) or the 4-hour expiry kills a live URL. Starting
+  new playback or a cast handoff calls `/api/stream/start` again and binds to
+  the then-current session. When changing any signer, keep `sid` in both the
+  HMAC payload and the query, and thread it through `_signed_query` so HLS
+  sub-fetches stay bound.
 - Stream roots fail closed (SEC-P0-4). The gateway derives its allowed roots
   from the active library-folder configuration (the `libraries` table, else
   `LIBRARY_ROOT_*`) plus any `STREAM_ALLOWED_ROOTS`, and rejects any media

@@ -19,6 +19,7 @@ from app.models.media_file import MediaFile, MediaKind, ScanState
 from app.models.music import Album, Artist, Track
 from app.models.user import User
 from app.services import security
+from tests.conftest import make_active_session
 
 
 @pytest.fixture()
@@ -302,10 +303,12 @@ def test_subtitle_vtt_signed_no_bearer(db_session, library, monkeypatch):
     app.dependency_overrides[get_db] = _override_db
     try:
         c = TestClient(app)
-        params = security.sign_media_url_params(mf.id, "subtitle", "2", uuid.uuid4())
+        sess = make_active_session(db_session)[1]
+        params = security.sign_media_url_params(mf.id, "subtitle", "2", sess.user_id, sess.id)
         resp = c.get(
             f"/api/media-files/{mf.id}/subtitles/2.vtt",
-            params={"uid": params["uid"], "exp": params["exp"], "sig": params["sig"]},
+            params={"uid": params["uid"], "sid": params["sid"],
+                    "exp": params["exp"], "sig": params["sig"]},
         )
         assert resp.status_code == 200, resp.text
         assert resp.headers["content-type"].startswith("text/vtt")
@@ -409,12 +412,13 @@ def test_download_audio_signed_no_bearer(db_session, audio_file):
     app.dependency_overrides[get_db] = _override_db
     try:
         c = TestClient(app)
+        sess = make_active_session(db_session)[1]
         params = security.sign_media_url_params(
-            audio_file.id, "download", "original", uuid.uuid4(),
+            audio_file.id, "download", "original", sess.user_id, sess.id,
         )
         resp = c.get(
             f"/api/media-files/{audio_file.id}/download",
-            params={"quality": "original", "uid": params["uid"],
+            params={"quality": "original", "uid": params["uid"], "sid": params["sid"],
                     "exp": params["exp"], "sig": params["sig"]},
         )
         assert resp.status_code == 200, resp.text

@@ -40,13 +40,14 @@ from fastapi import (
 from fastapi.responses import PlainTextResponse
 from sqlalchemy.orm import Session
 
-from app.api.deps import current_user, get_bearer_token, get_db
+from app.api.deps import current_session_id, current_user, get_bearer_token, get_db
 from app.config import settings
 from app.models.media_file import MediaFile, ScanState
 from app.models.user import User
 from app.services import media_streams, path_map, playback
 from app.services import security as security_service
 from app.services.range_response import serve_file_range
+from app.services.signed_urls import session_authorizes
 
 
 router = APIRouter()
@@ -96,6 +97,7 @@ def get_streams(
     media_file_id: uuid.UUID,
     request: Request,
     _user: Annotated[User, Depends(current_user)],
+    session_id: Annotated[uuid.UUID, Depends(current_session_id)],
     db: Annotated[Session, Depends(get_db)],
 ) -> dict:
     mf = _require_ready_media_file(db, media_file_id)
@@ -111,7 +113,7 @@ def get_streams(
         if not media_streams.is_image_subtitle(s.get("codec")):
             try:
                 s["vtt_url"] = security_service.build_signed_subtitle_url(
-                    base, media_file_id, int(s["index"]), _user.id,
+                    base, media_file_id, int(s["index"]), _user.id, session_id,
                 )
             except (KeyError, ValueError, TypeError):
                 pass
@@ -159,6 +161,7 @@ def download_url(
     media_file_id: uuid.UUID,
     request: Request,
     user: Annotated[User, Depends(current_user)],
+    session_id: Annotated[uuid.UUID, Depends(current_session_id)],
     db: Annotated[Session, Depends(get_db)],
     quality: str = Query("original"),
 ) -> dict:
@@ -169,7 +172,7 @@ def download_url(
         raise HTTPException(status_code=409, detail={"reason": "not_available_offline"})
     return {
         "url": security_service.build_signed_download_url(
-            _public_base(request), media_file_id, quality, user.id,
+            _public_base(request), media_file_id, quality, user.id, session_id,
         ),
         "container": mf.container,
         "size_bytes": mf.size_bytes,
@@ -190,19 +193,20 @@ def get_subtitle_vtt(
     uid: Optional[str] = None,
     exp: Optional[int] = None,
     sig: Optional[str] = None,
+    sid: Optional[str] = None,
 ) -> PlainTextResponse:
     """Extract subtitle stream `stream_index` to WebVTT.
 
     Auth: a bearer token OR a valid signed query bound to this exact
-    (media_file_id, stream_index). A present-but-bad/expired signature with no
-    bearer is a hard 401. Image-based subtitle codecs 409 with
-    {reason: image_subtitle_burn_required}.
+    (media_file_id, stream_index) and the issuing session. A present-but-bad/
+    expired signature with no bearer is a hard 401. Image-based subtitle codecs
+    409 with {reason: image_subtitle_burn_required}.
     """
     if user is None:
         if not (
-            uid is not None and exp is not None and sig is not None
+            uid is not None and exp is not None and sig is not None and sid is not None
             and security_service.verify_media_url_params(
-                media_file_id, "subtitle", str(stream_index), uid, exp, sig,
+                media_file_id, "subtitle", str(stream_index), uid, sid, exp, sig,
             )
         ):
             raise HTTPException(
@@ -210,6 +214,9 @@ def get_subtitle_vtt(
                 detail="subtitle_auth_required",
                 headers={"WWW-Authenticate": "Bearer"},
             )
+        # SEC-P1-2: signature good; the issuing session must still be live.
+        if not session_authorizes(db, sid):
+            raise HTTPException(status_code=403, detail="session_revoked")
 
     mf = _require_ready_media_file(db, media_file_id)
     path = _resolved_path(mf)
@@ -255,6 +262,7 @@ def download(
     uid: Optional[str] = None,
     exp: Optional[int] = None,
     sig: Optional[str] = None,
+    sid: Optional[str] = None,
 ) -> object:
     """Serve a file for offline download.
 
@@ -269,9 +277,9 @@ def download(
 
     if user is None:
         if not (
-            uid is not None and exp is not None and sig is not None
+            uid is not None and exp is not None and sig is not None and sid is not None
             and security_service.verify_media_url_params(
-                media_file_id, "download", quality, uid, exp, sig,
+                media_file_id, "download", quality, uid, sid, exp, sig,
             )
         ):
             raise HTTPException(
@@ -279,6 +287,9 @@ def download(
                 detail="download_auth_required",
                 headers={"WWW-Authenticate": "Bearer"},
             )
+        # SEC-P1-2: signature good; the issuing session must still be live.
+        if not session_authorizes(db, sid):
+            raise HTTPException(status_code=403, detail="session_revoked")
 
     mf = _require_ready_media_file(db, media_file_id)
     path = Path(_resolved_path(mf))
