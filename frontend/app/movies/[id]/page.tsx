@@ -15,6 +15,7 @@ import { AuthShell } from "@/components/AuthShell";
 import { Backdrop } from "@/components/Backdrop";
 import { MarkWatchedButton } from "@/components/MarkWatchedButton";
 import { apiGet, ApiError } from "@/lib/client-api";
+import { loadOverride } from "@/lib/overrides";
 import {
   colorForTitle,
   formatBytes,
@@ -40,6 +41,7 @@ export default function MovieDetailPage() {
   const [reloadTick, setReloadTick] = useState(0);
   const [editInitial, setEditInitial] = useState<EditInitial | null>(null);
   const [editLoading, setEditLoading] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -84,14 +86,17 @@ export default function MovieDetailPage() {
   const openEdit = useCallback(async () => {
     if (!movie) return;
     setEditLoading(true);
+    setEditError(null);
     try {
-      const res = await fetch(`/api/admin/override/movie/${movie.id}`, {
-        cache: "no-store",
-      });
-      if (!res.ok) return;
-      const body = (await res.json()) as OverrideOut;
+      // apiGet refreshes an expired session once and retries; anything
+      // still failing is shown next to the button instead of nothing.
+      const res = await loadOverride<OverrideOut>(apiGet, "movie", movie.id);
+      if (!res.ok) {
+        setEditError(res.error);
+        return;
+      }
       setEditInitial({
-        ...body,
+        ...res.data,
         algorithmic_sort_hint: algorithmicSortHint(movie.title),
       });
     } finally {
@@ -125,6 +130,7 @@ export default function MovieDetailPage() {
           isAdmin={isAdmin}
           onEdit={openEdit}
           editBusy={editLoading}
+          editError={editError}
         />
       )}
       {editInitial && movie ? (
@@ -146,11 +152,13 @@ function MovieHero({
   isAdmin,
   onEdit,
   editBusy,
+  editError,
 }: {
   movie: MovieDetail;
   isAdmin: boolean;
   onEdit: () => void;
   editBusy: boolean;
+  editError: string | null;
 }) {
   const tint: CSSProperties = {
     ["--pg" as never]: colorForTitle(movie.title),
@@ -200,6 +208,14 @@ function MovieHero({
               >
                 {editBusy ? "Loading..." : "Edit"}
               </button>
+            ) : null}
+            {isAdmin && editError ? (
+              <span
+                role="alert"
+                style={{ color: "var(--danger)", fontFamily: "var(--mono)", fontSize: 12, marginLeft: 8 }}
+              >
+                {editError}
+              </span>
             ) : null}
           </div>
           <h1>{movie.title}</h1>
