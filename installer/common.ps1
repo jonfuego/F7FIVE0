@@ -25,20 +25,61 @@ function Refresh-Path {
     $env:Path = "$machine;$user"
 }
 
-function Download([string]$url, [string]$dest) {
+# Reads installer\downloads.manifest.psd1 (next to this file) and returns the
+# entry for $key: a hashtable with Name, Version, Url, Sha256, and Publisher.
+# Every file Setup downloads is pinned there (SEC-P0-2). Cached per run.
+function Get-DownloadSpec([string]$key) {
+    if (-not $script:DownloadManifest) {
+        $path = Join-Path $PSScriptRoot "downloads.manifest.psd1"
+        if (-not (Test-Path $path)) { Fail "download manifest not found: $path" }
+        $script:DownloadManifest = Import-PowerShellDataFile -Path $path
+    }
+    $spec = $script:DownloadManifest[$key]
+    if (-not $spec) { Fail "no pinned download '$key' in downloads.manifest.psd1" }
+    return $spec
+}
+
+# Downloads $url to $dest and verifies it against $expectedSha256 (SEC-P0-2).
+# The hash is REQUIRED: a blank or missing expected hash is a hard error, so a
+# call can never skip verification by accident. On mismatch the file is removed
+# and the function throws, naming both the expected and the actual hash. When
+# $publisher is given, the file must also carry a Valid Authenticode signature
+# whose subject contains that string (used for signed exe/msi; leave blank for
+# zips and unsigned binaries, which the SHA-256 already pins).
+function Download([string]$url, [string]$dest, [string]$expectedSha256, [string]$publisher = "") {
+    if ([string]::IsNullOrWhiteSpace($expectedSha256)) {
+        Fail "refusing to download $url without an expected SHA-256 (SEC-P0-2)."
+    }
+    $want = $expectedSha256.Trim().ToUpperInvariant()
     Info "downloading $url"
     $tmp = "$dest.partial"
+    $downloaded = $false
     for ($i = 1; $i -le 3; $i++) {
         try {
             Invoke-WebRequest -Uri $url -OutFile $tmp -UseBasicParsing
-            Move-Item -Force $tmp $dest
-            return
+            $downloaded = $true
+            break
         } catch {
             if ($i -eq 3) { throw }
             Warn "download failed (attempt $i), retrying: $($_.Exception.Message)"
             Start-Sleep -Seconds (3 * $i)
         }
     }
+    if (-not $downloaded) { throw "download of $url failed" }
+    $got = (Get-FileHash -Path $tmp -Algorithm SHA256).Hash.ToUpperInvariant()
+    if ($got -ne $want) {
+        Remove-Item -Force $tmp -ErrorAction SilentlyContinue
+        throw "SHA-256 mismatch for $url : expected $want, got $got. The file was removed."
+    }
+    if ($publisher) {
+        $sig = Get-AuthenticodeSignature -FilePath $tmp
+        $subject = if ($sig.SignerCertificate) { $sig.SignerCertificate.Subject } else { "" }
+        if ($sig.Status -ne "Valid" -or $subject -notlike "*$publisher*") {
+            Remove-Item -Force $tmp -ErrorAction SilentlyContinue
+            throw "Authenticode check failed for $url : status '$($sig.Status)', subject '$subject' (expected a Valid signature from '$publisher'). The file was removed."
+        }
+    }
+    Move-Item -Force $tmp $dest
 }
 
 # Runs winget and returns its exit code. 0 = installed;

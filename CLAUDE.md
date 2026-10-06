@@ -125,6 +125,37 @@ INSTALL.md for the operator view.
   `backend/pip-audit-exceptions.txt`, or CI fails. Every `Image.open` in
   `backend/app` must pass an explicit `formats=` allowlist so Pillow never
   selects a parser outside JPEG/PNG/WEBP.
+- Pinned installer downloads (SEC-P0-2): every file Setup fetches by a direct
+  URL is pinned in `installer/downloads.manifest.psd1` to an exact version, an
+  immutable URL (never a "latest" or rolling URL), and its SHA-256. Entries now:
+  `node`, `ffmpeg` (used by `install.ps1`), and `cloudflared`, `caddy`,
+  `tailscale` (used by `remote-access.ps1`). The scripts read specs with
+  `Get-DownloadSpec` (in `common.ps1`) and pass Url + Sha256 (+ Publisher) to
+  the `Download` helper, which REQUIRES a hash, verifies it with `Get-FileHash`,
+  and on mismatch removes the file and throws. Signed binaries (cloudflared exe,
+  Tailscale MSI) also carry `Publisher`; `Download` then requires a Valid
+  `Get-AuthenticodeSignature` whose subject contains it. Caddy ships as a zip
+  (GitHub has no bare Windows exe), so `remote-access.ps1` extracts `caddy.exe`
+  after the hash check. Things installed by winget (Python, PostgreSQL, NSSM) or
+  bundled (the APK) are NOT direct downloads and are NOT in the manifest. The
+  offline logic test is `installer/tests/download-verify.ps1` (no network: it
+  serves a fixture over `file://`); keep it green. `build-dist.ps1` copies the
+  manifest into `dist/installer` so releases carry it.
+  Refreshing a pinned download: (1) pick the exact new version and its immutable
+  URL (a versioned path, not a "latest"/rolling one); for FFmpeg use gyan.dev's
+  versioned `packages/ffmpeg-<ver>-essentials_build.zip`, for cloudflared the
+  tagged `releases/download/<tag>/...` URL, for Caddy the tagged GitHub
+  `caddy_<ver>_windows_amd64.zip`, for Tailscale the versioned
+  `tailscale-setup-<ver>-amd64.msi`, for Node the `dist/v<ver>/...` zip.
+  (2) Compute the hash from the real file:
+  `(Get-FileHash -Algorithm SHA256 <downloaded-file>).Hash`. Prefer downloading
+  the exact file; a vendor-published `.sha256`/SHASUMS is an acceptable source
+  if it matches. (3) For a signed exe/msi confirm
+  `(Get-AuthenticodeSignature <file>).Status` is `Valid` and copy the
+  SignerCertificate Subject CN into `Publisher`. (4) Update Version, Url,
+  Sha256, Publisher in `downloads.manifest.psd1`, then run
+  `powershell -File installer\tests\download-verify.ps1` and parse-check the
+  installer scripts.
 - Setup installs for home use only and never waits on a person. Remote access
   is set up afterwards from Admin > Remote access: the API writes
   `data/remote-access/request.json` and starts the `F7FIVE0-RemoteAccess`

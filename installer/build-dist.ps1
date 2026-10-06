@@ -65,7 +65,7 @@ Mirror (Join-Path $Frontend "public") (Join-Path $Dist "web\public")
 Mirror (Join-Path $Repo "backend") (Join-Path $Dist "backend") @(".venv", "__pycache__", ".pytest_cache", "tests", "_reports") @("*.pyc")
 Mirror (Join-Path $Repo "scripts") (Join-Path $Dist "scripts") @() @("dev-*.ps1", "publish.ps1")
 New-Item -ItemType Directory -Path (Join-Path $Dist "installer") | Out-Null
-foreach ($f in @("install.ps1", "uninstall.ps1", "common.ps1", "remote-access.ps1")) {
+foreach ($f in @("install.ps1", "uninstall.ps1", "common.ps1", "remote-access.ps1", "downloads.manifest.psd1")) {
     Copy-Item (Join-Path $PSScriptRoot $f) (Join-Path $Dist "installer\$f")
 }
 # The Apps list icon (UninstallDisplayIcon in F7FIVE0.iss) points at the

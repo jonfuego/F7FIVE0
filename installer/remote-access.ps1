@@ -53,10 +53,14 @@ if (-not $InstallDir) { $InstallDir = Split-Path -Parent $PSScriptRoot }
 $InstallDir = [IO.Path]::GetFullPath($InstallDir)
 . (Join-Path $PSScriptRoot "common.ps1")
 
-$CloudflaredUrl  = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe"
-$CaddyUrl        = "https://caddyserver.com/api/download?os=windows&arch=amd64"
+# Pinned downloads (SEC-P0-2): exact version, immutable URL, and SHA-256 per
+# file in installer\downloads.manifest.psd1. Get-DownloadSpec (common.ps1)
+# reads them; the Download helper verifies the hash (and Authenticode, for the
+# signed cloudflared exe and Tailscale MSI). Caddy ships as a zip we extract.
 # winget does not work reliably as SYSTEM, so Tailscale comes straight from its MSI.
-$TailscaleMsiUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi"
+$CloudflaredSpec = Get-DownloadSpec "cloudflared"
+$CaddySpec       = Get-DownloadSpec "caddy"
+$TailscaleSpec   = Get-DownloadSpec "tailscale"
 
 $BinDir   = Join-Path $InstallDir "bin"
 $DataDir  = Join-Path $InstallDir "data"
@@ -230,7 +234,7 @@ function Setup-Tailscale {
     if (-not (Test-Path $ts)) {
         Step "Installing Tailscale"
         $msi = Join-Path $env:TEMP "f7five0-tailscale.msi"
-        Download $TailscaleMsiUrl $msi
+        Download $TailscaleSpec.Url $msi $TailscaleSpec.Sha256 $TailscaleSpec.Publisher
         $p = Start-Process -FilePath "msiexec.exe" -ArgumentList "/i `"$msi`" /quiet /norestart" -Wait -PassThru
         Remove-Item -Force $msi -ErrorAction SilentlyContinue
         if ($p.ExitCode -notin @(0, 3010)) { Warn "The Tailscale installer stopped (code $($p.ExitCode))." }
@@ -265,7 +269,7 @@ function Setup-Tailscale {
 
 function Get-Cloudflared {
     $cfd = Join-Path $BinDir "cloudflared.exe"
-    if (-not (Test-Path $cfd)) { Download $CloudflaredUrl $cfd }
+    if (-not (Test-Path $cfd)) { Download $CloudflaredSpec.Url $cfd $CloudflaredSpec.Sha256 $CloudflaredSpec.Publisher }
     return $cfd
 }
 
@@ -371,7 +375,19 @@ function Setup-TunnelToken([string]$hostName, [string]$token) {
 function Setup-PortForward([string]$hostName, [string]$duckToken) {
     Step "Setting up the HTTPS proxy (Caddy)"
     $caddy = Join-Path $BinDir "caddy.exe"
-    if (-not (Test-Path $caddy)) { Download $CaddyUrl $caddy }
+    if (-not (Test-Path $caddy)) {
+        # Caddy ships as a verified zip (the GitHub release has no bare exe);
+        # pull caddy.exe out of it.
+        $caddyZip = Join-Path $env:TEMP "f7five0-caddy.zip"
+        Download $CaddySpec.Url $caddyZip $CaddySpec.Sha256 $CaddySpec.Publisher
+        $caddyUnz = Join-Path $env:TEMP "f7five0-caddy"
+        if (Test-Path $caddyUnz) { Remove-Item -Recurse -Force $caddyUnz }
+        Expand-Archive -Path $caddyZip -DestinationPath $caddyUnz -Force
+        $caddyExe = Get-ChildItem -Path $caddyUnz -Recurse -Filter caddy.exe | Select-Object -First 1
+        if (-not $caddyExe) { Remove-Item -Recurse -Force $caddyUnz, $caddyZip -ErrorAction SilentlyContinue; Warn "Caddy download did not contain caddy.exe."; return $null }
+        Copy-Item $caddyExe.FullName $caddy -Force
+        Remove-Item -Recurse -Force $caddyUnz, $caddyZip -ErrorAction SilentlyContinue
+    }
     $caddyDir = Join-Path $InstallDir "caddy"
     $caddyData = Join-Path $DataDir "caddy"
     foreach ($d in @($caddyDir, $caddyData)) { if (-not (Test-Path $d)) { New-Item -ItemType Directory -Path $d | Out-Null } }
