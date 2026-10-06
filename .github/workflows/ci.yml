@@ -23,7 +23,6 @@ jobs:
       # Install the hashed lock: --require-hashes refuses any dist whose hash
       # is not pinned, so a tampered or substituted wheel fails the build.
       - run: pip install --require-hashes -r backend/requirements.lock
-        working-directory: backend
       - run: pip install pytest
       - run: python -m pytest -q
         working-directory: backend
