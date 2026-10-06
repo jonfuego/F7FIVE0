@@ -86,10 +86,13 @@ INSTALL.md for the operator view.
   resolution CI and the installer consume with `pip install --require-hashes`.
   Never install the backend from `requirements.txt` in CI or Setup. To bump a
   dependency: edit `requirements.txt`, then regenerate the lock with
-  `pip-compile --generate-hashes --output-file requirements.lock
-  requirements.txt` (run pip-tools from a throwaway venv or `pipx`/`uvx`, never
-  add it to the runtime deps), targeting Python 3.12 (the CI/Setup runtime),
-  then run pytest. CI runs `pip-audit` against the lock through
+  `uv pip compile --universal --generate-hashes --python-version 3.12
+  --output-file requirements.lock requirements.txt` (run uv from a throwaway
+  venv or `uvx`/`pipx`, never add it to the runtime deps). The lock MUST be
+  `--universal`: CI runs on Linux and Setup on Windows, so the lock has to
+  carry platform-specific deps (for example `uvloop` on Linux, `colorama` on
+  Windows) with their env markers, or `--require-hashes` fails on the other
+  platform. Run pytest after. CI runs `pip-audit` against the lock through
   `scripts/pip_audit_gate.py`; any advisory it finds must be fixed or listed
   (with a reason and an expiry on or before 2027-01-06) in
   `backend/pip-audit-exceptions.txt`, or CI fails. Every `Image.open` in
