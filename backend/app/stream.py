@@ -38,7 +38,8 @@ from app.config import settings
 from app.db import SessionLocal
 from app.models.media_file import MediaFile, ScanState
 from app.models.transcode import TranscodeSession
-from app.services import transcode_cache, transcoder
+from app.services import library_folders, transcode_cache, transcoder
+from app.services.path_map import translate as translate_path
 from app.services.playback import (
     VARIANT_LADDER,
     is_audio_only,
@@ -185,11 +186,47 @@ def get_db():
         db.close()
 
 
-def _allowed_roots() -> list[Path]:
-    raw = (settings.stream_allowed_roots or "").strip()
-    if not raw:
-        return []
-    return [Path(p.strip()) for p in raw.split(";") if p.strip()]
+def _allowed_roots(db: Session) -> list[Path]:
+    """Every directory a media file is allowed to live under.
+
+    Derived from the active library-folder configuration (the `libraries`
+    table once Admin saves folders, else the `LIBRARY_ROOT_*` env keys), plus
+    any explicit `STREAM_ALLOWED_ROOTS` entries. Each configured folder is
+    added in both its raw form and its path-rewritten form (drive letter ->
+    UNC) so a root matches whichever shape `media_files.path` was stored in.
+    Returns an empty list only when nothing is configured; callers fail closed
+    on that.
+    """
+    roots: list[Path] = []
+
+    def _add(p: str) -> None:
+        p = (p or "").strip()
+        if not p:
+            return
+        roots.append(Path(p))
+        translated = translate_path(p)
+        if translated and translated != p:
+            roots.append(Path(translated))
+
+    for paths in library_folders.all_folders(db).values():
+        for p in paths:
+            _add(p)
+    for p in (settings.stream_allowed_roots or "").split(";"):
+        _add(p)
+    return roots
+
+
+def _contain(db: Session, path: Path) -> Path:
+    """Enforce root containment, or bypass it only under the explicit,
+    off-by-default unsafe development flag. With the flag off and no roots
+    configured, every file is rejected (SEC-P0-4 fail closed)."""
+    if settings.stream_unsafe_allow_any_path:
+        log.warning(
+            "stream_unsafe_allow_any_path is ON: serving %s without root "
+            "containment. Never use this on a reachable install.", path,
+        )
+        return path.resolve(strict=False)
+    return ensure_under_roots(path, _allowed_roots(db))
 
 
 def verified_media_file(
@@ -276,11 +313,9 @@ async def health():
 def direct_play(
     mf: Annotated[MediaFile, Depends(verified_media_file)],
     request: Request,
+    db: Annotated[Session, Depends(get_db)],
 ) -> object:
-    path = Path(mf.path)
-    roots = _allowed_roots()
-    if roots:
-        path = ensure_under_roots(path, roots)
+    path = _contain(db, Path(mf.path))
 
     container = (mf.container or "").lower()
     content_type: Optional[str] = None
@@ -359,6 +394,7 @@ def hls_variant_playlist(
     uid: Annotated[str, Query()],
     exp: Annotated[int, Query()],
     sig: Annotated[str, Query()],
+    db: Annotated[Session, Depends(get_db)],
     t: Annotated[int, Query()] = 0,
     o: Annotated[str, Query()] = "",
 ) -> PlainTextResponse:
@@ -368,10 +404,7 @@ def hls_variant_playlist(
     if v is None:
         raise HTTPException(status_code=404, detail="unknown_variant")
 
-    source = Path(mf.path)
-    roots = _allowed_roots()
-    if roots:
-        source = ensure_under_roots(source, roots)
+    source = _contain(db, Path(mf.path))
 
     try:
         user_id = uuid.UUID(uid)
@@ -484,6 +517,7 @@ def hls_segment(
     segment: Annotated[str, PathParam()],
     uid: Annotated[str, Query()],
     request: Request,
+    db: Annotated[Session, Depends(get_db)],
     t: Annotated[int, Query()] = 0,
     o: Annotated[str, Query()] = "",
 ) -> object:
@@ -522,10 +556,7 @@ def hls_segment(
         v = transcoder.variant_by_label(variant)
         if v is None:
             raise HTTPException(status_code=404, detail="unknown_variant")
-        source = Path(mf.path)
-        roots = _allowed_roots()
-        if roots:
-            source = ensure_under_roots(source, roots)
+        source = _contain(db, Path(mf.path))
         resume_offset_sec = t + seg_index * int(transcoder.HLS_SEG_DURATION)
         job = transcoder.manager.respawn_from_segment(
             user_id, mf.id, v, source,

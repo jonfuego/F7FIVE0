@@ -188,6 +188,15 @@ class Settings(BaseSettings):
     #   STREAM_ALLOWED_ROOTS=D:\\Media;\\\\nas\\media
     stream_allowed_roots: str = ""
 
+    # SEC-P0-4: the stream gateway derives its allowed roots from the active
+    # library-folder configuration (plus STREAM_ALLOWED_ROOTS) and fails
+    # closed when there are none, so there is no "empty means allow
+    # everything" path. This flag is the ONLY escape hatch and is for local
+    # development against media outside any library folder. It defaults off,
+    # Setup never writes it, and turning it on disables root containment
+    # entirely. Do not set it on an internet-reachable install.
+    stream_unsafe_allow_any_path: bool = False
+
     # Path rewriting at sync ingress.
     # Semicolon-delimited pairs of `SRC=DST`. Used to translate *arr-reported
     # drive letters (mapped only in user sessions) to UNC paths that service

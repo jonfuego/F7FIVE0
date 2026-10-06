@@ -40,6 +40,14 @@ INSTALL.md for the operator view.
   the folder grant does not inherit to files.
 - The stream gateway runs one uvicorn worker (in-process transcoder
   registry). It validates the HMAC signature before any DB lookup.
+- Stream roots fail closed (SEC-P0-4). The gateway derives its allowed roots
+  from the active library-folder configuration (the `libraries` table, else
+  `LIBRARY_ROOT_*`) plus any `STREAM_ALLOWED_ROOTS`, and rejects any media
+  path not under one of them (`ensure_under_roots`, case- and UNC-aware). With
+  no roots configured it serves nothing; there is no "empty means allow
+  everything" path. The only bypass is `STREAM_UNSAFE_ALLOW_ANY_PATH` (off by
+  default, never written by Setup, for local dev only). Setup does not need to
+  write `STREAM_ALLOWED_ROOTS`; the library folders supply the roots.
 - HLS playlists are rewritten so every URI carries the signed query.
 - Tokens never reach the browser. Browser calls go through the Next BFF
   routes (`/api/session|library|stream|admin|art|requests/*`).
