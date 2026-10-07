@@ -161,23 +161,33 @@ ignores those keys.
 ## Media on a NAS or network drive
 
 The services run as the built-in SYSTEM account, which can't sign in to
-network shares. To use `\\nas\media` paths:
+network shares on its own. To use `\\nas\media` paths:
 
 1. Use UNC paths (`\\nas\media\Movies`), not mapped drive letters, for
    your media folders.
-2. Make the services run as a Windows account that can open the share
-   (save the share's credentials for that account first). From an elevated
-   PowerShell:
+2. Enter the NAS sign-in in **Admin > Library folders**. Any folder on a
+   network share shows a **Sign in** button next to it. Type the NAS
+   username (`user`, `DOMAIN\user`, or `user@domain`) and password and save.
+   One sign-in covers every share and folder on that server. The password is
+   encrypted on the server with Windows DPAPI; it never comes back to the
+   browser and is never written to `.env`. The folders turn reachable right
+   away, and they reconnect on their own after a reboot. To change it later,
+   use **Change sign-in**; to clear it, **Remove sign-in**.
 
-   ```powershell
-   cd C:\F7FIVE0
-   .\installer\install.ps1 -ServiceUser ".\youraccount"
-   ```
+This is the easy path and leaves the services running as SYSTEM. If you would
+rather run the services as a Windows account that can open the share (no
+per-server sign-in needed, useful when many shares live on different servers),
+from an elevated PowerShell:
 
-   It asks for that account's password and re-registers the services under
-   it. Your settings and data are untouched. Use this rather than changing
-   **Log On** in `services.msc`: Setup also gives that account access to
-   `.env`, `data\`, and `logs\`, which a `services.msc` change does not.
+```powershell
+cd C:\F7FIVE0
+.\installer\install.ps1 -ServiceUser ".\youraccount"
+```
+
+It asks for that account's password and re-registers the services under it.
+Your settings and data are untouched. Use this rather than changing **Log On**
+in `services.msc`: Setup also gives that account access to `.env`, `data\`,
+and `logs\`, which a `services.msc` change does not.
 
 ## Folder permissions
 

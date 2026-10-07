@@ -15,7 +15,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from app.config import settings
 from app.db import db_session
-from app.services import library_folders, live_hub, scan_library, scan_music_videos, sync
+from app.services import library_folders, live_hub, nas_auth, scan_library, scan_music_videos, sync
 
 
 log = logging.getLogger("f7five0.scheduler")
@@ -61,6 +61,9 @@ def _run_folder_scan() -> None:
     has_music_videos = False
     try:
         with db_session() as db:
+            # Connect any saved NAS sign-ins before walking folders, so a UNC
+            # share is readable for this scan. Cheap when already connected.
+            nas_auth.ensure_all(db)
             scan_library.scan_all(db)
             has_music_videos = bool(library_folders.folders(db, "music_videos"))
     except Exception:

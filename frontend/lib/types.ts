@@ -358,10 +358,46 @@ export type RemoteAccessStatus = {
 // ---- Library folders (Admin > Library folders) -----------------------------
 export type LibraryFolderKind = "movies" | "tv" | "music" | "music_videos";
 
+// Why the server can or can't open a folder. "ok", local-path reasons
+// ("not_found" / "access_denied"), or the NAS reasons for a UNC share.
+export type LibraryFolderReason =
+  | "ok"
+  | "not_found"
+  | "access_denied"
+  | "bad_credentials"
+  | "unreachable"
+  | "share_not_found"
+  | "credential_conflict"
+  | "account_blocked"
+  | "error";
+
 export type LibraryFolder = {
   path: string;
   // The server (as the account its services run under) can open it.
   reachable: boolean;
+  reason: LibraryFolderReason;
+  // For a UNC share, the NAS username saved for its server, or null.
+  signed_in_as: string | null;
+};
+
+// One saved NAS sign-in (Admin > Library folders). No secret, ever.
+export type NasCredential = {
+  server: string;
+  username: string;
+  updated_at: string | null;
+};
+
+export type NasShareStatus = {
+  share: string;
+  reason: LibraryFolderReason;
+  code: number;
+};
+
+export type NasSaveResult = {
+  server: string;
+  username: string;
+  updated_at: string | null;
+  shares: NasShareStatus[];
 };
 
 export type LibraryFoldersLibrary = {

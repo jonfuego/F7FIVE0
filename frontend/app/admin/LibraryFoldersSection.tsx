@@ -7,12 +7,24 @@
 // TV and music merge across folders; the same movie in two folders shows up
 // twice. Removing a folder takes its items out of the library without
 // deleting anything. See app/services/library_folders.py.
+//
+// NAS sign-in: the services run as LocalSystem, which has no account on a NAS,
+// so a UNC share (\\server\share) shows "can't open" until an admin enters a
+// Windows sign-in for that server here. The password is sent once, encrypted
+// on the server with DPAPI, and never comes back to the browser. One sign-in
+// covers every share on that server. See app/services/nas_auth.py.
 
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { apiGet, apiPut, ApiError } from "@/lib/client-api";
-import type { LibraryFolderKind, LibraryFolders } from "@/lib/types";
+import { apiGet, apiPut, apiDelete, ApiError } from "@/lib/client-api";
+import type {
+  LibraryFolder,
+  LibraryFolderKind,
+  LibraryFolderReason,
+  LibraryFolders,
+  NasSaveResult,
+} from "@/lib/types";
 
 type Draft = Record<LibraryFolderKind, string[]>;
 
@@ -22,6 +34,31 @@ const HINT: Record<LibraryFolderKind, string> = {
   music: "Artists and albums merge across folders.",
   music_videos: "Artists merge across folders.",
 };
+
+// Plain text for each reason the server reports when it can't open a folder.
+const REASON_TEXT: Partial<Record<LibraryFolderReason, string>> = {
+  not_found: "folder not found",
+  bad_credentials: "wrong username or password",
+  unreachable: "can't reach the NAS",
+  share_not_found: "share not found",
+  access_denied: "this account can't open the folder",
+  credential_conflict: "Windows already has a different sign-in for this NAS",
+  account_blocked: "account locked or disabled",
+};
+
+function isUnc(path: string): boolean {
+  return path.startsWith("\\\\");
+}
+
+// \\fuegonas\The Hive\Movies -> "fuegonas" (lowercased, the per-server key).
+function serverOf(path: string): string {
+  const parts = path
+    .replace(/\//g, "\\")
+    .replace(/^\\+/, "")
+    .split("\\")
+    .filter(Boolean);
+  return (parts[0] ?? "").toLowerCase();
+}
 
 function toDraft(data: LibraryFolders): Draft {
   const d = { movies: [], tv: [], music: [], music_videos: [] } as Draft;
@@ -42,6 +79,15 @@ export function LibraryFoldersSection() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+
+  // NAS sign-in inline form. Keyed by the row it hangs under; the credential
+  // itself applies to the whole server.
+  const [nasForm, setNasForm] = useState<{ key: string; server: string } | null>(null);
+  const [nasUser, setNasUser] = useState("");
+  const [nasPass, setNasPass] = useState("");
+  const [nasBusy, setNasBusy] = useState(false);
+  const [nasError, setNasError] = useState<string | null>(null);
+  const [nasNotice, setNasNotice] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -72,8 +118,10 @@ export function LibraryFoldersSection() {
 
   const saved = toDraft(data);
   const dirty = !same(draft, saved);
-  const reachable = new Map<string, boolean>();
-  for (const lib of data.libraries) for (const f of lib.folders) reachable.set(`${lib.kind}|${f.path}`, f.reachable);
+  // Per saved folder: its reachability, reason, and NAS username (UNC only).
+  const meta = new Map<string, LibraryFolder>();
+  for (const lib of data.libraries)
+    for (const f of lib.folders) meta.set(`${lib.kind}|${f.path}`, f);
 
   function addFolder(kind: LibraryFolderKind) {
     const value = (adding[kind] ?? "").trim().replace(/^"|"$/g, "");
@@ -116,6 +164,69 @@ export function LibraryFoldersSection() {
     }
   }
 
+  function openNasForm(key: string, server: string, currentUser: string | null) {
+    setNasForm({ key, server });
+    setNasUser(currentUser ?? "");
+    setNasPass("");
+    setNasError(null);
+    setNasNotice(null);
+  }
+
+  function closeNasForm() {
+    setNasForm(null);
+    setNasUser("");
+    setNasPass("");
+    setNasError(null);
+  }
+
+  async function saveNas(server: string) {
+    if (nasBusy) return;
+    if (!nasUser.trim() || !nasPass) {
+      setNasError("Enter the NAS username and password.");
+      return;
+    }
+    setNasBusy(true);
+    setNasError(null);
+    setNasNotice(null);
+    try {
+      const res = await apiPut<NasSaveResult>(
+        `/api/admin/nas-credentials/${encodeURIComponent(server)}`,
+        { username: nasUser.trim(), password: nasPass },
+      );
+      const bad = res.shares.find((s) => s.reason !== "ok");
+      closeNasForm();
+      await load();
+      setNasNotice(
+        bad
+          ? `Saved for \\\\${server}, but a share didn't connect: ${REASON_TEXT[bad.reason] ?? bad.reason}.`
+          : `Signed in to \\\\${server}. Rechecked every folder on it.`,
+      );
+    } catch (err) {
+      if (err instanceof ApiError && err.detail) setNasError(String(err.detail));
+      else setNasError(err instanceof Error ? err.message : "Could not sign in.");
+    } finally {
+      setNasBusy(false);
+    }
+  }
+
+  async function removeNas(server: string) {
+    if (nasBusy) return;
+    setNasBusy(true);
+    setNasError(null);
+    setNasNotice(null);
+    try {
+      await apiDelete(`/api/admin/nas-credentials/${encodeURIComponent(server)}`);
+      closeNasForm();
+      await load();
+      setNasNotice(`Removed the sign-in for \\\\${server}.`);
+    } catch (err) {
+      if (err instanceof ApiError && err.detail) setNasError(String(err.detail));
+      else setNasError(err instanceof Error ? err.message : "Could not remove the sign-in.");
+    } finally {
+      setNasBusy(false);
+    }
+  }
+
   return (
     <section className="rounded-xl border border-neutral-800 bg-neutral-900/40 p-6">
       <h2 className="text-base font-semibold">Library folders</h2>
@@ -142,35 +253,116 @@ export function LibraryFoldersSection() {
                   <li className="text-xs text-neutral-500">No folders. This library is off.</li>
                 ) : (
                   draft[kind].map((path) => {
-                    const known = reachable.get(`${kind}|${path}`);
+                    const key = `${kind}|${path}`;
+                    const info = meta.get(key);
+                    const known = info?.reachable;
+                    const unc = isUnc(path);
+                    const server = unc ? serverOf(path) : "";
+                    const signedInAs = info?.signed_in_as ?? null;
+                    const reasonText =
+                      info && !info.reachable ? REASON_TEXT[info.reason] : undefined;
+                    const formOpen = nasForm?.key === key;
                     return (
-                      <li
-                        key={path}
-                        className="flex items-center gap-3 rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-2"
-                      >
-                        <span className="min-w-0 flex-1 truncate font-mono text-xs text-neutral-200" title={path}>
-                          {path}
-                        </span>
-                        {known === undefined ? (
-                          <span className="text-xs text-neutral-500">not saved yet</span>
-                        ) : known ? (
-                          <span className="text-xs text-emerald-400">found</span>
-                        ) : (
+                      <li key={path} className="rounded-lg border border-neutral-800 bg-neutral-950">
+                        <div className="flex items-center gap-3 px-3 py-2">
                           <span
-                            className="text-xs text-amber-400"
-                            title="The server can't open this folder. Check the path, that the drive or NAS is on, and that the account the F7FIVE0 services run under can read it."
+                            className="min-w-0 flex-1 truncate font-mono text-xs text-neutral-200"
+                            title={path}
                           >
-                            can&apos;t open
+                            {path}
                           </span>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => removeFolder(kind, path)}
-                          className={smallButtonCls}
-                          aria-label={`Remove ${path}`}
-                        >
-                          Remove
-                        </button>
+                          {known === undefined ? (
+                            <span className="text-xs text-neutral-500">not saved yet</span>
+                          ) : known ? (
+                            <span className="text-xs text-emerald-400">found</span>
+                          ) : (
+                            <span
+                              className="text-xs text-amber-400"
+                              title="The server can't open this folder. Check the path, that the drive or NAS is on, and that the account the F7FIVE0 services run under can read it."
+                            >
+                              can&apos;t open
+                            </span>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => removeFolder(kind, path)}
+                            className={smallButtonCls}
+                            aria-label={`Remove ${path}`}
+                          >
+                            Remove
+                          </button>
+                        </div>
+                        {info && unc ? (
+                          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-neutral-800/70 px-3 py-1.5">
+                            {reasonText ? (
+                              <span className="text-xs text-amber-400">{reasonText}</span>
+                            ) : null}
+                            {signedInAs ? (
+                              <span className="text-xs text-neutral-400">
+                                signed in as <span className="text-neutral-200">{signedInAs}</span>
+                              </span>
+                            ) : (
+                              <span className="text-xs text-neutral-500">no NAS sign-in</span>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => openNasForm(key, server, signedInAs)}
+                              className={smallButtonCls}
+                            >
+                              {signedInAs ? "Change sign-in" : "Sign in"}
+                            </button>
+                          </div>
+                        ) : null}
+                        {formOpen ? (
+                          <form
+                            className="space-y-2 border-t border-neutral-800/70 px-3 py-3"
+                            onSubmit={(e) => {
+                              e.preventDefault();
+                              void saveNas(server);
+                            }}
+                          >
+                            <p className="text-xs text-neutral-500">
+                              One sign-in covers every share on <code>\\{server}</code>. The
+                              password is stored encrypted on the server and never shown again.
+                            </p>
+                            <input
+                              value={nasUser}
+                              onChange={(e) => setNasUser(e.target.value)}
+                              placeholder="Username (user, DOMAIN\user, or user@domain)"
+                              autoComplete="off"
+                              className={inputCls}
+                              aria-label={`NAS username for \\\\${server}`}
+                            />
+                            <input
+                              value={nasPass}
+                              onChange={(e) => setNasPass(e.target.value)}
+                              type="password"
+                              autoComplete="off"
+                              placeholder="Password"
+                              className={inputCls}
+                              aria-label={`NAS password for \\\\${server}`}
+                            />
+                            <div className="flex flex-wrap items-center gap-2">
+                              <button type="submit" disabled={nasBusy} className={primaryButtonCls}>
+                                {nasBusy ? "Saving..." : "Save"}
+                              </button>
+                              <button type="button" onClick={closeNasForm} className={smallButtonCls}>
+                                Cancel
+                              </button>
+                              {signedInAs ? (
+                                <button
+                                  type="button"
+                                  onClick={() => void removeNas(server)}
+                                  disabled={nasBusy}
+                                  className={smallButtonCls}
+                                >
+                                  Remove sign-in
+                                </button>
+                              ) : null}
+                              {nasError ? <span className="text-xs text-red-400">{nasError}</span> : null}
+                            </div>
+                          </form>
+                        ) : null}
                       </li>
                     );
                   })
@@ -210,6 +402,7 @@ export function LibraryFoldersSection() {
         ) : null}
         {error ? <span className="text-xs text-red-400">{error}</span> : null}
         {status ? <span className="text-xs text-neutral-400">{status}</span> : null}
+        {nasNotice ? <span className="text-xs text-neutral-400">{nasNotice}</span> : null}
       </div>
     </section>
   );

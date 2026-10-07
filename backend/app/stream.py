@@ -17,6 +17,7 @@ kill authority across worker boundaries. See install-services.ps1.
 from __future__ import annotations
 
 import logging
+import os
 import re
 import time
 import uuid
@@ -38,7 +39,7 @@ from app.config import settings
 from app.db import SessionLocal
 from app.models.media_file import MediaFile, ScanState
 from app.models.transcode import TranscodeSession
-from app.services import library_folders, transcode_cache, transcoder
+from app.services import library_folders, nas_auth, transcode_cache, transcoder
 from app.services.path_map import translate as translate_path
 from app.services.playback import (
     VARIANT_LADDER,
@@ -105,6 +106,14 @@ def _close_orphaned_sessions() -> None:
 async def lifespan(app: FastAPI):
     log.info("F7FIVE0 Stream Gateway starting (env=%s)", settings.environment)
     Path(settings.transcode_cache_dir).mkdir(parents=True, exist_ok=True)
+    # Connect saved NAS sign-ins in this process's own logon session. The
+    # stream gateway is a separate process from the API, so it must do its own
+    # connect; LocalSystem services share a session but a -ServiceUser one does
+    # not. Cheap when already connected; a no-op off Windows.
+    try:
+        nas_auth.ensure_all()
+    except Exception:
+        log.warning("NAS ensure_all at stream startup raised", exc_info=True)
     _close_orphaned_sessions()
     transcoder.manager.start_janitor()
 
@@ -327,6 +336,15 @@ def direct_play(
     db: Annotated[Session, Depends(get_db)],
 ) -> object:
     path = _contain(db, Path(mf.path))
+
+    # If the media lives on a UNC share that isn't reachable right now (common
+    # after a reboot, before anything has touched the NAS), reconnect the saved
+    # sign-in once and let the serve path try again. Cheap when connected.
+    if nas_auth.is_unc_path(str(path)):
+        try:
+            os.stat(path)
+        except OSError:
+            nas_auth.ensure_all(db)
 
     container = (mf.container or "").lower()
     content_type: Optional[str] = None

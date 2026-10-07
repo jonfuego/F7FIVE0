@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Any, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -25,7 +25,8 @@ from app.api.deps import evict_session_cache, get_db, require_admin
 from app.api.schemas import (
     AudioAnalysisProgressOut, AudioAnalysisStartOut,
     LibraryFolderOut, LibraryFoldersIn, LibraryFoldersLibraryOut, LibraryFoldersOut,
-    MetadataSettingsOut, ReminderOut, ReminderSnoozeIn, TmdbKeyCheckOut, TmdbKeyIn,
+    MetadataSettingsOut, NasCredentialIn, NasCredentialOut, NasSaveOut,
+    ReminderOut, ReminderSnoozeIn, TmdbKeyCheckOut, TmdbKeyIn,
     TmdbKeyStatusOut,
     ActiveTranscodeOut, AdminSessionOut, AuthEventOut, MatchApply,
     MatchCandidate, OverrideOut, OverrideUpdate, ServerHealthOut,
@@ -43,7 +44,7 @@ from app.services.arr.lidarr import LidarrClient
 from app.services.arr.radarr import RadarrClient
 from app.services.arr.sonarr import SonarrClient
 from app.config import settings
-from app.services import library_folders, reminders, tmdb_key
+from app.services import library_folders, nas_auth, reminders, tmdb_key
 from app.services.metadata.runner import enrich_album, enrich_artist, enrich_movie
 
 log = logging.getLogger("f7five0.admin.override")
@@ -1015,8 +1016,11 @@ def _library_folders_out(db: Session) -> LibraryFoldersOut:
                 kind=kind,
                 label=library_folders.LABELS[kind],
                 folders=[
-                    LibraryFolderOut(path=st.path, reachable=st.reachable)
-                    for st in (library_folders.status(p) for p in current[kind])
+                    LibraryFolderOut(
+                        path=st.path, reachable=st.reachable,
+                        reason=st.reason, signed_in_as=st.signed_in_as,
+                    )
+                    for st in (library_folders.status(p, db) for p in current[kind])
                 ],
                 arr_managed=library_folders.arr_managed(kind),
             )
@@ -1056,6 +1060,73 @@ def put_library_folders(
     log.info("library folders saved: %s", library_folders.all_folders(db))
     scheduler.trigger_folder_scan_now()
     return _library_folders_out(db)
+
+
+# ---------------------------------------------------------------------------
+# NAS sign-in: a Windows sign-in per server, so LocalSystem can read a share
+# ---------------------------------------------------------------------------
+def _audit_nas(db: Session, user_id: uuid.UUID, event: str, request: Request) -> None:
+    """Append an auth-audit row for a NAS sign-in change. The password is
+    never a parameter here, so it cannot land in the audit trail."""
+    ip = getattr(request.state, "client_ip", None)
+    ua = request.headers.get("user-agent")
+    db.add(AuthEvent(
+        user_id=user_id,
+        event=event,
+        ip=ip if ip and ip != "unknown" else None,
+        user_agent=ua[:512] if ua else None,
+        at=datetime.now(timezone.utc),
+    ))
+
+
+@router.get("/nas-credentials", response_model=list[NasCredentialOut])
+def list_nas_credentials(
+    _admin: Annotated[User, Depends(require_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> list[NasCredentialOut]:
+    """Every saved NAS sign-in, as server + username. Never returns a secret."""
+    return [NasCredentialOut(**row) for row in nas_auth.list_servers(db)]
+
+
+@router.put("/nas-credentials/{server}", response_model=NasSaveOut)
+def put_nas_credential(
+    server: str,
+    body: NasCredentialIn,
+    _admin: Annotated[User, Depends(require_admin)],
+    db: Annotated[Session, Depends(get_db)],
+    request: Request,
+) -> NasSaveOut:
+    """Save (or change) the sign-in for a NAS server, reconnect its shares, and
+    report the per-share connect status. The password is encrypted with DPAPI
+    and never stored, logged, or returned. Accepts `user`, `DOMAIN\\user`, or
+    `user@domain`."""
+    if not nas_auth.available():
+        raise HTTPException(status_code=501, detail="nas_sign_in_windows_only")
+    result = nas_auth.save(db, server, body.username, body.password)
+    _audit_nas(db, _admin.id, "nas_sign_in_set", request)
+    db.commit()
+    log.info("nas sign-in saved for server %s as %s", result["server"], result["username"])
+    return NasSaveOut(**result)
+
+
+@router.delete("/nas-credentials/{server}", response_model=list[NasCredentialOut])
+def delete_nas_credential(
+    server: str,
+    _admin: Annotated[User, Depends(require_admin)],
+    db: Annotated[Session, Depends(get_db)],
+    request: Request,
+) -> list[NasCredentialOut]:
+    """Remove a server's sign-in and cancel its share connections."""
+    if not nas_auth.available():
+        raise HTTPException(status_code=501, detail="nas_sign_in_windows_only")
+    nas_auth.remove(db, server)
+    _audit_nas(db, _admin.id, "nas_sign_in_removed", request)
+    db.commit()
+    log.info("nas sign-in removed for server %s", server.strip().lstrip("\\").lower())
+    return [NasCredentialOut(**row) for row in nas_auth.list_servers(db)]
+
+
+# ---------------------------------------------------------------------------
 # Metadata: the TMDB key (Admin > Metadata)
 # ---------------------------------------------------------------------------
 def _metadata_out(db: Session) -> MetadataSettingsOut:
