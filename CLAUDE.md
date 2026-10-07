@@ -14,7 +14,8 @@ INSTALL.md for the operator view.
   (phone, Android TV, Android Auto). `npm ci` relies on `.npmrc` legacy-peer-deps.
 - `installer/`: `install.ps1` (does all the work, idempotent),
   `remote-access.ps1` (Tailscale / Cloudflare / port forwarding / token /
-  off), `common.ps1` (helpers both dot-source), `uninstall.ps1`,
+  off), `update.ps1` (the Admin > Updates updater, a SYSTEM task),
+  `common.ps1` (helpers all of them dot-source), `uninstall.ps1`,
   `build-dist.ps1` (assembles the release payload; list new installer files
   there), `F7FIVE0.iss` (Inno Setup wizard that only collects answers).
 - `scripts/`: dev helpers, `publish.ps1` (deploy a git checkout to
@@ -207,6 +208,53 @@ INSTALL.md for the operator view.
   API and Web, and clients read it from `/api/client/features`.
   `install.ps1 -RemoteAccess <method>` and `remote-access.ps1 -Method` are the
   console (advanced / recovery) paths.
+- Updates: Admin > Updates updates the server from the latest GitHub release
+  or an uploaded Setup (`backend/app/services/updates.py`,
+  `installer/update.ps1`). Setup records the installed version in
+  `<install>\version.json` (`install.ps1`, from the `appVersion` the Inno script
+  passes); `services/server_version.py` reads it (fallback `0.0.0-dev`) and
+  `/api/health` reports it. Once a day the scheduler (and "Check now") asks
+  `api.github.com/repos/jonfuego/F7FIVE0/releases/latest` with no token, skips
+  drafts and prereleases, and stores `{checked_at, latest, notes, setup_url,
+  sums_url, error}` in `app_settings` `update_check`; a network error is stored,
+  never raised. Admins get a badge on the Admin link when `latest` is newer.
+  Nothing installs itself: the API verifies the Setup, writes
+  `data/updates/request.json {id, setup_path, sha256, version, source}`, and
+  starts the SYSTEM scheduled task `F7FIVE0-Update` (startable by the
+  `-ServiceUser` account, like the Remote access task), which runs a copy of
+  `update.ps1` kept in `data/updates/run` because Setup replaces the install
+  folder mid-run. Two ways in, nothing else. (1) A release download: https only,
+  hosts `github.com`, `objects.githubusercontent.com` and
+  `release-assets.githubusercontent.com` (checked on every redirect), a size
+  cap, and the Setup's SHA-256 must equal its line in the release's
+  `SHA256SUMS.txt`; a release with no checksums is shown, never installed. (2) An
+  uploaded Setup: the admin's own password again (header, checked before the file
+  is read; five wrong tries lock it for 15 minutes), a PE exe under the cap, and
+  either its SHA-256 equals the `F7FIVE0-Setup-<v>.exe` line of the published
+  release for the version in the exe's own version info (not its name), or it
+  has a Valid Authenticode signature whose signer subject equals
+  `UPDATE_SIGNER_SUBJECT` (empty turns that off; until releases are signed only
+  the first applies, and unsigned test builds are refused by design). Never the
+  same or an older version (a prerelease sorts below its release): the API and
+  the updater both refuse. The updater copies the Setup into `run\` (Admins and
+  SYSTEM only) and checks and runs that copy; stops the services and `pg_dump -Fc`
+  to `data/updates/backup/<from>-<id>.dump` (a new version can migrate the
+  schema, so code alone is not enough to go back); runs Setup with
+  `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-`; waits up to 5 minutes for
+  `/api/health` to report the new version and `/stream/health` and the web port
+  to answer 200; on any failure `pg_restore --clean`, runs the cached previous
+  Setup (`data/updates/setup`, copied there by Setup itself via `{srcexe}`, kept
+  to the current and previous version; the `.iss` skips that copy when Setup runs
+  from the cache, which is how a rollback runs), and health-checks the old
+  version. It refuses to start without that cached Setup. `status.json` carries
+  the phases `verifying`, `backup`, `installing`, `health_check`, then `done`,
+  `rolled_back` or `failed` (plus `queued`, `downloading`, `rolling_back`); the
+  page polls it across the restart. A silent upgrade keeps settings: the wizard
+  sends answers only on a new install, `.env` keys that exist always win
+  (`Merge-EnvFile`), and an upgrade keeps the Windows account the services
+  already run as. Phones: every Setup bundles the matching APK, so updating the
+  server is updating the app; `GET /api/client/android-app` then reports the new
+  version and the app's own "Update from your server" offer follows.
 - Passkeys (WebAuthn) are on only when an RP id resolves (WEBAUTHN_RP_ID or
   the host of an https PUBLIC_URL); clients read `/api/client/features`.
   Allowed Android apps and certs come from WEBAUTHN_ANDROID_CERT_SHA256 /
@@ -265,5 +313,8 @@ cd mobile; npm run typecheck; npm test
 ```
 
 Installer changes: parse-check with
-`[System.Management.Automation.Language.Parser]::ParseFile(...)` and do a
-real run on a clean Windows VM before tagging a release.
+`[System.Management.Automation.Language.Parser]::ParseFile(...)`, run
+`installer\tests\download-verify.ps1` and `installer\tests\update-verify.ps1`
+under Windows PowerShell 5.1 (`powershell.exe`, not `pwsh`), and do a real run
+on a clean Windows VM before tagging a release. Self-update (Admin > Updates)
+is only proven by a real update on a VM: the tests use a stub Setup.
