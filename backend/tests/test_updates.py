@@ -325,6 +325,9 @@ def test_check_rate_limit_is_stored(db_session):
 def test_check_with_no_release_yet(db_session):
     result = updates.check_for_update(db_session, client=mock_client(github_handler(None)))
     assert result["latest"] is None and result["error"]
+    # A private repository answers an unauthenticated check the same way (404),
+    # so the text can't claim nothing is published.
+    assert "public" in result["error"]
 
 
 def test_check_never_offers_a_prerelease_or_draft(db_session):
@@ -719,6 +722,19 @@ def test_upload_signed_by_the_configured_signer_is_accepted(client, upd_dir, hel
     r = _upload(client, setup_exe("1.1.0"))
     assert r.status_code == 202, r.text
     assert json.loads((upd_dir / "request.json").read_text(encoding="utf-8"))["source"] == "signed"
+
+
+def test_upload_is_judged_before_the_updater_is_needed(client, upd_dir, helper, admin_pw, monkeypatch):
+    helper._available = False  # no F7FIVE0-Update task on this machine
+    monkeypatch.setattr(updates, "fetch_release_sums", lambda v, client=None: f"{'0' * 64}  F7FIVE0-Setup-{v}.exe\n")
+    monkeypatch.setattr(updates, "authenticode", lambda path: ("NotSigned", ""))
+    r = _upload(client, setup_exe("1.1.0"))
+    assert r.status_code == 403 and r.json()["detail"] == "untrusted_setup"  # refused for what it is
+    data = setup_exe("1.1.0")
+    monkeypatch.setattr(updates, "fetch_release_sums", lambda v, client=None: f"{sha(data)}  F7FIVE0-Setup-{v}.exe\n")
+    r = _upload(client, data)
+    assert r.status_code == 503 and r.json()["detail"] == "helper_unavailable"  # trusted, but nothing can install it
+    assert _incoming(upd_dir) == [] and not (upd_dir / "request.json").exists() and helper.started == 0
 
 
 def test_upload_over_the_size_cap_is_refused(client, upd_dir, helper, admin_pw, monkeypatch):
