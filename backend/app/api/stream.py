@@ -163,6 +163,12 @@ def _audio_artwork_for(db: Session, mf: MediaFile) -> tuple[
     The join chain is track -> album -> artist; all three are cached in
     session-local state so the two extra DB fetches vs. `_title_for` land
     on identity-map hits after the first call.
+
+    `cover_path` must be the client-ready `/api/art/...` URL that
+    `resolve_art` hands out, the same value the album detail endpoint
+    returns. The raw `albums.cover_path` DB column is a scanner/Lidarr path
+    the browser cannot load, so a client that copies this into a queue item
+    (the web watch route minting a dock item) would render a broken image.
     """
     if mf.kind.value != "track":
         return None, None, None
@@ -174,7 +180,10 @@ def _audio_artwork_for(db: Session, mf: MediaFile) -> tuple[
         if album is None:
             return None, None, None
         artist = db.get(Artist, album.artist_id)
-        return album.cover_path, (artist.name if artist else None), album.title
+        cover = resolve_art(
+            db, entity_kind=ENTITY_ALBUM, entity_id=t.album_id, role=ROLE_COVER,
+        )
+        return cover, (artist.name if artist else None), album.title
     except Exception:
         return None, None, None
 

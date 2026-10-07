@@ -15,6 +15,7 @@ import pytest
 from app.models.audio_analysis import (
     ANALYSIS_VERSION, TrackAudioAnalysis, TrackSimilarity,
 )
+from app.models.art import ArtOverride
 from app.models.media_file import MediaFile, MediaKind, ScanState
 from app.models.music import Album, Artist, Track
 from app.models.user import User
@@ -507,3 +508,36 @@ def test_stream_start_bad_subtitle_422(client, audio_file):
         "subtitle": "nonsense",
     })
     assert resp.status_code == 422
+
+
+def test_stream_start_cover_path_is_resolved_art_url(client, db_session, library, audio_file):
+    """Regression: the audio stream/start cover_path must be the client-ready
+    `/api/art/...` URL (what resolve_art/the album detail hand out), never the
+    raw `albums.cover_path` DB column, which is a scanner/Lidarr path the
+    browser cannot load. A client that copies this into a dock queue item (the
+    web watch route) would otherwise render a broken image. See batch4/02-art."""
+    from app.models.art import ENTITY_ALBUM, ROLE_COVER
+    from app.services.art import SYSTEM_USER_ID
+
+    db_session.add(User(
+        id=SYSTEM_USER_ID, username="system", display_name="System",
+        password_hash="!", role="admin", is_active=False,
+    ))
+    db_session.flush()
+
+    album = library["album"]
+    # Simulate a real library where the raw DB column holds a non-servable path.
+    raw_scanner_path = "/mnt/library/music/Godflesh/Decay/cover.jpg"
+    album.cover_path = raw_scanner_path
+    db_session.add(ArtOverride(
+        entity_kind=ENTITY_ALBUM, entity_id=album.id, role=ROLE_COVER,
+        local_path="cover.jpg", source_kind="local", set_by=SYSTEM_USER_ID,
+    ))
+    db_session.commit()
+
+    resp = client.post("/api/stream/start", json={"file_id": str(audio_file.id)})
+    assert resp.status_code == 200, resp.text
+    cover = resp.json()["cover_path"]
+    assert cover is not None
+    assert cover != raw_scanner_path
+    assert cover.startswith(f"/api/art/{ENTITY_ALBUM}/{album.id}/{ROLE_COVER}")
