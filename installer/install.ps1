@@ -687,6 +687,11 @@ $want = [ordered]@{
     # whole trusted set for a normal install. Add a LAN proxy IP/CIDR here only
     # if one actually fronts the services.
     "TRUSTED_PROXIES"         = "127.0.0.1,::1"
+    # Shared secret the Caddy front door sends to the Next web app as the
+    # X-F7five0-Proxy header so Next forwards the real client-IP headers to the
+    # backend only on that trusted path; a direct LAN browser can't spoof an IP.
+    # remote-access.ps1 reads this back and writes header_up into the Caddyfile.
+    "TRUSTED_PROXY_SECRET"    = New-Secret 48
 }
 $lines = New-Object System.Collections.Generic.List[string]
 if (-not (Test-Path $EnvFile)) {
@@ -772,10 +777,15 @@ Install-Svc "F7FIVE0-Stream" $VenvPy "-m uvicorn app.stream:app --host 127.0.0.1
 # earlier install). Tunnel-only installs stay on loopback.
 $lanRule = Get-NetFirewallRule -DisplayName "F7FIVE0 web" -ErrorAction SilentlyContinue
 $bind = if ($OpenFirewall -eq "1" -or $lanRule) { "0.0.0.0" } else { "127.0.0.1" }
+# The Next proxy needs the trusted-proxy secret so it can tell front-door
+# traffic (Caddy sends it as X-F7five0-Proxy) from a direct LAN browser and
+# forward client-IP headers only on the trusted path. Read the effective value
+# from .env (an existing one wins over the freshly generated one above).
 $webEnv = @(
     "NODE_ENV=production", "PORT=$WebPort", "HOSTNAME=$bind",
     "API_ORIGIN=http://127.0.0.1:$ApiPort", "STREAM_ORIGIN=http://127.0.0.1:$StreamPort",
     "F7FIVE0_DOWNLOADS_DIR=$(Join-Path $DataDir 'downloads')",
+    "TRUSTED_PROXY_SECRET=$(Get-EnvValue 'TRUSTED_PROXY_SECRET')",
     "NEXT_TELEMETRY_DISABLED=1"
 )
 Install-Svc "F7FIVE0-Web" $Node "`"$(Join-Path $WebDir 'server.js')`"" $WebDir $webEnv "F7FIVE0 web app"

@@ -86,6 +86,20 @@ INSTALL.md for the operator view.
   the cookie `Secure` flag (`lib/cookies.ts`) build origins through it instead
   of trusting a raw browser `Host` / `X-Forwarded-Proto`. Session cookies are
   still `Secure` only over real HTTPS, so plain-HTTP LAN installs can sign in.
+  The Next proxy hop is the one place a browser could forge a client-IP header
+  that then reaches a trusted (loopback) backend peer, because Next 16's proxy
+  cannot read the client socket peer IP. So `frontend/proxy.ts` forwards the
+  client-IP headers (`CF-Connecting-IP`, `X-Forwarded-For`, `X-Real-IP`,
+  `Forwarded`) to the backend only when the request carries the shared
+  `X-F7five0-Proxy` secret that Setup writes to the front door (Caddy, via
+  `TRUSTED_PROXY_SECRET`); otherwise it strips them, so a direct LAN browser
+  cannot spoof an IP (the backend records loopback). `x-forwarded-host` /
+  `x-forwarded-proto` are always set from the allowlisted origin, never the raw
+  header. The pure helper is `frontend/lib/forward-headers.ts`. Note cloudflared
+  and Tailscale cannot inject the secret, so on those paths the backend
+  attributes the request to loopback unless `/api` and `/stream` are routed from
+  the front door straight to the backend (where the backend's own trusted-peer
+  check reads the front door's `X-Forwarded-For`).
 - Libraries: when a `*_API_KEY` for Radarr/Sonarr/Lidarr is set, that app
   owns the library (`services/sync.py`). Otherwise `services/scan_library.py`
   scans `LIBRARY_ROOT_*` folders. Never let both write the same library.

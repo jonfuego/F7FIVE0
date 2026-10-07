@@ -415,7 +415,13 @@ function Setup-PortForward([string]$hostName, [string]$duckToken) {
 
     $caddyfile = Join-Path $caddyDir "Caddyfile"
     $global = if ($ContactEmail) { "{`r`n    email $ContactEmail`r`n}`r`n`r`n" } else { "" }
-    $body = "$hostName {`r`n    reverse_proxy 127.0.0.1:$WebPort`r`n}`r`n"
+    # Mark Caddy's traffic as coming from a trusted front door so the Next proxy
+    # forwards the real client-IP headers to the backend (SEC-P1-1). Setup wrote
+    # TRUSTED_PROXY_SECRET into .env and the web service env; send it as the
+    # X-F7five0-Proxy header. Without it the backend attributes to loopback.
+    $proxySecret = Get-EnvValue "TRUSTED_PROXY_SECRET"
+    $markProxy = if ($proxySecret) { "`r`n        header_up X-F7five0-Proxy $proxySecret" } else { "" }
+    $body = "$hostName {`r`n    reverse_proxy 127.0.0.1:$WebPort {$markProxy`r`n    }`r`n}`r`n"
     [IO.File]::WriteAllText($caddyfile, "# Written by F7FIVE0 setup. Caddy gets and renews the HTTPS certificate.`r`n$global$body", (New-Object Text.UTF8Encoding($false)))
     $proxyEnv = @("XDG_DATA_HOME=$caddyData", "XDG_CONFIG_HOME=$caddyData")
     Install-Svc "F7FIVE0-Proxy" $caddy "run --config `"$caddyfile`" --adapter caddyfile" $caddyDir $proxyEnv "F7FIVE0 HTTPS proxy (Caddy)"

@@ -39,6 +39,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { ACCESS_COOKIE, REFRESH_COOKIE } from "@/lib/server-env";
 import { requestProto, siteOriginFromHeaders } from "@/lib/origin";
+import { buildForwardHeaders, TRUST_HEADER } from "@/lib/forward-headers";
 import { isForbiddenCrossOrigin, securityHeaders } from "@/lib/security-headers";
 
 const API_ORIGIN = process.env.API_ORIGIN ?? "http://127.0.0.1:8001";
@@ -61,23 +62,44 @@ const BFF_PREFIXES = [
 
 const ASSETLINKS_PATH = "/.well-known/assetlinks.json";
 
+// Length-safe, time-independent string compare. Avoids leaking the secret
+// length or matching position through early-exit timing on the trust check.
+function timingSafeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+// The request is trusted (its client-IP headers are honoured and forwarded on)
+// only when it carries the shared secret the front door (Caddy, written by
+// Setup) injects, and only when the env secret is actually set. With no secret
+// configured nothing is trusted, which is the safe default: a direct LAN
+// browser can never mark itself trusted. Next 16's proxy cannot read the client
+// socket peer IP, so a shared secret header is the only sound signal here.
+function isTrustedProxyHop(req: NextRequest): boolean {
+  const secret = process.env.TRUSTED_PROXY_SECRET ?? "";
+  if (!secret) return false;
+  const sent = req.headers.get(TRUST_HEADER) ?? "";
+  return timingSafeEqual(sent, secret);
+}
+
 function proxyTo(req: NextRequest, origin: string) {
   const path =
     req.nextUrl.pathname === ASSETLINKS_PATH
       ? "/api/client/assetlinks.json"
       : req.nextUrl.pathname + req.nextUrl.search;
   const target = new URL(path, origin);
-  const headers = new Headers(req.headers);
-  // Tell the backend which origin the client used so the absolute URLs it
-  // signs (HLS, subtitles, art, downloads) point back at this server.
-  headers.set(
-    "x-forwarded-host",
-    req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? req.nextUrl.host,
-  );
-  headers.set(
-    "x-forwarded-proto",
-    req.headers.get("x-forwarded-proto") ?? req.nextUrl.protocol.replace(":", ""),
-  );
+  // Tell the backend which origin the client used (so the absolute URLs it
+  // signs point back at this server) via the sanitised, allowlisted origin,
+  // never the raw browser header. Client-IP headers are forwarded only from our
+  // own front door; a direct LAN browser's forged CF-Connecting-IP / X-Forwarded-*
+  // are stripped. See lib/forward-headers.ts.
+  const headers = buildForwardHeaders(req.headers, {
+    siteOrigin: siteOriginFromHeaders(req.headers),
+    proto: requestProto(req.headers),
+    trusted: isTrustedProxyHop(req),
+  });
   return NextResponse.rewrite(target, { request: { headers } });
 }
 
