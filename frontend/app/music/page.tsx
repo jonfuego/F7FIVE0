@@ -215,6 +215,14 @@ function ArtistTile({
     const items = await loadAutoPlaylist("artist-radio");
     if (items.length > 0) playAlbum(items);
   }
+  // Cover play button: the artist page's primary Play action (by-artist
+  // auto-playlist straight into the dock), without following the card link.
+  async function onPlay(e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    const items = await loadAutoPlaylist("by-artist");
+    if (items.length > 0) playAlbum(items, { shuffle: false });
+  }
 
   return (
     <Link
@@ -234,9 +242,14 @@ function ArtistTile({
             className="real-art"
           />
         ) : null}
-        <div className="play-spot" aria-hidden>
+        <button
+          type="button"
+          className="play-spot"
+          aria-label={`Play ${artist.name}`}
+          onClick={onPlay}
+        >
           <span className="tri" />
-        </div>
+        </button>
         <div ref={menuRef} style={artistMenuAnchorStyle}>
           <button
             type="button"

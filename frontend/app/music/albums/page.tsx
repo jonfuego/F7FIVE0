@@ -14,7 +14,8 @@ import { AlphaRail, alphaLetterOf } from "@/components/AlphaRail";
 import { Grid, GridEmpty } from "@/components/Grid";
 import { apiGet } from "@/lib/client-api";
 import { colorForTitle, hueFromString } from "@/lib/format";
-import type { Album, OverrideOut } from "@/lib/types";
+import { albumToQueueItems, useQueue } from "@/lib/queue";
+import type { Album, AlbumDetail, OverrideOut } from "@/lib/types";
 import { useViewPref } from "@/lib/use-view-pref";
 
 type EditInitial = OverrideOut & { algorithmic_sort_hint: string };
@@ -172,6 +173,19 @@ function AlbumTile({
   const sub = album.artist_name ?? "";
   const artistHref = album.artist_id ? `/music/artists/${album.artist_id}` : null;
   const router = useRouter();
+  const { playAlbum } = useQueue();
+
+  // Cover play button: resolve the album's tracks and start it in the dock
+  // without following the card's link to the detail page.
+  async function onPlay() {
+    try {
+      const detail = await apiGet<AlbumDetail>(`/api/library/albums/${album.id}`);
+      const items = albumToQueueItems(detail);
+      if (items.length > 0) playAlbum(items, { shuffle: false });
+    } catch {
+      // Best-effort; nothing to play if the detail fetch fails.
+    }
+  }
 
   return (
     <Link
@@ -191,9 +205,18 @@ function AlbumTile({
             className="real-art"
           />
         ) : null}
-        <div className="play-spot" aria-hidden>
+        <button
+          type="button"
+          className="play-spot"
+          aria-label={`Play ${album.title}`}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            void onPlay();
+          }}
+        >
           <span className="tri" />
-        </div>
+        </button>
         <AlbumTileMenu albumId={album.id} albumTitle={album.title} />
         {isAdmin && onEdit ? (
           <button
