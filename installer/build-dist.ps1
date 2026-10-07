@@ -7,7 +7,7 @@
   installs into C:\F7FIVE0):
 
     backend\     FastAPI source + requirements.txt + requirements.lock (no venv, no tests)
-    web\         Next.js standalone bundle, ready for `node server.js`
+    web\         Next.js standalone bundle, launched via `node server-wrapper.js`
     installer\   install.ps1 / uninstall.ps1 / remote-access.ps1 / common.ps1
     android\     F7FIVE0-<version>.apk (+ -armv7) and .sha256 files, when
                  -ApkDir is given. install.ps1 copies them into data\downloads.
@@ -61,6 +61,11 @@ if (-not (Test-Path (Join-Path $standalone "server.js"))) { throw "no standalone
 Mirror $standalone (Join-Path $Dist "web")
 Mirror (Join-Path $Frontend ".next\static") (Join-Path $Dist "web\.next\static")
 Mirror (Join-Path $Frontend "public") (Join-Path $Dist "web\public")
+# The web service runs the launcher (server-wrapper.js), not server.js directly,
+# so it can record the real client IP (criterion 4). Ship it next to server.js.
+$launcher = Join-Path $Frontend "server-wrapper.js"
+if (-not (Test-Path $launcher)) { throw "web launcher missing: $launcher" }
+Copy-Item $launcher (Join-Path $Dist "web\server-wrapper.js") -Force
 
 Mirror (Join-Path $Repo "backend") (Join-Path $Dist "backend") @(".venv", "__pycache__", ".pytest_cache", "tests", "_reports") @("*.pyc")
 Mirror (Join-Path $Repo "scripts") (Join-Path $Dist "scripts") @() @("dev-*.ps1", "publish.ps1")

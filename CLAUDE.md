@@ -88,18 +88,22 @@ INSTALL.md for the operator view.
   still `Secure` only over real HTTPS, so plain-HTTP LAN installs can sign in.
   The Next proxy hop is the one place a browser could forge a client-IP header
   that then reaches a trusted (loopback) backend peer, because Next 16's proxy
-  cannot read the client socket peer IP. So `frontend/proxy.ts` forwards the
-  client-IP headers (`CF-Connecting-IP`, `X-Forwarded-For`, `X-Real-IP`,
-  `Forwarded`) to the backend only when the request carries the shared
-  `X-F7five0-Proxy` secret that Setup writes to the front door (Caddy, via
-  `TRUSTED_PROXY_SECRET`); otherwise it strips them, so a direct LAN browser
-  cannot spoof an IP (the backend records loopback). `x-forwarded-host` /
+  cannot read the client socket peer IP. The launcher `server-wrapper.js` (which
+  every production web launch runs instead of `server.js`) stamps the real socket
+  peer as `x-f7five0-peer` (overwriting any client value) and sets the
+  `F7FIVE0_LAUNCHER` process signal a client can never forge. `frontend/proxy.ts`
+  trusts the peer only when that signal is present (fail closed without the
+  launcher, so the backend records loopback). A loopback peer is a local front
+  door (cloudflared / Caddy / Tailscale terminating on this host over loopback):
+  its `CF-Connecting-IP` / `X-Forwarded-For` pass through. A LAN-browser peer has
+  its forgeable client-IP headers (`CF-Connecting-IP`, `X-Forwarded-For`,
+  `X-Real-IP`, `Forwarded`) stripped and `x-forwarded-for` set to the real peer
+  IP. The `TRUSTED_PROXY_SECRET` / Caddy `header_up` `X-F7five0-Proxy` stays as an
+  extra signal (a trusted hop keeps its genuine client-IP headers). Loopback-peer
+  trust means any local process can set client-IP headers, which is the same
+  trust the backend already gives a loopback peer. `x-forwarded-host` /
   `x-forwarded-proto` are always set from the allowlisted origin, never the raw
-  header. The pure helper is `frontend/lib/forward-headers.ts`. Note cloudflared
-  and Tailscale cannot inject the secret, so on those paths the backend
-  attributes the request to loopback unless `/api` and `/stream` are routed from
-  the front door straight to the backend (where the backend's own trusted-peer
-  check reads the front door's `X-Forwarded-For`).
+  header. The pure helper is `frontend/lib/forward-headers.ts`.
 - Libraries: when a `*_API_KEY` for Radarr/Sonarr/Lidarr is set, that app
   owns the library (`services/sync.py`). Otherwise `services/scan_library.py`
   scans `LIBRARY_ROOT_*` folders. Never let both write the same library.

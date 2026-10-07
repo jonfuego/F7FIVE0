@@ -178,6 +178,11 @@ if ($Only -in @("all", "web")) {
         robocopy $Public $StandalonePublic /MIR /NFL /NDL /NJH /NJS /NC /NS /NP | Out-Null
         if ($LASTEXITCODE -ge 8) { throw "robocopy public -> standalone failed ($LASTEXITCODE)" }
     }
+    # The web service runs the launcher (server-wrapper.js), not server.js
+    # directly, so it can record the real client IP. Lay it next to server.js.
+    $Launcher = Join-Path $Frontend "server-wrapper.js"
+    if (-not (Test-Path $Launcher)) { throw "web launcher missing: $Launcher" }
+    Copy-Item $Launcher (Join-Path $Standalone "server-wrapper.js") -Force
     Info "standalone ready at $Standalone"
 }
 

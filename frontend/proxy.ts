@@ -39,7 +39,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { ACCESS_COOKIE, REFRESH_COOKIE } from "@/lib/server-env";
 import { requestProto, siteOriginFromHeaders } from "@/lib/origin";
-import { buildForwardHeaders, TRUST_HEADER } from "@/lib/forward-headers";
+import { buildForwardHeaders, PEER_HEADER, TRUST_HEADER } from "@/lib/forward-headers";
 import { isForbiddenCrossOrigin, securityHeaders } from "@/lib/security-headers";
 
 const API_ORIGIN = process.env.API_ORIGIN ?? "http://127.0.0.1:8001";
@@ -93,12 +93,17 @@ function proxyTo(req: NextRequest, origin: string) {
   // Tell the backend which origin the client used (so the absolute URLs it
   // signs point back at this server) via the sanitised, allowlisted origin,
   // never the raw browser header. Client-IP headers are forwarded only from our
-  // own front door; a direct LAN browser's forged CF-Connecting-IP / X-Forwarded-*
-  // are stripped. See lib/forward-headers.ts.
+  // own front door, or (via the launcher's stamped socket peer) set to the real
+  // LAN peer; a direct LAN browser's forged CF-Connecting-IP / X-Forwarded-* are
+  // stripped. The peer header's value is passed straight into the helper, and
+  // launcherActive is the unforgeable process-level signal the launcher sets.
+  // See lib/forward-headers.ts and server-wrapper.js.
   const headers = buildForwardHeaders(req.headers, {
     siteOrigin: siteOriginFromHeaders(req.headers),
     proto: requestProto(req.headers),
     trusted: isTrustedProxyHop(req),
+    peer: req.headers.get(PEER_HEADER),
+    launcherActive: process.env.F7FIVE0_LAUNCHER === "1",
   });
   return NextResponse.rewrite(target, { request: { headers } });
 }
