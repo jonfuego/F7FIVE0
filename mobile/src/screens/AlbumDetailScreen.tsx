@@ -92,6 +92,7 @@ export default function AlbumDetailScreen(): React.ReactElement {
                   artPath={s.cover_path}
                   active={nowPlaying?.mediaFileId === s.media_files[0]?.id}
                   onPress={() => playSongs(songs, i)}
+                  menu={{ song: s, playSongs, playNext, addToQueue }}
                 />
               ))}
               <AlbumTileMenu
