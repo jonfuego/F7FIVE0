@@ -48,6 +48,9 @@ def _run_music_videos_scan() -> None:
     callers should not block on it."""
     try:
         with db_session() as db:
+            # Connect any saved NAS sign-ins before walking folders, so a UNC
+            # share is readable for this scan. Cheap when already connected.
+            nas_auth.ensure_all(db)
             scan_music_videos.scan(db)
     except Exception:
         log.exception("music_videos scan raised")

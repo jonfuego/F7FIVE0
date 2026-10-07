@@ -151,6 +151,43 @@ def test_ensure_all_connects_known_shares(db_session, stub_layers, one_unc_folde
 
 
 # ---------------------------------------------------------------------------
+# The admin-triggered music-videos scan connects before it walks the share
+# ---------------------------------------------------------------------------
+def test_music_videos_scan_connects_first(monkeypatch):
+    """`_run_music_videos_scan` must call `ensure_all` before
+    `scan_music_videos.scan`, so an admin POST /api/library/sync/music-videos
+    never walks a UNC share that hasn't been connected yet. Matches the order
+    in `_run_folder_scan`.
+    """
+    from contextlib import contextmanager
+
+    from app import scheduler
+
+    sentinel = object()
+    calls: list[tuple[str, object]] = []
+
+    @contextmanager
+    def fake_db_session():
+        yield sentinel
+
+    monkeypatch.setattr(scheduler, "db_session", fake_db_session)
+    monkeypatch.setattr(
+        scheduler.nas_auth, "ensure_all",
+        lambda db: calls.append(("ensure_all", db)),
+    )
+    monkeypatch.setattr(
+        scheduler.scan_music_videos, "scan",
+        lambda db: calls.append(("scan", db)),
+    )
+
+    scheduler._run_music_videos_scan()
+
+    assert ("ensure_all", sentinel) in calls
+    assert ("scan", sentinel) in calls
+    assert calls.index(("ensure_all", sentinel)) < calls.index(("scan", sentinel))
+
+
+# ---------------------------------------------------------------------------
 # Windows error code -> reason mapping
 # ---------------------------------------------------------------------------
 def test_reason_for_code_mapping():
