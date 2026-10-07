@@ -1,4 +1,4 @@
-# Helpers shared by install.ps1 and remote-access.ps1. Dot-source it:
+# Helpers shared by install.ps1, remote-access.ps1, and update.ps1. Dot-source it:
 #   . (Join-Path $PSScriptRoot "common.ps1")
 # Functions read the caller's variables at call time: $EnvFile, $Nssm,
 # $LogsDir, $ServiceUser, $ServicePassword, and $RunLog (when set, every
@@ -216,15 +216,24 @@ function Set-EnvKey([string]$key, [string]$value) {
 }
 
 # Registers (or re-registers) an NSSM service. Runs as $ServiceUser when the
-# caller set one, otherwise as LocalSystem.
+# caller set one, otherwise as LocalSystem. When the caller set
+# $script:KeepServiceAccount (an upgrade of an install whose services run as a
+# Windows account), an existing service is changed in place instead of removed
+# and re-created, so it keeps that account: Setup can't ask for the password again.
 function Install-Svc([string]$Name, [string]$Exe, [string]$AppArgs, [string]$WorkDir, [string[]]$ExtraEnv, [string]$Desc) {
     $prev = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
-    if (Get-Service -Name $Name -ErrorAction SilentlyContinue) {
+    $exists = [bool](Get-Service -Name $Name -ErrorAction SilentlyContinue)
+    if ($exists -and $script:KeepServiceAccount -and -not $ServiceUser) {
         & $Nssm stop $Name *> $null
-        & $Nssm remove $Name confirm *> $null
+        & $Nssm set $Name Application $Exe *> $null
+    } else {
+        if ($exists) {
+            & $Nssm stop $Name *> $null
+            & $Nssm remove $Name confirm *> $null
+        }
+        & $Nssm install $Name $Exe *> $null
     }
-    & $Nssm install $Name $Exe *> $null
     & $Nssm set $Name AppParameters $AppArgs *> $null
     & $Nssm set $Name AppDirectory $WorkDir *> $null
     & $Nssm set $Name DisplayName $Name *> $null
@@ -261,4 +270,123 @@ function Get-LanIPv4 {
     return @(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
         Where-Object { $_.IPAddress -notmatch '^(127\.|169\.254\.)' -and $_.PrefixOrigin -ne "WellKnown" } |
         Select-Object -ExpandProperty IPAddress)
+}
+
+# ---------------------------------------------------------------------------
+# Versions. Setup's versions are X.Y.Z, or X.Y.Z-label for a test build
+# (0.1.0-batch4). Semantic versioning: a prerelease sorts below its release.
+# ---------------------------------------------------------------------------
+$script:SemVerRx = '^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z.-]+)?$'
+
+function Test-SemVer([string]$v) {
+    if ([string]::IsNullOrEmpty($v)) { return $false }
+    return [bool]($v -match $script:SemVerRx)
+}
+
+function ConvertTo-SemVerParts([string]$v) {
+    if ([string]::IsNullOrEmpty($v) -or $v -notmatch $script:SemVerRx) { throw "not a version: '$v'" }
+    $pre = @()
+    if ($matches[4]) { $pre = @($matches[4] -split '\.') }
+    return @{ Core = @([int]$matches[1], [int]$matches[2], [int]$matches[3]); Pre = $pre }
+}
+
+# -1, 0, or 1. Throws when either side isn't a version.
+function Compare-SemVer([string]$a, [string]$b) {
+    $pa = ConvertTo-SemVerParts $a
+    $pb = ConvertTo-SemVerParts $b
+    for ($i = 0; $i -lt 3; $i++) {
+        if ($pa.Core[$i] -ne $pb.Core[$i]) {
+            if ($pa.Core[$i] -lt $pb.Core[$i]) { return -1 }
+            return 1
+        }
+    }
+    if ($pa.Pre.Count -eq 0 -and $pb.Pre.Count -eq 0) { return 0 }
+    if ($pa.Pre.Count -eq 0) { return 1 }
+    if ($pb.Pre.Count -eq 0) { return -1 }
+    $n = [Math]::Min($pa.Pre.Count, $pb.Pre.Count)
+    for ($i = 0; $i -lt $n; $i++) {
+        $x = [string]$pa.Pre[$i]
+        $y = [string]$pb.Pre[$i]
+        $xNum = $x -match '^\d+$'
+        $yNum = $y -match '^\d+$'
+        if ($xNum -and $yNum) {
+            if ([decimal]$x -ne [decimal]$y) {
+                if ([decimal]$x -lt [decimal]$y) { return -1 }
+                return 1
+            }
+        } elseif ($xNum) { return -1 }
+        elseif ($yNum) { return 1 }
+        else {
+            $c = [string]::CompareOrdinal($x, $y)
+            if ($c -ne 0) { return [Math]::Sign($c) }
+        }
+    }
+    return [Math]::Sign($pa.Pre.Count - $pb.Pre.Count)
+}
+
+# ---------------------------------------------------------------------------
+# .env merge (install.ps1). Existing keys ALWAYS win, so an upgrade, including
+# a silent one run by the updater, never blanks a setting: the contact email,
+# the TMDB key, ports, library folders, secrets, anything added by hand. Keys in
+# $Want that are missing get appended; the three port keys in $PortKeys are
+# rewritten to the ports chosen for this run (the services are registered with
+# them, so .env must match). Returns how many keys were added.
+# ---------------------------------------------------------------------------
+function Merge-EnvFile([string]$Path, $Want, [hashtable]$PortKeys) {
+    $existing = @{}
+    $lines = New-Object System.Collections.Generic.List[string]
+    if (Test-Path $Path) {
+        foreach ($line in Get-Content $Path) {
+            $lines.Add($line)
+            if ($line -match '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$') { $existing[$matches[1]] = $matches[2] }
+        }
+    } else {
+        $lines.Add("# F7FIVE0 configuration. Written by setup; safe to edit.")
+        $lines.Add("# Restart the F7FIVE0 services after changing anything here.")
+        $lines.Add("# Every available key is documented in .env.example.")
+        $lines.Add("")
+    }
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i] -match '^\s*(API_PORT|STREAM_PORT|WEB_PORT)\s*=') {
+            $key = $matches[1]
+            if ($PortKeys.ContainsKey($key)) { $lines[$i] = "$key=$($PortKeys[$key])" }
+        }
+    }
+    $added = 0
+    foreach ($k in $Want.Keys) {
+        if ($existing.ContainsKey($k)) { continue }
+        if ($k -eq "DATABASE_URL" -and -not $Want[$k]) { Fail ".env has no DATABASE_URL and none could be created." }
+        $lines.Add("$k=$($Want[$k])")
+        $added++
+    }
+    [IO.File]::WriteAllLines($Path, $lines, (New-Object Text.UTF8Encoding($false)))
+    return $added
+}
+
+# ---------------------------------------------------------------------------
+# Setup cache for rollback: <data>\updates\setup\F7FIVE0-Setup-<version>.exe.
+# Setup copies itself there. Keep the installed version's copy and the newest
+# one below it (the previous Setup); anything else goes. Never fatal.
+# ---------------------------------------------------------------------------
+function Prune-SetupCache([string]$CacheDir, [string]$InstalledVersion) {
+    if (-not (Test-Path $CacheDir) -or -not (Test-SemVer $InstalledVersion)) { return }
+    $copies = @()
+    foreach ($f in Get-ChildItem $CacheDir -Filter "F7FIVE0-Setup-*.exe" -File -ErrorAction SilentlyContinue) {
+        if ($f.Name -match '^F7FIVE0-Setup-(.+)\.exe$' -and (Test-SemVer $matches[1])) {
+            $copies += [pscustomobject]@{ Version = $matches[1]; File = $f }
+        }
+    }
+    $keep = @($InstalledVersion)
+    $lower = @($copies | Where-Object { (Compare-SemVer $_.Version $InstalledVersion) -lt 0 })
+    $previous = $null
+    foreach ($c in $lower) {
+        if ($null -eq $previous -or (Compare-SemVer $c.Version $previous.Version) -gt 0) { $previous = $c }
+    }
+    if ($previous) { $keep += $previous.Version }
+    foreach ($c in $copies) {
+        if ($keep -notcontains $c.Version) {
+            Remove-Item -LiteralPath $c.File.FullName -Force -ErrorAction SilentlyContinue
+            Info "removed cached Setup $($c.File.Name)"
+        }
+    }
 }

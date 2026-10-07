@@ -18,6 +18,9 @@
     8. Registers the F7FIVE0-RemoteAccess scheduled task, which the web
        app's Admin > Remote access page uses to set up access from anywhere
        (Tailscale, Cloudflare, or port forwarding) after install.
+    9. Registers the F7FIVE0-Update scheduled task (SYSTEM, on demand), which
+       Admin > Updates uses to update the server from a GitHub release or an
+       uploaded Setup, and records the installed version in version.json.
 
   The Setup wizard (F7FIVE0-Setup.exe) runs this script for you. You can
   also run it by hand from an elevated PowerShell:
@@ -26,8 +29,12 @@
 
   and it asks for anything it needs.
 
-  Upgrading: run the new Setup.exe (or this script from the new release).
-  Your .env, database, art, and watch history are kept.
+  Upgrading: run the new Setup.exe (or this script from the new release), or
+  use Admin > Updates, which runs the same Setup silently (installer\update.ps1).
+  Your .env, database, art, and watch history are kept, and so are the Windows
+  account the services run as and the settings in the web app (NAS sign-ins,
+  the TMDB key). Silent runs get no answers from the wizard, so every answer
+  is "keep what is there".
 
 .PARAMETER InstallDir
   Where F7FIVE0 lives. Default C:\F7FIVE0.
@@ -97,6 +104,7 @@ $NssmWingetId  = "NSSM.NSSM"
 
 $ServiceNames = @("F7FIVE0-API", "F7FIVE0-Stream", "F7FIVE0-Web")
 $RemoteAccessTask = "F7FIVE0-RemoteAccess"
+$UpdateTask = "F7FIVE0-Update"
 $DefaultApiPort = 8001
 $DefaultStreamPort = 8002
 $DbName = "f7five0"
@@ -229,6 +237,7 @@ $DuckDnsToken   = Answer "duckDnsToken" $DuckDnsToken
 $TmdbKey        = Answer "tmdbKey" $TmdbKey
 $ContactEmail   = Answer "contactEmail" $ContactEmail
 $ServiceUser    = Answer "serviceUser" $ServiceUser
+$AppVersion     = Answer "appVersion" ""
 $ServicePassword = Answer "servicePassword" ""
 $PgSuperPassword = Answer "postgresPassword" ""
 if (-not $WebPort) { $p = Answer "webPort" ""; $WebPort = if ($p) { [int]$p } else { 0 } }
@@ -271,9 +280,17 @@ try {
 Step "Securing the install folder"
 # ---------------------------------------------------------------------------
 $svcSid = $null
+$script:KeepServiceAccount = $false
 if ($ServiceUser) {
     $svcSid = Get-AccountSid $ServiceUser
     if (-not $svcSid) { Fail "Could not find the Windows account '$ServiceUser' (-ServiceUser)." }
+} elseif ($IsUpgrade) {
+    # An upgrade without -ServiceUser (the wizard never has it, and a silent
+    # update can't ask for a password) keeps the Windows account the services
+    # already run as: its folder rights stay, and Install-Svc changes the
+    # services in place instead of re-creating them as LocalSystem.
+    $svcSid = Get-ServiceAccountSid
+    if ($svcSid) { $script:KeepServiceAccount = $true; Info "keeping the Windows account the services run as" }
 }
 Set-InstallAcl $InstallDir $svcSid
 Ok "only administrators can change F7FIVE0's files"
@@ -655,13 +672,8 @@ if (-not $IsUpgrade) {
 # ---------------------------------------------------------------------------
 Step "Writing configuration (.env)"
 # ---------------------------------------------------------------------------
-# Existing keys always win, so an upgrade never clobbers your settings.
-$existing = [ordered]@{}
-if (Test-Path $EnvFile) {
-    foreach ($line in Get-Content $EnvFile) {
-        if ($line -match '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$') { $existing[$matches[1]] = $matches[2] }
-    }
-}
+# Existing keys always win, so an upgrade never clobbers your settings
+# (Merge-EnvFile in common.ps1; installer\tests\update-verify.ps1 covers it).
 $want = [ordered]@{
     "ENVIRONMENT"             = "production"
     "LOG_LEVEL"               = "INFO"
@@ -695,31 +707,10 @@ $want = [ordered]@{
     # remote-access.ps1 reads this back and writes header_up into the Caddyfile.
     "TRUSTED_PROXY_SECRET"    = New-Secret 48
 }
-$lines = New-Object System.Collections.Generic.List[string]
-if (-not (Test-Path $EnvFile)) {
-    $lines.Add("# F7FIVE0 configuration. Written by setup; safe to edit.")
-    $lines.Add("# Restart the F7FIVE0 services after changing anything here.")
-    $lines.Add("# Every available key is documented in .env.example.")
-    $lines.Add("")
-} else {
-    foreach ($line in Get-Content $EnvFile) { $lines.Add($line) }
-}
 # Ports are the exception: the services are registered with the ports chosen
 # above, so .env must match them even when they changed on this run.
 $portKeys = @{ "API_PORT" = "$ApiPort"; "STREAM_PORT" = "$StreamPort"; "WEB_PORT" = "$WebPort" }
-for ($i = 0; $i -lt $lines.Count; $i++) {
-    if ($lines[$i] -match '^\s*(API_PORT|STREAM_PORT|WEB_PORT)\s*=') {
-        $lines[$i] = "$($matches[1])=$($portKeys[$matches[1]])"
-    }
-}
-$added = 0
-foreach ($k in $want.Keys) {
-    if ($existing.Contains($k)) { continue }
-    if ($k -eq "DATABASE_URL" -and -not $want[$k]) { Fail ".env has no DATABASE_URL and none could be created." }
-    $lines.Add("$k=$($want[$k])")
-    $added++
-}
-[IO.File]::WriteAllLines($EnvFile, $lines, (New-Object Text.UTF8Encoding($false)))
+$added = Merge-EnvFile $EnvFile $want $portKeys
 # The services read .env, so their account (when not SYSTEM) gets read access.
 Set-PrivateAcl $EnvFile @($svcSid)
 Ok ("{0} ({1} new setting(s))" -f $EnvFile, $added)
@@ -843,6 +834,87 @@ if ($svcSid) {
     if ($sddl -notmatch [regex]::Escape($svcSid)) { $raTask.SetSecurityDescriptor("$sddl(A;;GRGX;;;$svcSid)", 0) }
 }
 Ok "scheduled task $RemoteAccessTask registered (used by Admin > Remote access)"
+
+# ---------------------------------------------------------------------------
+Step "Updater"
+# ---------------------------------------------------------------------------
+# Admin > Updates updates the server from a GitHub release or an uploaded
+# Setup. The web app verifies the Setup and writes a request; F7FIVE0-Update
+# (a scheduled task that runs as SYSTEM, on demand only) runs the updater. The
+# task runs a COPY of update.ps1 kept under data\updates\run, because Setup
+# replaces the install folder while the updater is still running. See
+# installer\update.ps1.
+$UpdDir = Join-Path $DataDir "updates"
+$UpdRun = Join-Path $UpdDir "run"
+foreach ($d in @($UpdDir, (Join-Path $UpdDir "incoming"), (Join-Path $UpdDir "setup"), (Join-Path $UpdDir "backup"), $UpdRun)) {
+    if (-not (Test-Path $d)) { New-Item -ItemType Directory -Path $d | Out-Null }
+}
+# updates\ and incoming\: the web app's account writes the request, the status,
+# and the Setup it downloaded. run\ holds the updater itself and backup\ holds
+# full database dumps: Administrators and SYSTEM only. setup\ holds the cached
+# Setups a rollback runs: Administrators and SYSTEM write, the service account
+# may only read.
+$upGrants = @("*S-1-5-32-544:(OI)(CI)F", "*S-1-5-18:(OI)(CI)F")
+if ($svcSid) { $upGrants += "*${svcSid}:(OI)(CI)M" }
+& icacls $UpdDir /reset | Out-Null
+& icacls $UpdDir /inheritance:r /grant:r @upGrants | Out-Null
+foreach ($sub in @("run", "backup")) {
+    & icacls (Join-Path $UpdDir $sub) /inheritance:r /grant:r "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-18:(OI)(CI)F" | Out-Null
+}
+$setupGrants = @("*S-1-5-32-544:(OI)(CI)F", "*S-1-5-18:(OI)(CI)F")
+if ($svcSid) { $setupGrants += "*${svcSid}:(OI)(CI)RX" }
+& icacls (Join-Path $UpdDir "setup") /inheritance:r /grant:r @setupGrants | Out-Null
+foreach ($name in @("update.ps1", "common.ps1")) {
+    $from = Join-Path $InstallDir "installer\$name"
+    if (Test-Path $from) { Copy-Item $from (Join-Path $UpdRun $name) -Force }
+    else { Warn "installer\$name is missing from this package; Admin > Updates can't update this server" }
+}
+$updScript = Join-Path $UpdRun "update.ps1"
+$upAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$updScript`" -InstallDir `"$InstallDir`" -FromRequest" -WorkingDirectory $UpdRun
+$upPrincipal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+$upSettings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Hours 2) -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+$upRunning = @(Get-ScheduledTask -TaskName $UpdateTask -ErrorAction SilentlyContinue | Where-Object { $_.State -eq "Running" })
+if ($upRunning.Count) {
+    # Setup was started by this very task (an update from Admin). Its
+    # registration is the one in use and doesn't change between versions.
+    Info "$UpdateTask is running this update; its registration is left as it is"
+} else {
+    Register-ScheduledTask -TaskName $UpdateTask -Action $upAction -Principal $upPrincipal -Settings $upSettings -Description "Runs F7FIVE0 updates when an admin starts one from the web app." -Force | Out-Null
+}
+if ($svcSid) {
+    # Read + execute on the task lets that account start it (schtasks /Run).
+    $sched = New-Object -ComObject Schedule.Service
+    $sched.Connect()
+    $upTask = $sched.GetFolder("\").GetTask($UpdateTask)
+    $upSddl = $upTask.GetSecurityDescriptor(4)   # DACL only
+    if ($upSddl -notmatch [regex]::Escape($svcSid)) { $upTask.SetSecurityDescriptor("$upSddl(A;;GRGX;;;$svcSid)", 0) }
+}
+Ok "scheduled task $UpdateTask registered (used by Admin > Updates)"
+
+# ---------------------------------------------------------------------------
+Step "Recording the version"
+# ---------------------------------------------------------------------------
+# version.json is what the API, Admin > Updates, and the updater's health check
+# read. Setup passes appVersion; a release zip carries a VERSION file. Written
+# before the services start, so a started API already reports it. Without a
+# version (a git checkout) the file is left as it is.
+$VersionNow = $AppVersion
+if (-not $VersionNow) {
+    $versionFile = Join-Path $SourceDir "VERSION"
+    if (Test-Path $versionFile) { $VersionNow = (Get-Content $versionFile -Raw).Trim() }
+}
+if ($VersionNow -and (Test-SemVer $VersionNow)) {
+    $VersionNow = $VersionNow.TrimStart("v")
+    $record = [ordered]@{ version = $VersionNow; installed_at = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ") }
+    [IO.File]::WriteAllText((Join-Path $InstallDir "version.json"), ($record | ConvertTo-Json), (New-Object Text.UTF8Encoding($false)))
+    Ok "version $VersionNow recorded"
+    # Setup copied itself into data\updates\setup. Keep this version's copy and the previous one.
+    Prune-SetupCache (Join-Path $UpdDir "setup") $VersionNow
+} elseif ($VersionNow) {
+    Warn "'$VersionNow' is not a version number; version.json was not written."
+} else {
+    Info "no version given; version.json left as it is"
+}
 
 # Command-line remote access (advanced and recovery). The Setup wizard
 # installs for home use only and never runs this.
