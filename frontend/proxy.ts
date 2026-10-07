@@ -214,5 +214,11 @@ export function proxy(req: NextRequest) {
 export const config = {
   // Run on all paths except Next internals. The handler above decides
   // which of those paths are actually public.
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|robots.txt).*)"],
+  //
+  // api/admin/updates/upload is skipped on purpose: it carries a whole Setup
+  // exe, and Next buffers at most 10 MB of a request body that goes through
+  // this proxy (experimental.proxyClientMaxBodySize), which would cut the file
+  // off. Its route handler streams the body to the API and makes the same-origin
+  // check itself; the API requires the admin bearer and password.
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|robots.txt|api/admin/updates/upload).*)"],
 };

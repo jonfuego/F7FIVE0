@@ -5,6 +5,9 @@
 // Menu: name + role header (non-clickable), Account link, Admin link
 // (admins only), Sign out button. Sign out POSTs to /api/session/logout
 // and bounces to /login. Click outside or Esc closes the panel.
+//
+// Admins also see a badge on the Admin link (and a dot on the gear) when the
+// last update check found a newer F7FIVE0 (Admin > Updates).
 
 "use client";
 
@@ -13,6 +16,7 @@ import { useEffect, useRef, useState } from "react";
 import { Settings } from "lucide-react";
 import { Icon } from "@/components/Icon";
 import { refreshSession } from "@/lib/client-api";
+import { loadUpdateBadge } from "@/lib/update-badge";
 
 type Me = {
   id: string;
@@ -27,6 +31,8 @@ export function GearMenu() {
   const [signingOut, setSigningOut] = useState(false);
   // Only offer the Android app when this server has one to hand out.
   const [hasApp, setHasApp] = useState(false);
+  // Admins only: a newer F7FIVE0 is waiting (from the last stored check).
+  const [updateAvailable, setUpdateAvailable] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -35,6 +41,10 @@ export function GearMenu() {
       const profile = await loadMeWithRefresh();
       if (!cancelled) setMe(profile);
       if (!profile) return;
+      if (profile.role === "admin") {
+        const waiting = await loadUpdateBadge();
+        if (!cancelled) setUpdateAvailable(waiting);
+      }
       try {
         const res = await fetch("/download/android", { method: "HEAD", cache: "no-store" });
         if (!cancelled) setHasApp(res.ok);
@@ -77,6 +87,7 @@ export function GearMenu() {
 
   const roleLabel = me?.role === "admin" ? "Admin" : "Member";
   const isAdmin = me?.role === "admin";
+  const showUpdate = isAdmin && updateAvailable;
 
   return (
     <div className="gear-menu" ref={wrapRef}>
@@ -84,11 +95,12 @@ export function GearMenu() {
         type="button"
         className="gear-trigger"
         onClick={() => setOpen((v) => !v)}
-        aria-label="Account menu"
+        aria-label={showUpdate ? "Account menu (update available)" : "Account menu"}
         aria-haspopup="menu"
         aria-expanded={open}
       >
         <GearIcon />
+        {showUpdate ? <span className="update-dot" aria-hidden="true" /> : null}
       </button>
       {open ? (
         <div className="gear-panel" role="menu">
@@ -122,6 +134,11 @@ export function GearMenu() {
               onClick={() => setOpen(false)}
             >
               Admin
+              {showUpdate ? (
+                <span className="update-badge" role="status" aria-label="Update available">
+                  Update
+                </span>
+              ) : null}
             </Link>
           ) : null}
           <button

@@ -164,6 +164,23 @@ button { border: 0; background: transparent; color: inherit; font: inherit; curs
   transition: border-color .15s var(--ease), color .15s var(--ease);
 }
 .gear-trigger:hover { border-color: var(--ink); color: var(--ink); }
+/* Admins: a newer F7FIVE0 is waiting (dot on the gear, pill on the Admin link). */
+.gear-trigger { position: relative; }
+.update-dot {
+  position: absolute; top: 5px; right: 5px;
+  width: 10px; height: 10px; border-radius: 50%;
+  background: var(--hive-text);
+  border: 2px solid var(--surface-2);
+}
+.update-badge {
+  display: inline-block;
+  margin-left: 8px; padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--hive); color: #fff;
+  font-size: 11px; font-weight: 700;
+  letter-spacing: 0.06em; text-transform: uppercase;
+  vertical-align: 1px;
+}
 .gear-panel {
   position: absolute;
   top: calc(100% + 8px);
