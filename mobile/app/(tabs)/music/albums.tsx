@@ -3,15 +3,18 @@ import React from "react";
 import { View } from "react-native";
 
 import { useAlbums } from "@/api/queries";
-import type { Album } from "@/api/types";
+import type { Album, AlbumDetail } from "@/api/types";
+import { albumToSongs } from "@/player/albumPlay";
+import { usePlayer } from "@/player/PlayerProvider";
+import { useApi } from "@/state/auth";
 import { AlphaRail } from "@/ui/AlphaRail";
 import { QueryState } from "@/ui/QueryState";
 import { RefreshableGrid } from "@/ui/RefreshableGrid";
 import { LibraryScreen, libraryBody } from "@/ui/LibraryScreen";
+import { PosterCard } from "@/ui/PosterCard";
 import type { FilterOption, SortOption } from "@/ui/sortFilter";
 import { toggleDir } from "@/ui/sortFilter";
 import { SortFilterBar } from "@/ui/SortFilterBar";
-import { Tile } from "@/ui/Tile";
 import { useAlphaRail } from "@/ui/useAlphaRail";
 import { useGrid } from "@/ui/useGrid";
 import { useViewPref } from "@/state/viewPrefs";
@@ -38,7 +41,20 @@ const ALBUM_FILTERS: FilterOption<Album>[] = [
 export function AlbumsLibrary(): React.ReactElement {
   const albums = useAlbums();
   const router = useRouter();
+  const api = useApi();
+  const { playSongs } = usePlayer();
   const { columns, itemWidth } = useGrid();
+  // Tile Play: fetch the album detail and start it in the player, the same
+  // way the album screen does. The card press still opens the detail screen.
+  const playAlbumById = async (albumId: string) => {
+    try {
+      const detail = await api.json<AlbumDetail>(`/api/albums/${albumId}`);
+      const songs = albumToSongs(detail);
+      if (songs.length > 0) await playSongs(songs, 0);
+    } catch {
+      // Best-effort; nothing to play if the detail fetch fails.
+    }
+  };
   // Saved view (server, per user): this screen's sort and filter.
   const sortView = useViewPref("sort:albums", sortFilterInitial(ALBUM_SORTS), isSortFilterState);
   const sf = useSortFilter(sortView, albums.data ?? [], ALBUM_SORTS, ALBUM_FILTERS);
@@ -76,13 +92,16 @@ export function AlbumsLibrary(): React.ReactElement {
               refreshing={albums.isFetching}
               onRefresh={albums.refetch}
               renderItem={({ item }) => (
-                <Tile
+                <PosterCard
                   title={item.title}
-                  subtitle={item.artist_name}
+                  meta={item.artist_name}
                   artPath={item.cover_path}
-                  size={itemWidth}
+                  width={itemWidth}
+                  square
+                  round
                   compact
                   onPress={() => router.push(`/music/album/${item.id}`)}
+                  onPlay={() => void playAlbumById(item.id)}
                 />
               )}
             />

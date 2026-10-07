@@ -5,6 +5,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
 import { AuthShell } from "@/components/AuthShell";
@@ -13,12 +14,16 @@ import { MediaCard } from "@/components/MediaCard";
 import { Row } from "@/components/Row";
 import { apiGet, apiPost } from "@/lib/client-api";
 import { colorForTitle, hueFromString, joinMeta } from "@/lib/format";
+import { resolveHeroPlay } from "@/lib/play-action";
 import {
   pickProgressFor, statusForFile, useProgressMap,
 } from "@/lib/progress";
+import { albumToQueueItems, useQueue, type QueueItem } from "@/lib/queue";
 import { useScrollRestoration } from "@/lib/scroll-restoration";
+import { groupBySeason } from "@/lib/seasons";
 import type {
-  ContinueWatchingItem, RecentItem, RecentMusicVideo,
+  AlbumDetail, ContinueWatchingItem, MovieDetail, RecentItem,
+  RecentMusicVideo, SeriesDetail,
 } from "@/lib/types";
 
 const ROW_LIMIT = 20;
@@ -139,7 +144,11 @@ export default function Home() {
         </div>
       ) : null}
 
-      {featured ? <Hero item={featured} /> : <HeroSkeleton />}
+      {featured ? (
+        <Hero item={featured} continueWatching={state.continueWatching} />
+      ) : (
+        <HeroSkeleton />
+      )}
 
       <Row
         title="Continue Watching"
@@ -263,7 +272,19 @@ function progressBarFromMap(
   return undefined;
 }
 
-function Hero({ item }: { item: RecentItem }) {
+function Hero({
+  item,
+  continueWatching,
+}: {
+  item: RecentItem;
+  continueWatching: ContinueWatchingItem[] | null;
+}) {
+  const router = useRouter();
+  const { playAlbum } = useQueue();
+  // Resolving the playable media file (movie file, series on-deck / first
+  // episode) needs a detail fetch, so Play shows a brief busy state and
+  // guards against double taps.
+  const [playBusy, setPlayBusy] = useState(false);
   const tint: CSSProperties = {
     ["--pg" as never]: colorForTitle(item.title),
     ["--ph" as never]: String(hueFromString(item.title)),
@@ -305,6 +326,31 @@ function Hero({ item }: { item: RecentItem }) {
       cancelled = true;
     };
   }, [item.kind, item.id]);
+
+  // Hero Play. An album starts in the dock and stays on the page; a movie
+  // or series resolves its playable file and navigates to /watch, the same
+  // route the detail pages use (the watch page resumes). The kind-to-action
+  // decision lives in resolveHeroPlay (pure, unit-tested).
+  async function onPlay() {
+    if (playBusy) return;
+    setPlayBusy(true);
+    try {
+      if (item.kind === "album") {
+        const detail = await apiGet<AlbumDetail>(`/api/library/albums/${item.id}`);
+        const items = albumToQueueItems(detail);
+        if (items.length > 0) playAlbum(items, { shuffle: false });
+        return;
+      }
+      const mediaFileId = await resolveVideoFileId(item, continueWatching);
+      const action = resolveHeroPlay(item.kind, mediaFileId);
+      if (action.type === "watch") router.push(action.href);
+    } catch {
+      // Best-effort: a failed resolve leaves the page unchanged.
+    } finally {
+      setPlayBusy(false);
+    }
+  }
+
   return (
     <section className="hero" style={tint}>
       <div className="keyart" />
@@ -321,9 +367,15 @@ function Hero({ item }: { item: RecentItem }) {
         {meta ? <div className="meta">{splitMeta(meta)}</div> : null}
         {overview ? <p className="blurb">{overview}</p> : null}
         <div className="ctas">
-          <Link className="btn play" href={detailHref(item.kind, item.id)}>
+          <button
+            type="button"
+            className="btn play"
+            onClick={onPlay}
+            disabled={playBusy}
+            aria-label={`Play ${item.title}`}
+          >
             <span className="tri" /> Play
-          </Link>
+          </button>
           <Link className="btn ghost" href={detailHref(item.kind, item.id)}>
             + Details
           </Link>
@@ -331,6 +383,32 @@ function Hero({ item }: { item: RecentItem }) {
       </div>
     </section>
   );
+}
+
+// Resolve the media file id to play for a video hero item. Movies use the
+// first file; series prefer the On Deck episode (from the already-loaded
+// continue-watching list), falling back to the first episode on disk.
+async function resolveVideoFileId(
+  item: RecentItem,
+  continueWatching: ContinueWatchingItem[] | null,
+): Promise<string | null> {
+  if (item.kind === "movie") {
+    const detail = await apiGet<MovieDetail>(`/api/library/movies/${item.id}`);
+    return detail.media_files[0]?.id ?? null;
+  }
+  if (item.kind === "series") {
+    const onDeck = continueWatching?.find(
+      (it) => it.kind === "series" && it.id === item.id,
+    );
+    if (onDeck?.media_file_id) return onDeck.media_file_id;
+    const detail = await apiGet<SeriesDetail>(`/api/library/series/${item.id}`);
+    for (const group of groupBySeason(detail.episodes)) {
+      for (const ep of group.episodes) {
+        if (ep.media_files.length > 0) return ep.media_files[0].id;
+      }
+    }
+  }
+  return null;
 }
 
 function splitMeta(meta: string) {
@@ -353,10 +431,39 @@ function HeroSkeleton() {
   );
 }
 
+// Home Mixes rail. The whole card no longer navigates: "Open Mix" links to
+// /mixes, and Play fetches this mix's auto-playlist and starts it in the
+// dock (same wiring the /mixes playbills use), staying on the page.
+const MIX_PREVIEW_URL: Record<string, string> = {
+  "recently-added": "/api/library/auto-playlist/recently-added?limit=100",
+  "most-played": "/api/library/auto-playlist/most-played?limit=100&window=all",
+  "continue-listening": "/api/library/auto-playlist/continue-listening?limit=50",
+  random: "/api/library/auto-playlist/random?limit=100",
+};
+
 function MixPreviewCard({ kind, tag, title, sub }: { kind: string; tag: string; title: string; sub: string }) {
+  const { playAlbum } = useQueue();
+  const [busy, setBusy] = useState(false);
+
+  async function onPlay() {
+    if (busy) return;
+    const url = MIX_PREVIEW_URL[kind];
+    if (!url) return;
+    setBusy(true);
+    try {
+      const data = await apiGet<{ items: QueueItem[] }>(url);
+      if (Array.isArray(data?.items) && data.items.length > 0) {
+        playAlbum(data.items, { shuffle: false });
+      }
+    } catch {
+      // Best-effort: a failed fetch leaves the page and dock unchanged.
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
-    <Link
-      href="/mixes"
+    <div
       className="playbill"
       style={{
         flex: "0 0 auto",
@@ -373,11 +480,20 @@ function MixPreviewCard({ kind, tag, title, sub }: { kind: string; tag: string; 
         <h3>{title}</h3>
         <p className="pb-sub">{sub}</p>
         <div className="pb-foot">
-          <span>Open Mix</span>
-          <span className="play"><span className="tri" /> Play</span>
+          <Link href="/mixes">Open Mix</Link>
+          <button
+            type="button"
+            className="play"
+            onClick={onPlay}
+            disabled={busy}
+            aria-label={`Play ${title}`}
+            style={{ background: "none", border: "none", cursor: "pointer", font: "inherit", color: "inherit", padding: 0 }}
+          >
+            <span className="tri" /> Play
+          </button>
         </div>
       </div>
-    </Link>
+    </div>
   );
 }
 

@@ -4,7 +4,10 @@ import { ScrollView, StyleSheet, Text, View, RefreshControl } from "react-native
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { useAlbums, useContinueWatching, useOnDeck, useRecent } from "@/api/queries";
-import type { RecentItem } from "@/api/types";
+import type { AlbumDetail, RecentItem } from "@/api/types";
+import { albumToSongs } from "@/player/albumPlay";
+import { usePlayer } from "@/player/PlayerProvider";
+import { useApi } from "@/state/auth";
 import { colors, fonts, spacing, typography } from "@/state/theme";
 import { ContinueWatchingCard } from "@/ui/ContinueWatchingCard";
 import { MarqueeHeader } from "@/ui/MarqueeHeader";
@@ -20,6 +23,19 @@ function recentHref(it: RecentItem): string {
 
 export default function HomeScreen(): React.ReactElement {
   const router = useRouter();
+  const api = useApi();
+  const { playSongs } = usePlayer();
+  // Tile Play: fetch the album detail and start it in the player, the same
+  // way the album screen does. The card press still opens the detail screen.
+  const playAlbumById = async (albumId: string) => {
+    try {
+      const detail = await api.json<AlbumDetail>(`/api/albums/${albumId}`);
+      const songs = albumToSongs(detail);
+      if (songs.length > 0) await playSongs(songs, 0);
+    } catch {
+      // Best-effort; nothing to play if the detail fetch fails.
+    }
+  };
   const cont = useContinueWatching();
   const recent = useRecent();
   const albums = useAlbums();
@@ -145,6 +161,7 @@ export default function HomeScreen(): React.ReactElement {
                   square
                   round
                   onPress={() => router.push(`/music/album/${al.id}`)}
+                  onPlay={() => void playAlbumById(al.id)}
                 />
               ))}
             </View>

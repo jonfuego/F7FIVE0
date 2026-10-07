@@ -1,4 +1,4 @@
-import { Check, Film, Music } from "lucide-react-native";
+import { Check, Film, Music, Play } from "lucide-react-native";
 import React, { useState } from "react";
 import { Image, Pressable, StyleSheet, Text, View } from "react-native";
 
@@ -23,6 +23,10 @@ interface PosterCardProps {
   onPress: () => void;
   /** Dense grids: title only, smaller type (meta stays in the a11y label). */
   compact?: boolean;
+  /** When set, a small play control is painted over the frame. Tapping it
+   * starts playback (the handler resolves the item and calls the player);
+   * the card press still opens the detail screen. */
+  onPlay?: () => void;
 }
 
 /** Derive a stable warm hue from the title so the placeholder isn't a flat box
@@ -47,6 +51,7 @@ export function PosterCard({
   progress = 0,
   onPress,
   compact,
+  onPlay,
 }: PosterCardProps): React.ReactElement {
   const api = useApi();
   const uri = resolveArtUri(artPath);
@@ -102,6 +107,17 @@ export function PosterCard({
             <View style={[styles.progressFill, { width: `${pct * 100}%` }]} />
           </View>
         ) : null}
+        {onPlay ? (
+          <Pressable
+            onPress={onPlay}
+            accessibilityRole="button"
+            accessibilityLabel={`Play ${title}`}
+            hitSlop={8}
+            style={({ pressed }) => [styles.playSpot, pressed && styles.pressed]}
+          >
+            <Icon icon={Play} size={16} color={colors.background} fill />
+          </Pressable>
+        ) : null}
       </View>
       <Text style={[styles.title, compact && styles.titleCompact]} numberOfLines={1}>
         {title}
@@ -142,6 +158,17 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.5)",
   },
   progressFill: { height: 3, backgroundColor: colors.accent },
+  playSpot: {
+    position: "absolute",
+    bottom: 6,
+    right: 6,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: colors.accent,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   title: { fontFamily: fonts.uiSemiBold, fontSize: 14, color: colors.text, marginTop: spacing.xs },
   meta: { fontFamily: fonts.mono, fontSize: 11, color: colors.textFaint, marginTop: 1 },
   titleCompact: { fontSize: 12 },

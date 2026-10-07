@@ -8,14 +8,18 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import EditOverridesModal, { algorithmicSortHint } from "@/components/EditOverridesModal";
 import { AuthShell } from "@/components/AuthShell";
 import { AlphaRail, alphaLetterOf } from "@/components/AlphaRail";
 import { Grid, GridEmpty } from "@/components/Grid";
 import { apiGet } from "@/lib/client-api";
 import { colorForTitle, hueFromString } from "@/lib/format";
+import { watchHref } from "@/lib/play-action";
 import { useScrollRestoration } from "@/lib/scroll-restoration";
-import type { MusicVideoArtist, OverrideOut } from "@/lib/types";
+import type {
+  MusicVideoArtist, MusicVideoArtistDetail, MusicVideoReleaseDetail, OverrideOut,
+} from "@/lib/types";
 import { useViewPref } from "@/lib/use-view-pref";
 
 type EditInitial = OverrideOut & { algorithmic_sort_hint: string };
@@ -186,6 +190,27 @@ function ArtistTile({
     ["--pg" as never]: colorForTitle(artist.name),
     ["--ph" as never]: String(hueFromString(artist.name)),
   };
+  const router = useRouter();
+
+  // Cover play button: resolve this artist's first music video and open it
+  // at /watch/<id>, without following the card link to the artist page.
+  async function onPlay() {
+    try {
+      const detail = await apiGet<MusicVideoArtistDetail>(
+        `/api/library/music-videos/artists/${artist.id}`,
+      );
+      const release = detail.releases[0];
+      if (!release) return;
+      const rel = await apiGet<MusicVideoReleaseDetail>(
+        `/api/library/music-videos/releases/${release.id}`,
+      );
+      const fileId = rel.videos.find((v) => v.media_file_id)?.media_file_id;
+      if (fileId) router.push(watchHref(fileId));
+    } catch {
+      // Best-effort; nothing to play if a resolve step fails.
+    }
+  }
+
   return (
     <Link
       href={`/music-videos/${artist.id}`}
@@ -204,9 +229,18 @@ function ArtistTile({
             className="real-art"
           />
         ) : null}
-        <div className="play-spot" aria-hidden>
+        <button
+          type="button"
+          className="play-spot"
+          aria-label={`Play ${artist.name}`}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            void onPlay();
+          }}
+        >
           <span className="tri" />
-        </div>
+        </button>
         {isAdmin ? (
           <button
             type="button"

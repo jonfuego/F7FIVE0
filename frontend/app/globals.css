@@ -787,6 +787,10 @@ button { border: 0; background: transparent; color: inherit; font: inherit; curs
   position: absolute;
   bottom: 12px; right: 12px;
   width: 44px; height: 44px;
+  /* Now a real <button>; reset UA chrome so the look is unchanged. */
+  border: 0;
+  padding: 0;
+  cursor: pointer;
   border-radius: var(--radius-full);
   background: var(--hive);
   color: var(--on-hive);
