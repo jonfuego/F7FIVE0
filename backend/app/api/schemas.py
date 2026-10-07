@@ -997,6 +997,13 @@ class ClientErrorReport(BaseModel):
 class LibraryFolderOut(BaseModel):
     path: str
     reachable: bool
+    # Why the server can or can't open it: "ok", or a reason code
+    # ("not_found" / "access_denied" for local paths, plus the NAS reasons
+    # "bad_credentials" / "unreachable" / "share_not_found" /
+    # "credential_conflict" / "account_blocked" / "error" for UNC shares).
+    reason: str = "ok"
+    # For a UNC folder, the NAS username saved for its server, or null.
+    signed_in_as: Optional[str] = None
 
 
 class LibraryFoldersLibraryOut(BaseModel):
@@ -1017,6 +1024,34 @@ class LibraryFoldersOut(BaseModel):
 
 class LibraryFoldersIn(BaseModel):
     folders: dict[str, list[str]]
+
+
+# ---- NAS sign-in (Admin > Library folders) ---------------------------------
+class NasCredentialOut(BaseModel):
+    """One saved NAS sign-in. No secret or password field, ever."""
+    server: str
+    username: str
+    updated_at: Optional[str] = None
+
+
+class NasCredentialIn(BaseModel):
+    username: str = Field(min_length=1, max_length=256)
+    password: str = Field(min_length=1, max_length=256)
+
+
+class NasShareStatusOut(BaseModel):
+    share: str
+    reason: str
+    code: int
+
+
+class NasSaveOut(BaseModel):
+    """Result of saving a sign-in: the server, its username, and the connect
+    status per known share. No secret or password field, ever."""
+    server: str
+    username: str
+    updated_at: Optional[str] = None
+    shares: list[NasShareStatusOut]
 # ---- Metadata (Admin > Metadata) -------------------------------------------
 class TmdbKeyStatusOut(BaseModel):
     configured: bool

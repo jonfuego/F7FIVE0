@@ -189,13 +189,40 @@ def _hide_files_under(db: Session, kind: str, removed: list[str], keep: list[str
 class FolderStatus:
     path: str
     reachable: bool
+    # "ok", or why it can't be opened. Local paths: "not_found" /
+    # "access_denied". UNC shares reuse the NAS reason codes
+    # (nas_auth.reason_for_code): "bad_credentials", "unreachable",
+    # "share_not_found", "access_denied", "credential_conflict",
+    # "account_blocked", "error".
+    reason: str = "ok"
+    # For a UNC folder, the NAS username signed in for its server, or None.
+    signed_in_as: Optional[str] = None
 
 
-def status(path: str) -> FolderStatus:
-    """Whether the server (as the account the API runs under) can open it."""
+def status(path: str, db: Optional[Session] = None) -> FolderStatus:
+    """Whether the server (as the account the F7FIVE0 services run under) can
+    open the folder, and if not, why. For a UNC share, connect any saved NAS
+    sign-in first so a share that just needs reconnecting comes back as
+    reachable, and report who it is signed in as."""
+    # Local import avoids a circular import: nas_auth reads library folders.
+    from app.services import nas_auth
+
+    unc = nas_auth.is_unc_path(path)
+    signed_in_as = nas_auth.username_for(db, path) if (unc and db is not None) else None
+    if unc:
+        # Reconnect this server's shares under our logon session if a sign-in
+        # is saved. Cheap when already connected; a no-op off Windows.
+        nas_auth.ensure_all(db)
+
     try:
         os.listdir(path)
         ok = os.path.isdir(path)
-    except OSError:
+        reason = "ok" if ok else ("error" if unc else "not_found")
+    except OSError as exc:
         ok = False
-    return FolderStatus(path=path, reachable=ok)
+        if unc:
+            winerror = getattr(exc, "winerror", None)
+            reason = nas_auth.reason_for_code(winerror) if winerror else "unreachable"
+        else:
+            reason = "access_denied" if isinstance(exc, PermissionError) else "not_found"
+    return FolderStatus(path=path, reachable=ok, reason=reason, signed_in_as=signed_in_as)

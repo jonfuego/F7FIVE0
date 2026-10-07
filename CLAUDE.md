@@ -115,6 +115,24 @@ INSTALL.md for the operator view.
   second copies details/art since `tmdb_id` is unique). An unreachable folder
   is skipped and its files keep their state; removing a folder in Admin marks
   its files missing.
+- NAS sign-in: the services run as LocalSystem, which has no account on a NAS,
+  so a UNC library share (`\\server\share`) can't be read until an admin enters
+  a Windows sign-in for that server in Admin > Library folders.
+  `app/services/nas_auth.py` is the one place this lives. Sign-ins are per
+  server (`\\fuegonas` keyed as `fuegonas`, lowercased); one sign-in covers
+  every share on that server. The password is encrypted with Windows DPAPI at
+  machine scope (`CryptProtectData` with `CRYPTPROTECT_LOCAL_MACHINE`) and kept
+  in `app_settings` under `nas_credentials`; it is never stored in `.env`,
+  logged, returned to the browser, or written in plaintext. Shares are
+  connected with `WNetAddConnection2W` using no local name, so no drive letter
+  is ever mapped; a change cancels the existing connection first (avoids error
+  1219). Windows scopes one set of credentials per server per logon session, so
+  each process connects for itself: `nas_auth.ensure_all()` runs at API startup
+  and stream-gateway startup, before every folder scan, in the Admin folder
+  status check, and as a one-shot retry in the stream file-open path on a UNC
+  error. Machine-scope DPAPI means any local process can decrypt the secret,
+  the same trust boundary as `.env` and the DB password already on this host.
+  Off Windows the endpoints answer 501 and `ensure_all()` is a no-op.
 - TMDB key: always read it with `services/tmdb_key.get()` (Admin-saved key in
   `app_settings` wins over `TMDB_API_KEY`; cached per process, refreshed on
   save). Never read `settings.tmdb_api_key` directly. Admin reminder banners

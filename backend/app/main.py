@@ -13,6 +13,7 @@ from sqlalchemy import text
 
 from app.config import settings
 from app.db import engine
+from app.services import nas_auth
 from app.services.trusted_proxy import real_client_ip
 from app import scheduler
 from app.api import admin as admin_routes
@@ -51,6 +52,13 @@ async def lifespan(app: FastAPI):
     except Exception:
         log.exception("Database connection failed at startup")
         raise
+    # Connect any saved NAS sign-ins under this process's logon session, so a
+    # UNC library share is readable from the first request (LocalSystem has no
+    # NAS login of its own). Cheap when already connected; a no-op off Windows.
+    try:
+        nas_auth.ensure_all()
+    except Exception:
+        log.warning("NAS ensure_all at API startup raised", exc_info=True)
     # Start the *arr sync scheduler. Jobs run every 5 minutes, starting on
     # the first fire interval (not immediately on boot) so startup stays fast.
     scheduler.start()
