@@ -161,8 +161,11 @@ jobs:
           # cyclonedx-bom installs the "cyclonedx-py" console script, so run it by
           # spec. Build the Python SBOM from the hash-pinned backend lock.
           pipx run --spec cyclonedx-bom cyclonedx-py requirements backend/requirements.lock --output-format JSON --output-file installer/Output/sbom-backend.cdx.json
-          npx --yes @cyclonedx/cyclonedx-npm --package-lock-only --output-format json --output-file installer/Output/sbom-web.cdx.json frontend/package.json
-          npx --yes @cyclonedx/cyclonedx-npm --package-lock-only --output-format json --output-file installer/Output/sbom-mobile.cdx.json mobile/package.json
+          # --ignore-npm-errors: cyclonedx-npm runs `npm ls` under the hood, which
+          # exits non-zero on this repo's peer-dep warnings (Expo / RN use
+          # legacy-peer-deps). The flag lets the SBOM build complete anyway.
+          npx --yes @cyclonedx/cyclonedx-npm --ignore-npm-errors --package-lock-only --output-format json --output-file installer/Output/sbom-web.cdx.json frontend/package.json
+          npx --yes @cyclonedx/cyclonedx-npm --ignore-npm-errors --package-lock-only --output-format json --output-file installer/Output/sbom-mobile.cdx.json mobile/package.json
           Get-ChildItem installer/Output -Filter "sbom-*.cdx.json" | Format-Table Name, Length
       # SHA256SUMS over the shipped binaries (Setup.exe and the zip), written in
       # the usual "<hash>  <name>" form so `sha256sum -c` and certutil both verify.
