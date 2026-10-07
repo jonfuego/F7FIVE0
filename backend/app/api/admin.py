@@ -12,7 +12,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Any, Optional
 
+from urllib.parse import unquote
+
 from fastapi import APIRouter, Depends, Query, Request
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -27,7 +30,7 @@ from app.api.schemas import (
     LibraryFolderOut, LibraryFoldersIn, LibraryFoldersLibraryOut, LibraryFoldersOut,
     MetadataSettingsOut, NasCredentialIn, NasCredentialOut, NasSaveOut,
     ReminderOut, ReminderSnoozeIn, TmdbKeyCheckOut, TmdbKeyIn,
-    TmdbKeyStatusOut,
+    TmdbKeyStatusOut, UpdateBadgeOut, UpdateRunOut, UpdatesOut,
     ActiveTranscodeOut, AdminSessionOut, AuthEventOut, MatchApply,
     MatchCandidate, OverrideOut, OverrideUpdate, ServerHealthOut,
     SortOverrideOut, SortOverrideUpdate, WatchHistoryRowOut,
@@ -44,7 +47,10 @@ from app.services.arr.lidarr import LidarrClient
 from app.services.arr.radarr import RadarrClient
 from app.services.arr.sonarr import SonarrClient
 from app.config import settings
-from app.services import library_folders, nas_auth, reminders, tmdb_key
+from app.services import (
+    android_app, library_folders, nas_auth, reminders, remote_access as ra,
+    server_version, tmdb_key, updates,
+)
 from app.services.metadata.runner import enrich_album, enrich_artist, enrich_movie
 
 log = logging.getLogger("f7five0.admin.override")
@@ -1065,9 +1071,10 @@ def put_library_folders(
 # ---------------------------------------------------------------------------
 # NAS sign-in: a Windows sign-in per server, so LocalSystem can read a share
 # ---------------------------------------------------------------------------
-def _audit_nas(db: Session, user_id: uuid.UUID, event: str, request: Request) -> None:
-    """Append an auth-audit row for a NAS sign-in change. The password is
-    never a parameter here, so it cannot land in the audit trail."""
+def _audit_event(db: Session, user_id: uuid.UUID, event: str, request: Request) -> None:
+    """Append an auth-audit row for a sensitive admin action (a NAS sign-in
+    change, an update). A password is never a parameter here, so it cannot
+    land in the audit trail."""
     ip = getattr(request.state, "client_ip", None)
     ua = request.headers.get("user-agent")
     db.add(AuthEvent(
@@ -1103,7 +1110,7 @@ def put_nas_credential(
     if not nas_auth.available():
         raise HTTPException(status_code=501, detail="nas_sign_in_windows_only")
     result = nas_auth.save(db, server, body.username, body.password)
-    _audit_nas(db, _admin.id, "nas_sign_in_set", request)
+    _audit_event(db, _admin.id, "nas_sign_in_set", request)
     db.commit()
     log.info("nas sign-in saved for server %s as %s", result["server"], result["username"])
     return NasSaveOut(**result)
@@ -1120,10 +1127,190 @@ def delete_nas_credential(
     if not nas_auth.available():
         raise HTTPException(status_code=501, detail="nas_sign_in_windows_only")
     nas_auth.remove(db, server)
-    _audit_nas(db, _admin.id, "nas_sign_in_removed", request)
+    _audit_event(db, _admin.id, "nas_sign_in_removed", request)
     db.commit()
     log.info("nas sign-in removed for server %s", server.strip().lstrip("\\").lower())
     return [NasCredentialOut(**row) for row in nas_auth.list_servers(db)]
+
+
+# ---------------------------------------------------------------------------
+# Updates: check GitHub, update from a release, or upload a Setup
+# ---------------------------------------------------------------------------
+def get_update_helper() -> ra.Helper:
+    return updates.get_helper()
+
+
+# Refusals come back as the error code in `detail`; the admin page words them.
+_UPDATE_STATUS = {
+    "admin_password_required": 403, "admin_password_incorrect": 403, "too_many_attempts": 429,
+    "untrusted_setup": 403, "update_running": 409, "no_update": 409, "not_newer": 409,
+    "no_checksums": 409, "no_setup": 409, "too_large": 413, "not_an_exe": 400, "no_version": 400,
+    "host_not_allowed": 400, "release_unreachable": 503, "helper_unavailable": 503, "helper_failed": 503,
+}
+
+
+def _update_http(exc: "updates.UpdateError") -> HTTPException:
+    return HTTPException(status_code=_UPDATE_STATUS.get(exc.code, 400), detail=exc.code)
+
+
+def _updates_out(db: Session, helper: ra.Helper) -> UpdatesOut:
+    check = updates.stored_check(db)
+    installed = server_version.installed()
+    latest = check.get("latest") or None
+    available = updates.is_newer(latest, installed)
+    run = updates.run_state()
+    helper_ok = helper.available()
+    blocked: Optional[str] = None
+    if available:
+        if run["active"]:
+            blocked = "running"
+        elif not check.get("sums_url"):
+            blocked = "no_checksums"
+        elif not check.get("setup_url"):
+            blocked = "no_setup"
+        elif not helper_ok:
+            blocked = "helper_unavailable"
+    apks = android_app.find_apks()
+    phone = apks.get("arm64") or apks.get("armv7")
+    return UpdatesOut(
+        installed_version=installed,
+        phone_app_version=phone.version if phone else None,
+        latest_version=latest,
+        update_available=available,
+        can_install=available and blocked is None,
+        install_blocked=blocked,
+        notes=check.get("notes"),
+        checked_at=check.get("checked_at"),
+        check_error=check.get("error"),
+        helper_available=helper_ok,
+        signer_configured=bool(settings.update_signer_subject.strip()),
+        rollback_ready=updates.rollback_ready(),
+        max_setup_mb=settings.update_max_setup_mb,
+        run=UpdateRunOut(**run),
+    )
+
+
+@router.get("/updates", response_model=UpdatesOut)
+def get_updates(
+    _admin: Annotated[User, Depends(require_admin)],
+    db: Annotated[Session, Depends(get_db)],
+    helper: Annotated[ra.Helper, Depends(get_update_helper)],
+) -> UpdatesOut:
+    """Installed version, the bundled phone app, the latest published release
+    (as of the last check), and the state of any update."""
+    return _updates_out(db, helper)
+
+
+@router.get("/updates/badge", response_model=UpdateBadgeOut)
+def updates_badge(
+    _admin: Annotated[User, Depends(require_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> UpdateBadgeOut:
+    """For the Admin link's badge in the nav: true when the last check found a
+    release newer than the installed version. Cheap (no network, no task query),
+    so every page can ask."""
+    latest = updates.stored_check(db).get("latest") or None
+    return UpdateBadgeOut(update_available=updates.is_newer(latest, server_version.installed()), latest_version=latest)
+
+
+@router.post("/updates/check", response_model=UpdatesOut)
+def check_updates(
+    _admin: Annotated[User, Depends(require_admin)],
+    db: Annotated[Session, Depends(get_db)],
+    helper: Annotated[ra.Helper, Depends(get_update_helper)],
+) -> UpdatesOut:
+    """Ask GitHub now. Also runs daily from the scheduler. Network trouble is
+    stored and shown, not raised. Nothing is installed."""
+    updates.check_for_update(db)
+    db.commit()
+    return _updates_out(db, helper)
+
+
+@router.get("/updates/run", response_model=UpdateRunOut)
+def update_run(_admin: Annotated[User, Depends(require_admin)]) -> UpdateRunOut:
+    """Live state of the running (or last) update. Poll while it is active; it
+    keeps answering across the restart of the services."""
+    return UpdateRunOut(**updates.run_state())
+
+
+@router.post("/updates/apply", response_model=UpdateRunOut, status_code=202)
+def apply_update(
+    request: Request,
+    admin: Annotated[User, Depends(require_admin)],
+    db: Annotated[Session, Depends(get_db)],
+    helper: Annotated[ra.Helper, Depends(get_update_helper)],
+) -> UpdateRunOut:
+    """Update to the latest published release. The server downloads the Setup
+    and SHA256SUMS.txt over https from GitHub, checks the Setup against its
+    line in the checksum list, then starts the SYSTEM updater task. A release
+    without checksums is never installed."""
+    try:
+        state = updates.begin_apply(db, helper)
+    except updates.UpdateError as exc:
+        raise _update_http(exc) from exc
+    _audit_event(db, admin.id, "update_started", request)
+    db.commit()
+    log.info("update to %s requested by %s (from GitHub)", state.get("to_version"), admin.username)
+    return UpdateRunOut(**state)
+
+
+@router.post("/updates/upload", response_model=UpdateRunOut, status_code=202)
+async def upload_update(
+    request: Request,
+    admin: Annotated[User, Depends(require_admin)],
+    db: Annotated[Session, Depends(get_db)],
+    helper: Annotated[ra.Helper, Depends(get_update_helper)],
+) -> UpdateRunOut:
+    """Update from a Setup you upload. The body is the raw exe; the admin's own
+    password comes in the x-confirm-password header (percent-encoded) and is
+    checked before one byte of the file is read or kept.
+
+    The file is accepted only if its SHA-256 is the F7FIVE0-Setup-<version>.exe
+    line of SHA256SUMS.txt on the published GitHub release for the version in
+    its own version info, or it carries a valid Authenticode signature whose
+    signer subject equals UPDATE_SIGNER_SUBJECT. Anything else is deleted and
+    refused. The same or an older version is always refused."""
+    try:
+        updates.check_admin_password(
+            admin.id, admin.password_hash, unquote(request.headers.get("x-confirm-password") or ""),
+        )
+    except updates.UpdateError as exc:
+        if exc.code != "admin_password_required":
+            _audit_event(db, admin.id, "update_password_failed", request)
+            db.commit()
+        raise _update_http(exc) from exc
+    if not helper.available():
+        raise _update_http(updates.UpdateError("helper_unavailable"))
+    if updates.is_running():
+        raise _update_http(updates.UpdateError("update_running"))
+    max_bytes = updates.max_setup_bytes()
+    declared = request.headers.get("content-length", "")
+    if declared.isdigit() and int(declared) > max_bytes:
+        raise _update_http(updates.UpdateError("too_large"))
+    updates.clear_incoming()
+    try:
+        tmp, digest = await updates.stage_upload(request.stream(), updates.paths().incoming, max_bytes)
+    except updates.UpdateError as exc:
+        raise _update_http(exc) from exc
+    try:
+        trust = await run_in_threadpool(updates.verify_upload, tmp, digest, server_version.installed())
+    except updates.UpdateError as exc:
+        tmp.unlink(missing_ok=True)
+        _audit_event(db, admin.id, "update_upload_refused", request)
+        db.commit()
+        log.info("update upload from %s refused: %s", admin.username, exc.code)
+        raise _update_http(exc) from exc
+    staged = updates.promote_upload(tmp, trust["version"])
+    try:
+        run_id = updates.begin_run(helper, trust["version"], trust["source"])
+        state = updates.queue_run(helper, run_id, staged, digest, trust["version"], trust["source"])
+    except updates.UpdateError as exc:
+        staged.unlink(missing_ok=True)
+        raise _update_http(exc) from exc
+    _audit_event(db, admin.id, "update_started", request)
+    db.commit()
+    log.info("update to %s requested by %s (uploaded, %s)", trust["version"], admin.username, trust["source"])
+    return UpdateRunOut(**state)
 
 
 # ---------------------------------------------------------------------------

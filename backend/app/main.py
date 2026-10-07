@@ -13,7 +13,7 @@ from sqlalchemy import text
 
 from app.config import settings
 from app.db import engine
-from app.services import nas_auth
+from app.services import nas_auth, server_version
 from app.services.trusted_proxy import real_client_ip
 from app import scheduler
 from app.api import admin as admin_routes
@@ -70,7 +70,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="F7FIVE0 API",
-    version="0.1.0",
+    # What Setup recorded in <install>/version.json (0.0.0-dev without Setup).
+    version=server_version.installed(),
     lifespan=lifespan,
     docs_url="/api/docs" if settings.environment != "production" else None,
     redoc_url=None,
@@ -103,7 +104,9 @@ async def health():
     return {
         "status": "ok",
         "service": "f7five0-api",
-        "version": app.version,
+        # Read live, not from app.version: the updater's health check waits
+        # for this to show the new version once Setup has written version.json.
+        "version": server_version.installed(),
         "env": settings.environment,
     }
 

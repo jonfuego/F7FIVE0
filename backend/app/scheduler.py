@@ -6,6 +6,7 @@ shut down on app exit. Jobs run with their own DB session via `db_session()`.
 from __future__ import annotations
 
 import logging
+import random
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -15,7 +16,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from app.config import settings
 from app.db import db_session
-from app.services import library_folders, live_hub, nas_auth, scan_library, scan_music_videos, sync
+from app.services import library_folders, live_hub, nas_auth, scan_library, scan_music_videos, sync, updates
 
 
 log = logging.getLogger("f7five0.scheduler")
@@ -27,6 +28,11 @@ JOB_FULL_SYNC = "arr_full_sync"
 JOB_MUSIC_VIDEOS_SCAN = "music_videos_scan"
 JOB_FOLDER_SCAN = "folder_scan"
 JOB_AUDIO_ANALYSIS = "audio_analysis"
+JOB_UPDATE_CHECK = "update_check"
+
+# Once a day, give or take an hour, so a fleet of servers doesn't hit GitHub
+# at the same second. Checking never installs anything.
+UPDATE_CHECK_JITTER_SEC = 3600
 
 # Defer enrichment far enough that the upsert transaction is committed
 # before the worker reads the row. Five seconds matches the spec.
@@ -85,6 +91,17 @@ def _run_folder_scan() -> None:
     # working set. It only ever processes one track per step and reschedules
     # itself, so it stays low-priority and never blocks the scan path.
     _kick_audio_analysis()
+
+
+def _run_update_check() -> None:
+    """Scheduler-invoked check of GitHub for a newer release. Stores the answer
+    for Admin > Updates (and its nav badge); a network failure is stored, not
+    raised. It never starts an update."""
+    try:
+        with db_session() as db:
+            updates.check_for_update(db)
+    except Exception:
+        log.exception("scheduled update check raised")
 
 
 def _run_audio_analysis_step() -> None:
@@ -188,6 +205,17 @@ def start() -> BackgroundScheduler:
         # First pass shortly after boot so a fresh install fills up
         # without waiting a full interval.
         next_run_time=datetime.now(timezone.utc) + timedelta(seconds=30),
+    )
+    sched.add_job(
+        _run_update_check,
+        trigger=IntervalTrigger(days=1, jitter=UPDATE_CHECK_JITTER_SEC),
+        id=JOB_UPDATE_CHECK,
+        name="check GitHub for a newer F7FIVE0",
+        max_instances=1,
+        coalesce=True,
+        replace_existing=True,
+        # First look a few minutes after boot (spread out a little), then daily.
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=300 + random.randint(0, 300)),
     )
     sched.start()
     _scheduler = sched
