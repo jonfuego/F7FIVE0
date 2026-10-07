@@ -11,6 +11,7 @@ import Link from "next/link";
 import { notFound, useParams } from "next/navigation";
 import { AuthShell } from "@/components/AuthShell";
 import { BackButton } from "@/components/BackButton";
+import { TrackRowMenu } from "@/components/TrackRowMenu";
 import { apiGet, ApiError } from "@/lib/client-api";
 import {
   colorForTitle,
@@ -91,7 +92,7 @@ function AlbumHero({ album }: { album: AlbumDetail }) {
   const year = album.release_date ? album.release_date.slice(0, 4) : null;
   const groups = useMemo(() => groupByDisc(album.tracks), [album.tracks]);
   const queueItems = useMemo(() => albumToQueueItems(album), [album]);
-  const { playAlbum, addToQueue } = useQueue();
+  const { playAlbum, playNextBlock, addToQueue } = useQueue();
 
   const meta = joinMeta([
     year,
@@ -154,6 +155,13 @@ function AlbumHero({ album }: { album: AlbumDetail }) {
                   onClick={() => playAlbum(queueItems, { shuffle: true })}
                 >
                   Shuffle
+                </button>
+                <button
+                  type="button"
+                  className="btn ghost"
+                  onClick={() => playNextBlock(queueItems)}
+                >
+                  Play next
                 </button>
                 <button
                   type="button"
@@ -268,25 +276,38 @@ function TrackRow({
   }
 
   return (
-    <button
-      type="button"
+    <div
       className="track"
-      onClick={primary ? onPlay : undefined}
-      disabled={!primary}
-      style={{
-        width: "100%",
-        textAlign: "left",
-        cursor: primary ? "pointer" : "default",
-      }}
+      style={{ width: "100%", display: "flex", alignItems: "center" }}
     >
-      <div className="num">{String(number).padStart(2, "0")}</div>
-      <div className="body">
-        <div className="t">{track.title}</div>
-      </div>
-      <div className="right">
-        <div>{duration || "—"}</div>
-      </div>
-    </button>
+      <button
+        type="button"
+        onClick={primary ? onPlay : undefined}
+        disabled={!primary}
+        aria-label={primary ? `Play ${track.title}` : `${track.title} (no playable file)`}
+        style={{
+          flex: 1,
+          minWidth: 0,
+          display: "flex",
+          alignItems: "center",
+          background: "transparent",
+          border: "none",
+          color: "inherit",
+          textAlign: "left",
+          padding: 0,
+          cursor: primary ? "pointer" : "default",
+        }}
+      >
+        <div className="num">{String(number).padStart(2, "0")}</div>
+        <div className="body">
+          <div className="t">{track.title}</div>
+        </div>
+        <div className="right">
+          <div>{duration || "—"}</div>
+        </div>
+      </button>
+      <TrackRowMenu item={queueItem} label={track.title} />
+    </div>
   );
 }
 

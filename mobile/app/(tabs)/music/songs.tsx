@@ -86,6 +86,7 @@ export function SongsLibrary(): React.ReactElement {
                   active={nowPlaying?.mediaFileId === item.media_files[0]?.id}
                   onPress={() => playSongs(rows, index)}
                   onLongPress={() => setMenuFor(item)}
+                  menu={{ song: item, playSongs, playNext, addToQueue }}
                 />
               )}
             />

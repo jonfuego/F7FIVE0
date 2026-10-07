@@ -1,6 +1,6 @@
 // Music — flat-track index. Substring-searchable list of every track,
-// alphabetical by title. Row click plays via the dock; the row action
-// menu offers Play next and Add to queue.
+// alphabetical by title. Row click plays via the dock; the shared row 3-dot
+// menu (TrackRowMenu) offers Play now, Play next and Add to queue.
 
 "use client";
 
@@ -10,9 +10,10 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { AuthShell } from "@/components/AuthShell";
 import { AlphaRail, alphaLetterOf } from "@/components/AlphaRail";
 import { GridEmpty } from "@/components/Grid";
+import { TrackRowMenu } from "@/components/TrackRowMenu";
 import { apiGet, ApiError } from "@/lib/client-api";
 import { formatDuration } from "@/lib/format";
-import { songRowToQueueItem, useQueue, type QueueItem } from "@/lib/queue";
+import { songRowToQueueItem, useQueue } from "@/lib/queue";
 import { useScrollRestoration } from "@/lib/scroll-restoration";
 import type { SongRow } from "@/lib/types";
 import { useViewPref } from "@/lib/use-view-pref";
@@ -232,87 +233,13 @@ function SongList({ songs }: { songs: SongRow[] }) {
 }
 
 function SongRowItem({ row }: { row: SongRow }) {
-  const { playNow, playNext, playNextBlock, addToQueue } = useQueue();
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!menuOpen) return;
-    function onDocClick(e: MouseEvent) {
-      if (!menuRef.current) return;
-      if (!menuRef.current.contains(e.target as Node)) {
-        setMenuOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", onDocClick);
-    return () => document.removeEventListener("mousedown", onDocClick);
-  }, [menuOpen]);
+  const { playNow } = useQueue();
 
   const playable = row.media_files.length > 0;
+  const queueItem = playable ? songRowToQueueItem(row) : null;
 
   function onRowClick() {
-    if (!playable) return;
-    const item = songRowToQueueItem(row);
-    if (item) playNow(item);
-  }
-
-  function onPlayNext() {
-    setMenuOpen(false);
-    const item = songRowToQueueItem(row);
-    if (item) playNext(item);
-  }
-
-  function onAddToQueue() {
-    setMenuOpen(false);
-    const item = songRowToQueueItem(row);
-    if (item) addToQueue([item]);
-  }
-
-  async function onPlayAlbumNext() {
-    setMenuOpen(false);
-    try {
-      const album = await apiGet<{ tracks: Array<{
-        id: string;
-        title: string;
-        duration_sec: number | null;
-        media_files: Array<{ id: string }>;
-      }>; id: string; title: string; artist_id: string; artist_name: string | null; cover_path: string | null; }>(
-        `/api/library/albums/${row.album_id}`,
-      );
-      const block: QueueItem[] = [];
-      for (const t of album.tracks) {
-        const file = t.media_files[0];
-        if (!file) continue;
-        block.push({
-          media_file_id: file.id,
-          title: t.title,
-          artist_name: album.artist_name,
-          album_title: album.title,
-          cover_path: album.cover_path,
-          duration_sec: t.duration_sec,
-          track_id: t.id,
-          artist_id: album.artist_id,
-          album_id: album.id,
-        });
-      }
-      if (block.length > 0) playNextBlock(block);
-    } catch {
-      // Network or 404: nothing to enqueue.
-    }
-  }
-
-  async function onArtistRadioNext() {
-    setMenuOpen(false);
-    try {
-      const data = await apiGet<{ items: QueueItem[] }>(
-        `/api/library/auto-playlist/artist-radio/${row.artist_id}`,
-      );
-      if (Array.isArray(data.items) && data.items.length > 0) {
-        playNextBlock(data.items);
-      }
-    } catch {
-      // best-effort
-    }
+    if (queueItem) playNow(queueItem);
   }
 
   const initial = row.title?.[0]?.toUpperCase() ?? "?";
@@ -433,97 +360,10 @@ function SongRowItem({ row }: { row: SongRow }) {
         {formatDuration(row.duration_sec)}
       </div>
 
-      <div ref={menuRef} style={{ position: "relative", flex: "0 0 auto" }}>
-        <button
-          type="button"
-          onClick={() => setMenuOpen((v) => !v)}
-          aria-label="Track actions"
-          aria-haspopup="menu"
-          aria-expanded={menuOpen}
-          disabled={!playable}
-          style={{
-            background: "transparent",
-            border: "none",
-            color: "var(--ink-3)",
-            cursor: playable ? "pointer" : "default",
-            padding: "4px 8px",
-            fontFamily: "var(--mono)",
-            fontSize: 16,
-            lineHeight: 1,
-            opacity: playable ? 1 : 0.4,
-          }}
-        >
-          ⋮
-        </button>
-        {menuOpen && playable ? (
-          <div
-            role="menu"
-            style={{
-              position: "absolute",
-              right: 0,
-              top: "100%",
-              marginTop: 4,
-              minWidth: 160,
-              background: "var(--bg-2)",
-              border: "1px solid var(--line)",
-              borderRadius: 4,
-              zIndex: 5,
-              fontFamily: "var(--grotesk)",
-              fontSize: 13,
-              boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
-            }}
-          >
-            <button
-              type="button"
-              role="menuitem"
-              onClick={onPlayNext}
-              style={menuItemStyle}
-            >
-              Play next
-            </button>
-            <button
-              type="button"
-              role="menuitem"
-              onClick={onPlayAlbumNext}
-              style={menuItemStyle}
-            >
-              Play album next
-            </button>
-            <button
-              type="button"
-              role="menuitem"
-              onClick={onArtistRadioNext}
-              style={menuItemStyle}
-            >
-              Artist radio next
-            </button>
-            <button
-              type="button"
-              role="menuitem"
-              onClick={onAddToQueue}
-              style={menuItemStyle}
-            >
-              Add to queue
-            </button>
-          </div>
-        ) : null}
-      </div>
+      <TrackRowMenu item={queueItem} label={row.title} />
     </div>
   );
 }
-
-const menuItemStyle: React.CSSProperties = {
-  display: "block",
-  width: "100%",
-  padding: "8px 12px",
-  background: "transparent",
-  border: "none",
-  color: "var(--ink-1)",
-  textAlign: "left",
-  cursor: "pointer",
-  fontFamily: "inherit",
-  fontSize: "inherit",
-};
 
 function TrackInfoLink({
   href,
