@@ -529,6 +529,8 @@ if (-not (Test-Path (Join-Path $srcWeb "server.js"))) {
     $standalone = Join-Path $frontend ".next\standalone"
     Mirror (Join-Path $frontend ".next\static") (Join-Path $standalone ".next\static")
     Mirror (Join-Path $frontend "public") (Join-Path $standalone "public")
+    # The launcher runs instead of server.js; lay it next to server.js.
+    Copy-Item (Join-Path $frontend "server-wrapper.js") (Join-Path $standalone "server-wrapper.js") -Force
     $srcWeb = $standalone
 }
 if (-not $sameDir -or $srcWeb -ne (Join-Path $InstallDir "web")) {
@@ -788,7 +790,14 @@ $webEnv = @(
     "TRUSTED_PROXY_SECRET=$(Get-EnvValue 'TRUSTED_PROXY_SECRET')",
     "NEXT_TELEMETRY_DISABLED=1"
 )
-Install-Svc "F7FIVE0-Web" $Node "`"$(Join-Path $WebDir 'server.js')`"" $WebDir $webEnv "F7FIVE0 web app"
+# Run the launcher (server-wrapper.js), never server.js directly. The launcher
+# stamps the real socket peer as x-f7five0-peer and sets F7FIVE0_LAUNCHER so the
+# Next proxy can record the real client IP (criterion 4); it ships next to
+# server.js via build-dist.ps1. Install-Svc removes and re-registers the service,
+# so re-running Setup upgrades an existing install onto the launcher.
+$webLauncher = Join-Path $WebDir 'server-wrapper.js'
+if (-not (Test-Path $webLauncher)) { Fail "web launcher missing: $webLauncher" }
+Install-Svc "F7FIVE0-Web" $Node "`"$webLauncher`"" $WebDir $webEnv "F7FIVE0 web app"
 
 if ($OpenFirewall -eq "1" -or $lanRule) {
     if ($lanRule) {
