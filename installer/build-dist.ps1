@@ -97,8 +97,8 @@ if ($ApkDir) {
         if ($apk.Name -notmatch '^F7FIVE0-\d+\.\d+\.\d+(-armv7)?\.apk$') { continue }
         $shaFile = "$($apk.FullName).sha256"
         if (-not (Test-Path $shaFile)) { throw "missing $($apk.Name).sha256" }
-        $want = ((Get-Content $shaFile -Raw).Trim() -split '\s+')[0].ToLowerInvariant()
-        $got = (Get-FileHash $apk.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+        $want = ((Get-Content -LiteralPath $shaFile -Raw).Trim() -split '\s+')[0].ToLowerInvariant()
+        $got = (Get-FileHash -LiteralPath $apk.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
         if ($want -ne $got) { throw "$($apk.Name) checksum mismatch (file $got, .sha256 $want)" }
         Copy-Item $apk.FullName (Join-Path $androidOut $apk.Name)
         Copy-Item $shaFile (Join-Path $androidOut "$($apk.Name).sha256")
@@ -121,7 +121,10 @@ $distFull = (Resolve-Path $Dist).Path
 $lines = @()
 foreach ($f in Get-ChildItem $Dist -Recurse -File | Sort-Object FullName) {
     $rel = $f.FullName.Substring($distFull.Length).TrimStart('\', '/').Replace('\', '/')
-    $hash = (Get-FileHash $f.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+    # -LiteralPath: the Next standalone bundle has dynamic-route files whose
+    # names contain [ ] (e.g. app\music\[id]\page.js). Positional -Path treats
+    # those as wildcards, matches nothing, returns null, and .Hash then throws.
+    $hash = (Get-FileHash -LiteralPath $f.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
     $lines += "$hash  $rel"
 }
 Set-Content -Path $sumsFile -Value $lines -Encoding ASCII
@@ -143,7 +146,7 @@ if ($iscc) {
     $outDir = Join-Path $PSScriptRoot "Output"
     $setup = Get-ChildItem $outDir -Filter "F7FIVE0-Setup-*.exe" -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime | Select-Object -Last 1
     if ($setup) {
-        $h = (Get-FileHash $setup.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+        $h = (Get-FileHash -LiteralPath $setup.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
         Set-Content -Path (Join-Path $outDir "SHA256SUMS.txt") -Value "$h  $($setup.Name)" -Encoding ASCII
         Write-Host "wrote checksum for $($setup.Name)"
     }
