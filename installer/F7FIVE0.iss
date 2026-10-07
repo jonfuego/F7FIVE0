@@ -54,6 +54,13 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; Flags: unchecked
 
 [Files]
 Source: "dist\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
+; Setup keeps a copy of itself. A self-update from Admin (installer\update.ps1)
+; runs the copy of the version that was installed if the new version fails its
+; health check, so a rollback needs no download. install.ps1 trims the folder to
+; the current and the previous copy. A rollback runs that cached copy, so the
+; entry is skipped when Setup is already running from the cache: Windows can't
+; replace the exe that is running (Setup would stop with exit code 5).
+Source: "{srcexe}"; DestDir: "{app}\data\updates\setup"; DestName: "F7FIVE0-Setup-{#AppVersion}.exe"; Flags: external ignoreversion uninsneveruninstall; Check: NotRunningFromSetupCache
 
 [InstallDelete]
 ; Code folders are replaced wholesale on upgrade so removed files do not
@@ -429,7 +436,11 @@ begin
       JsonPair('streamPort', Trim(PortsPage.Values[2]), False) +
       JsonPair('tmdbKey', Trim(OptionsPage.Values[0]), False);
   end;
-  Cfg := Cfg + JsonPair('contactEmail', Trim(OptionsPage.Values[1]), True) + '}';
+  // appVersion goes with every run, new install or upgrade: install.ps1 records
+  // it in version.json. The rest above is sent only on a new install, so an
+  // upgrade (including a silent one from Admin > Updates, where no wizard page
+  // is shown) never overwrites what is already set.
+  Cfg := Cfg + JsonPair('appVersion', '{#AppVersion}', False) + JsonPair('contactEmail', Trim(OptionsPage.Values[1]), True) + '}';
   SaveStringToFile(CfgPath, Cfg, False);
 
   Params := '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\installer\install.ps1') +
@@ -448,4 +459,12 @@ end;
 function SetupSucceeded: Boolean;
 begin
   Result := not InstallFailed;
+end;
+
+// True unless this Setup is the cached copy itself (a rollback runs it from
+// {app}\data\updates\setup, the file the [Files] entry above would write).
+function NotRunningFromSetupCache: Boolean;
+begin
+  Result := CompareText(ExpandConstant('{srcexe}'),
+    ExpandConstant('{app}\data\updates\setup\F7FIVE0-Setup-{#AppVersion}.exe')) <> 0;
 end;

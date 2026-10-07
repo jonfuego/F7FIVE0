@@ -1052,6 +1052,58 @@ class NasSaveOut(BaseModel):
     username: str
     updated_at: Optional[str] = None
     shares: list[NasShareStatusOut]
+
+
+# ---- Updates (Admin > Updates) ---------------------------------------------
+class UpdateRunOut(BaseModel):
+    """A running or finished update, read from the updater's status.json."""
+    id: Optional[str] = None
+    # idle | queued | downloading | verifying | backup | installing |
+    # health_check | rolling_back | done | rolled_back | failed
+    phase: str
+    active: bool = False
+    step: Optional[str] = None
+    from_version: Optional[str] = None
+    to_version: Optional[str] = None
+    source: Optional[str] = None
+    error: Optional[str] = None
+    error_code: Optional[str] = None
+    started_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    finished_at: Optional[str] = None
+    downloaded_bytes: Optional[int] = None
+    total_bytes: Optional[int] = None
+    phases: list[str] = []
+    log: list[str] = []
+
+
+class UpdateBadgeOut(BaseModel):
+    """The nav badge: is a newer release waiting? Reads only the stored check."""
+    update_available: bool
+    latest_version: Optional[str] = None
+
+
+class UpdatesOut(BaseModel):
+    """Admin > Updates. No download URLs: the browser never fetches anything
+    itself, the server downloads and verifies."""
+    installed_version: str
+    phone_app_version: Optional[str] = None
+    latest_version: Optional[str] = None
+    update_available: bool
+    can_install: bool
+    # Why "Update" is unavailable when a newer version exists: no_checksums |
+    # no_setup | helper_unavailable | running.
+    install_blocked: Optional[str] = None
+    notes: Optional[str] = None
+    checked_at: Optional[str] = None
+    check_error: Optional[str] = None
+    helper_available: bool
+    signer_configured: bool
+    rollback_ready: bool
+    max_setup_mb: int
+    run: UpdateRunOut
+
+
 # ---- Metadata (Admin > Metadata) -------------------------------------------
 class TmdbKeyStatusOut(BaseModel):
     configured: bool

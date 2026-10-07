@@ -243,6 +243,19 @@ class Settings(BaseSettings):
     remote_access_dir: str = ""
     remote_access_task: str = "F7FIVE0-RemoteAccess"
 
+    # Admin > Updates. The web app hands an update to a SYSTEM scheduled task
+    # through files in UPDATES_DIR (installer/update.ps1; blank means
+    # <install folder>/data/updates). SERVER_VERSION_FILE is the record Setup
+    # writes (blank: <install folder>/version.json). A Setup you upload is
+    # accepted only if it matches a published GitHub release, or carries a
+    # valid Authenticode signature whose signer subject equals
+    # UPDATE_SIGNER_SUBJECT (empty turns the signature path off).
+    updates_dir: str = ""
+    update_task: str = "F7FIVE0-Update"
+    update_signer_subject: str = ""
+    update_max_setup_mb: int = 1024
+    server_version_file: str = ""
+
     # Cloudflare
     cloudflare_tunnel_name: str = "f7five0"
     cloudflare_tunnel_uuid: str = ""

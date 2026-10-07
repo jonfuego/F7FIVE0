@@ -355,6 +355,49 @@ export type RemoteAccessStatus = {
   run: RemoteAccessRun;
 };
 
+// ---- Admin > Updates --------------------------------------------------------
+export type UpdatePhase =
+  | "idle" | "queued" | "downloading" | "verifying" | "backup" | "installing"
+  | "health_check" | "rolling_back" | "done" | "rolled_back" | "failed";
+
+export type UpdateRun = {
+  id: string | null;
+  phase: UpdatePhase;
+  active: boolean;
+  step: string | null;
+  from_version: string | null;
+  to_version: string | null;
+  source: string | null;
+  error: string | null;
+  error_code: string | null;
+  started_at: string | null;
+  updated_at: string | null;
+  finished_at: string | null;
+  downloaded_bytes: number | null;
+  total_bytes: number | null;
+  phases: string[];
+  log: string[];
+};
+
+export type UpdatesStatus = {
+  installed_version: string;
+  phone_app_version: string | null;
+  latest_version: string | null;
+  update_available: boolean;
+  can_install: boolean;
+  install_blocked: "no_checksums" | "no_setup" | "helper_unavailable" | "running" | null;
+  notes: string | null;
+  checked_at: string | null;
+  check_error: string | null;
+  helper_available: boolean;
+  signer_configured: boolean;
+  rollback_ready: boolean;
+  max_setup_mb: number;
+  run: UpdateRun;
+};
+
+export type UpdateBadge = { update_available: boolean; latest_version: string | null };
+
 // ---- Library folders (Admin > Library folders) -----------------------------
 export type LibraryFolderKind = "movies" | "tv" | "music" | "music_videos";
 

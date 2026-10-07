@@ -8,7 +8,7 @@
 
     backend\     FastAPI source + requirements.txt + requirements.lock (no venv, no tests)
     web\         Next.js standalone bundle, launched via `node server-wrapper.js`
-    installer\   install.ps1 / uninstall.ps1 / remote-access.ps1 / common.ps1
+    installer\   install.ps1 / uninstall.ps1 / remote-access.ps1 / update.ps1 / common.ps1
     android\     F7FIVE0-<version>.apk (+ -armv7) and .sha256 files, when
                  -ApkDir is given. install.ps1 copies them into data\downloads.
     alembic.ini  .env.example  LICENSE  README.md  INSTALL.md  VERSION
@@ -70,7 +70,7 @@ Copy-Item $launcher (Join-Path $Dist "web\server-wrapper.js") -Force
 Mirror (Join-Path $Repo "backend") (Join-Path $Dist "backend") @(".venv", "__pycache__", ".pytest_cache", "tests", "_reports") @("*.pyc")
 Mirror (Join-Path $Repo "scripts") (Join-Path $Dist "scripts") @() @("dev-*.ps1", "publish.ps1")
 New-Item -ItemType Directory -Path (Join-Path $Dist "installer") | Out-Null
-foreach ($f in @("install.ps1", "uninstall.ps1", "common.ps1", "remote-access.ps1", "downloads.manifest.psd1")) {
+foreach ($f in @("install.ps1", "uninstall.ps1", "common.ps1", "remote-access.ps1", "update.ps1", "downloads.manifest.psd1")) {
     Copy-Item (Join-Path $PSScriptRoot $f) (Join-Path $Dist "installer\$f")
 }
 # The Apps list icon (UninstallDisplayIcon in F7FIVE0.iss) points at the

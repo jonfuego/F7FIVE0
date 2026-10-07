@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { AuthShell } from "@/components/AuthShell";
 import { RemoteAccessSection } from "./RemoteAccessSection";
+import { UpdatesSection } from "./UpdatesSection";
 import { LibraryFoldersSection } from "./LibraryFoldersSection";
 import { MetadataSection } from "./MetadataSection";
 import { apiGet, apiPatch, apiPost, apiDelete, ApiError } from "@/lib/client-api";
@@ -56,13 +57,14 @@ export default function AdminPage() {
         <header>
           <h1 className="text-2xl font-semibold tracking-tight">Admin</h1>
           <p className="mt-1 text-sm text-neutral-500">
-            Manage users, remote access, and library folders, trigger library sync, inspect active streams and recent history.
+            Manage users, updates, remote access, and library folders, trigger library sync, inspect active streams and recent history.
           </p>
         </header>
 
         {me ? (
           <>
             <UsersSection me={me} />
+            <UpdatesSection />
             <RemoteAccessSection />
             <LibraryFoldersSection />
             <MetadataSection />

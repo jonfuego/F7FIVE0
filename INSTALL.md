@@ -306,9 +306,45 @@ cd C:\F7FIVE0
 
 ## Updating
 
-Run the newer Setup.exe. It stops the services, swaps in the new code,
-applies database changes, and starts everything again. Your `.env`, data,
-and watch history are kept.
+Sign in as an admin and open **Admin > Updates**. It shows the version that is
+installed, the newest published version, and the phone app version that comes
+with your server. F7FIVE0 checks GitHub once a day, and **Check now** asks
+right away. When a newer version is waiting, the Admin link in the gear menu
+shows an **Update** badge.
+
+- **Update to vX.Y.Z** downloads the Setup from GitHub, checks it against the
+  checksums published with the release, and installs it. A release that
+  doesn't publish checksums can't be installed this way.
+- **Upload a Setup** is for a Setup you downloaded yourself. It asks for your
+  admin password again, and installs the file only if it is exactly a
+  published F7FIVE0 release (this server checks that with GitHub, so it needs
+  internet) or carries the F7FIVE0 signature (`UPDATE_SIGNER_SUBJECT` in
+  `.env`). Releases aren't signed yet, so for now only the first way applies,
+  and a Setup you built yourself is refused. Anything else is refused too.
+
+Neither ever installs the same version again or an older one.
+
+What happens: F7FIVE0 stops for a few minutes, the database is backed up to
+`C:\F7FIVE0\data\updates\backup`, the new Setup runs, and the updater checks
+that the new version answers (the API with the new version number, the
+streaming service, and the web app). If it doesn't come up, the updater puts
+the database back from the backup and runs the Setup of the version you had,
+so you are never left with old code on a newer database. The page shows each
+step and keeps working while the services restart. The logs are
+`C:\F7FIVE0\logs\update-<id>.log` and `update-<id>-setup.log`. Your `.env`,
+data, watch history, NAS sign-ins, and TMDB key are kept either way.
+
+Phones: updating the server updates the phone app it hands out. Phones with
+the older app are offered the new one the next time they sign in.
+
+**The first time:** a server installed before this feature needs one run of
+the newer Setup.exe by hand. That Setup adds the updater and keeps a copy of
+itself, which a later update goes back to if it has to. After that, use
+Admin > Updates.
+
+You can always run the newer Setup.exe by hand instead. It stops the
+services, swaps in the new code, applies database changes, and starts
+everything again. Your `.env`, data, and watch history are kept.
 
 ## Uninstalling
 
@@ -331,6 +367,8 @@ them from Settings > Apps if you don't need them.
 | Sign-in page loads but sign-in fails | Check `F7FIVE0-API.err.log`. The API needs PostgreSQL running (`Get-Service postgresql*`). |
 | Library stays empty | Check **Admin > Library folders** (each folder shows whether the server can open it), then `F7FIVE0-API.err.log` for "folder scan". Scans run 30 seconds after start and every 30 minutes. Admins can also trigger a sync from the Admin page. |
 | Network share shows nothing | See "Media on a NAS" above. SYSTEM can't read shares. |
+| Admin > Updates says the updater isn't installed | Run the newer Setup.exe by hand once (it registers the `F7FIVE0-Update` task and keeps a copy of itself). |
+| An update ended with "Went back to the old version" | The new version didn't pass its checks, so the old version and the database from before the update were restored. Open **Details** on the page, or `C:\F7FIVE0\logs\update-<id>.log` and `update-<id>-setup.log`, and tell whoever made the release. |
 | Admin > Remote access says the helper isn't installed | Run Setup again (it registers the `F7FIVE0-RemoteAccess` task), or use `installer\remote-access.ps1` from an elevated PowerShell. |
 | Remote access run failed | Open **Details** on the page, or `C:\F7FIVE0\data\remote-access\run.log`. |
 | Remote address doesn't load (port forwarding) | Check `F7FIVE0-Proxy.err.log`. Most often the router rule is missing, the address points at the wrong IP, or the provider blocks ports 80/443. |
