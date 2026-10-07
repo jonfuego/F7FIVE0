@@ -109,7 +109,7 @@ MESSAGES = {
     "helper_failed": "The server couldn't start the updater. See the F7FIVE0 logs, or run Setup again.",
     "github_unreachable": "Couldn't reach GitHub.",
     "rate_limited": "GitHub's rate limit stopped this check. It will try again later.",
-    "no_release": "GitHub has no published release to offer yet.",
+    "no_release": "GitHub has no public release to offer: none is published yet, or the F7FIVE0 repository is not public.",
     "github_error": "GitHub answered with an error.",
 }
 

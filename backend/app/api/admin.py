@@ -1279,8 +1279,9 @@ async def upload_update(
             _audit_event(db, admin.id, "update_password_failed", request)
             db.commit()
         raise _update_http(exc) from exc
-    if not helper.available():
-        raise _update_http(updates.UpdateError("helper_unavailable"))
+    # The file is judged first: a file that isn't a published release or signed
+    # is refused for that reason even on a server with no updater task. The
+    # updater is only needed once the file is trusted (begin_run checks it).
     if updates.is_running():
         raise _update_http(updates.UpdateError("update_running"))
     max_bytes = updates.max_setup_bytes()
