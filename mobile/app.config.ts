@@ -16,7 +16,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   name: "F7FIVE0",
   slug: "f7five0-app",
   scheme: "f7five0",
-  version: "1.0.2",
+  version: "1.0.3",
   orientation: "default",
   // Expo SDK 54 is the last SDK with the old architecture. The app stays on it
   // until react-native-track-player and the other native libraries are moved
@@ -42,7 +42,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   android: {
     package: "com.f7five0.app",
     // Bump with every sideloaded release so Android accepts it as an update.
-    versionCode: 3,
+    versionCode: 4,
     adaptiveIcon: {
       foregroundImage: "./assets/adaptive-icon.png",
       backgroundColor: "#FFFFFF",
