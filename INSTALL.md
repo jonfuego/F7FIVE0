@@ -8,6 +8,11 @@
   transcode cache (it trims itself to 200 GB by default; change
   `TRANSCODE_CACHE_MAX_GB` in `.env`).
 - An internet connection during setup.
+- An administrator account on that PC (Setup asks to run as administrator).
+- winget (Microsoft's "App Installer"). It comes with Windows 10 and 11;
+  some editions (LTSC, Server, or a trimmed image) leave it out. If Setup
+  says "winget is not available", install **App Installer** from the
+  Microsoft Store and run Setup again.
 - Optional: an NVIDIA graphics card. Setup turns on hardware transcoding
   when it finds one. Without one, the CPU handles it, which is fine for a
   couple of streams at once.
@@ -15,8 +20,11 @@
 ## Install with Setup.exe
 
 1. Download the latest **F7FIVE0-Setup-x.y.z.exe** from Releases and run it.
-   Windows may warn that the app is from an unknown publisher; choose
-   **More info > Run anyway**.
+   That one file is all you need. The `.apk` on the release is the phone
+   app (it installs on a phone, not on Windows) and the `.zip` is for
+   "Installing without the wizard" below. Setup is not code-signed yet, so
+   Windows may show "Windows protected your PC" or warn that the app is from
+   an unknown publisher; choose **More info > Run anyway**.
 2. Pick an install folder (default `C:\F7FIVE0`).
 3. Point it at your media folders. Leave any you don't have blank. A library
    can use more than one folder: click **Add...** again for each one.
@@ -363,6 +371,10 @@ them from Settings > Apps if you don't need them.
 
 | Symptom | Try |
 |---|---|
+| "Windows protected your PC" when starting Setup | Setup is not code-signed yet. Choose **More info**, then **Run anyway**. |
+| Setup stops or its console window closes | Run Setup again; it picks up where it stopped. Read the last lines of the newest `C:\F7FIVE0\logs\install-*.log` (and `setup-summary.txt` if it exists): the message there says what failed. "winget is not available" means installing **App Installer** from the Microsoft Store first. |
+| The zip won't extract ("access denied") | Use Setup.exe instead; the zip is only for installing without the wizard. If you do need it, extract into a folder you own (Downloads or Desktop, not Program Files) and check your antivirus didn't quarantine a file from it. |
+| The `.apk` won't install on Windows | It is the Android phone app. Put it on a phone, or sign in from the phone's browser and use **Account > Download for Android**. |
 | Browser can't reach localhost:3001 | `Get-Service F7FIVE0-*` should show three Running services. Check `C:\F7FIVE0\logs\F7FIVE0-Web.err.log`. |
 | Sign-in page loads but sign-in fails | Check `F7FIVE0-API.err.log`. The API needs PostgreSQL running (`Get-Service postgresql*`). |
 | Library stays empty | Check **Admin > Library folders** (each folder shows whether the server can open it), then `F7FIVE0-API.err.log` for "folder scan". Scans run 30 seconds after start and every 30 minutes. Admins can also trigger a sync from the Admin page. |
