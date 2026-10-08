@@ -31,7 +31,9 @@ No subscription. No ads. No account with anyone but you.
 
 1. **Download** `F7FIVE0-Setup-x.y.z.exe` from [Releases](../../releases/latest).
 2. **Run it.** Pick your media folders and set an admin password. Setup
-   installs everything else. Allow 5 to 15 minutes on a fresh PC.
+   installs everything else. Allow 5 to 15 minutes on a fresh PC. Setup is
+   not code-signed yet: if Windows says "Windows protected your PC", choose
+   **More info**, then **Run anyway**.
 3. **Open** <http://localhost:3001> and sign in.
 
 Your library fills in over the next few minutes and stays up to date on its

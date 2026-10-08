@@ -193,7 +193,24 @@ jobs:
           $tag = "${{ github.ref_name }}"
           gh release upload $tag (Get-ChildItem installer/Output -File).FullName --clobber
           if ($LASTEXITCODE -ne 0) { exit 1 }
-          gh api "repos/${{ github.repository }}/releases/generate-notes" -f tag_name=$tag --jq .body > notes.md
+          $generated = gh api "repos/${{ github.repository }}/releases/generate-notes" -f tag_name=$tag --jq .body
           if ($LASTEXITCODE -ne 0) { exit 1 }
+          # A "which file" guide goes above GitHub's change list, so people who
+          # land on the release page download Setup.exe, not the zip or the APK.
+          $header = @'
+          ## Which file do I need?
+
+          | File | What it is |
+          |---|---|
+          | `F7FIVE0-Setup-X.Y.Z.exe` | **The Windows installer. Most people need only this file.** Run it on the PC that will be your media server. |
+          | `F7FIVE0-X.Y.Z.apk` | The Android phone app. It installs on a phone, not on Windows. Easier: once your server is running, sign in from your phone's browser and use **Account > Download for Android**. |
+          | `F7FIVE0-X.Y.Z.zip` | The same server files without the wizard, for installing from PowerShell. See "Installing without the wizard" in INSTALL.md. |
+          | `SHA256SUMS.txt` | Checksums for the installer and the zip. |
+          | `sbom-*.cdx.json` | Software bill of materials. |
+
+          Setup needs a 64-bit Windows 10 (1809 or newer) or Windows 11 PC, an administrator account, and an internet connection. Setup is not code-signed yet, so Windows may show "Windows protected your PC": choose **More info**, then **Run anyway**. Full guide: [INSTALL.md](https://github.com/{REPO}/blob/vX.Y.Z/INSTALL.md).
+          '@
+          $header = $header.Replace("X.Y.Z", "${{ steps.v.outputs.version }}").Replace("{REPO}", "${{ github.repository }}")
+          Set-Content -Path notes.md -Value ($header + "`n`n" + (($generated | Out-String).Trim())) -Encoding utf8
           gh release edit $tag --draft=false --notes-file notes.md
           if ($LASTEXITCODE -ne 0) { exit 1 }
