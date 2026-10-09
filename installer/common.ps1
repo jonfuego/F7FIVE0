@@ -415,3 +415,70 @@ function Prune-SetupCache([string]$CacheDir, [string]$InstalledVersion) {
         }
     }
 }
+
+# ---------------------------------------------------------------------------
+# Leftovers of an uninstalled PostgreSQL.
+#
+# PostgreSQL's own uninstaller keeps the data folder on purpose, keeps the
+# "postgres" Windows account, and can leave the postgresql-x64-NN service entry
+# behind. A fresh install then trips over them: the installer asks for the old
+# account's password (its default is the NEW superuser password, which does not
+# match), cannot create a service whose name is taken, or meets a cluster it did
+# not make (so the new superuser password does not work). install.ps1 calls
+# Clear-PostgresLeftovers only when no usable psql.exe exists. It never deletes
+# anything that holds data: a dead service entry is removed, the account's
+# password is reset (the services that used it are gone), and an old data
+# folder is renamed aside. installer\tests\update-verify.ps1 covers the
+# decisions below.
+# ---------------------------------------------------------------------------
+function Get-ServiceExePath([string]$PathName) {
+    if (-not $PathName) { return "" }
+    $p = $PathName.Trim()
+    if ($p.StartsWith('"')) {
+        $end = $p.IndexOf('"', 1)
+        if ($end -gt 0) { return $p.Substring(1, $end - 1) }
+        return $p.Trim('"')
+    }
+    $m = [regex]::Match($p, '^(.+?\.exe)(\s|$)', 'IgnoreCase')
+    if ($m.Success) { return $m.Groups[1].Value }
+    return ($p -split '\s+')[0]
+}
+
+function Test-ProgramExists([string]$Exe) {
+    return [bool]($Exe -and (Test-Path -LiteralPath $Exe -PathType Leaf))
+}
+
+# Services named postgresql* whose program is gone: the PostgreSQL they ran was
+# uninstalled. $Services has the Win32_Service shape (Name, PathName, StartName).
+function Find-OrphanPgServices($Services) {
+    return @($Services | Where-Object { $_.Name -like "postgresql*" } |
+        Where-Object { -not (Test-ProgramExists (Get-ServiceExePath $_.PathName)) })
+}
+
+# True when no service whose program still exists logs on as $Account.
+function Test-PgAccountOrphan($Services, [string]$Account = "postgres") {
+    $pattern = '(^|\\)' + [regex]::Escape($Account) + '$'
+    $live = @($Services | Where-Object { $_.StartName -match $pattern } |
+        Where-Object { Test-ProgramExists (Get-ServiceExePath $_.PathName) })
+    return ($live.Count -eq 0)
+}
+
+# <Root>\<version>\data folders that hold a cluster (a PG_VERSION file) with no
+# psql.exe beside them in <version>\bin. Root is Program Files\PostgreSQL.
+function Find-PgLeftoverDataDirs([string]$Root) {
+    $found = @()
+    foreach ($v in @(Get-ChildItem -LiteralPath $Root -Directory -ErrorAction SilentlyContinue)) {
+        $data = Join-Path $v.FullName "data"
+        if ((Test-Path -LiteralPath (Join-Path $data "PG_VERSION")) -and -not (Test-Path -LiteralPath (Join-Path $v.FullName "bin\psql.exe"))) {
+            $found += $data
+        }
+    }
+    return $found
+}
+
+# Rename (never delete) an old data folder to <data>.f7five0-old-<stamp>.
+function Move-PgDataAside([string]$DataDir, [string]$Stamp) {
+    $to = "$DataDir.f7five0-old-$Stamp"
+    Move-Item -LiteralPath $DataDir -Destination $to -ErrorAction Stop
+    return $to
+}

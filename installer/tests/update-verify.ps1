@@ -505,6 +505,51 @@ public static class Stub {
     Check "iss: PostgresInstalled also accepts psql.exe on PATH, like install.ps1" ($pgFn -match "FileSearch\('psql\.exe', GetEnv\('PATH'\)\)")
 
     # -----------------------------------------------------------------------
+    # 12b. Leftovers of an uninstalled PostgreSQL (common.ps1)
+    #
+    # PostgreSQL's uninstaller can leave the postgresql-x64-NN service entry,
+    # the "postgres" Windows account and the data folder behind. install.ps1
+    # clears them before it installs a fresh PostgreSQL (and only when no
+    # usable psql.exe exists). The decisions are pure functions, tested here
+    # against fake service lists and a temp "Program Files\PostgreSQL".
+    # -----------------------------------------------------------------------
+    function CheckTry([string]$name, [scriptblock]$cond) {
+        $ok = $false
+        try { $ok = [bool](& $cond) } catch { $ok = $false }
+        Check $name $ok
+    }
+    $pgx = Join-Path $work "pgleft"
+    New-Item -ItemType Directory -Force -Path $pgx | Out-Null
+    $liveExe = Join-Path $pgx "live-pg_ctl.exe"
+    Set-Content -Path $liveExe -Value "x" -Encoding ASCII
+    $goneExe = Join-Path $pgx "gone\bin\pg_ctl.exe"
+    CheckTry "pg leftovers: Get-ServiceExePath reads a quoted path with arguments" { (Get-ServiceExePath ('"C:\Program Files\PostgreSQL\16\bin\pg_ctl.exe" runservice -N "postgresql-x64-16" -D "C:\Program Files\PostgreSQL\16\data" -w')) -eq 'C:\Program Files\PostgreSQL\16\bin\pg_ctl.exe' }
+    CheckTry "pg leftovers: Get-ServiceExePath reads an unquoted path and an empty one" { ((Get-ServiceExePath 'C:\tools\svc.exe -x') -eq 'C:\tools\svc.exe') -and ((Get-ServiceExePath '') -eq '') }
+    $fakeSvcs = @(
+        [pscustomobject]@{ Name = "postgresql-x64-16"; PathName = ('"' + $goneExe + '" runservice -N "postgresql-x64-16"'); StartName = ".\postgres" },
+        [pscustomobject]@{ Name = "postgresql-x64-14"; PathName = ('"' + $liveExe + '" runservice -N "postgresql-x64-14"'); StartName = ".\postgres" },
+        [pscustomobject]@{ Name = "Spooler"; PathName = "C:\Windows\System32\spoolsv.exe"; StartName = "LocalSystem" }
+    )
+    CheckTry "pg leftovers: only a postgresql service whose program is gone is an orphan" { $o = @(Find-OrphanPgServices $fakeSvcs); ($o.Count -eq 1) -and ($o[0].Name -eq "postgresql-x64-16") }
+    CheckTry "pg leftovers: the postgres account is not an orphan while a live service runs as it" { -not (Test-PgAccountOrphan $fakeSvcs "postgres") }
+    CheckTry "pg leftovers: the postgres account is an orphan when its services are gone or it runs none" { (Test-PgAccountOrphan @($fakeSvcs[0], $fakeSvcs[2]) "postgres") -and (Test-PgAccountOrphan @() "postgres") }
+    CheckTry "pg leftovers: a service run by another account does not keep the postgres account alive" { Test-PgAccountOrphan @([pscustomobject]@{ Name = "postgresql-x64-15"; PathName = $liveExe; StartName = "NT AUTHORITY\NetworkService" }) "postgres" }
+    $pfRoot = Join-Path $pgx "PostgreSQL"
+    foreach ($d in "16\data", "17\data", "17\bin", "18\data", "19") { New-Item -ItemType Directory -Force -Path (Join-Path $pfRoot $d) | Out-Null }
+    Set-Content -Path (Join-Path $pfRoot "16\data\PG_VERSION") -Value "16" -Encoding ASCII
+    Set-Content -Path (Join-Path $pfRoot "16\data\postgresql.conf") -Value "port = 5432" -Encoding ASCII
+    Set-Content -Path (Join-Path $pfRoot "17\data\PG_VERSION") -Value "17" -Encoding ASCII
+    Set-Content -Path (Join-Path $pfRoot "17\bin\psql.exe") -Value "x" -Encoding ASCII
+    CheckTry "pg leftovers: a data folder with no psql.exe beside it is left over; a live install's and an empty one are not" { $f = @(Find-PgLeftoverDataDirs $pfRoot); ($f.Count -eq 1) -and ($f[0] -eq (Join-Path $pfRoot "16\data")) }
+    CheckTry "pg leftovers: a missing Program Files\PostgreSQL has no leftovers" { @(Find-PgLeftoverDataDirs (Join-Path $pgx "nowhere")).Count -eq 0 }
+    $moved = $null
+    CheckTry "pg leftovers: Move-PgDataAside renames the folder and keeps every file" {
+        $script:moved = Move-PgDataAside (Join-Path $pfRoot "16\data") "20261009-100000"
+        ($script:moved -eq ((Join-Path $pfRoot "16\data") + ".f7five0-old-20261009-100000")) -and (Test-Path (Join-Path $script:moved "PG_VERSION")) -and (Test-Path (Join-Path $script:moved "postgresql.conf")) -and -not (Test-Path (Join-Path $pfRoot "16\data"))
+    }
+    CheckTry "pg leftovers: after the move there is nothing left to move" { @(Find-PgLeftoverDataDirs $pfRoot).Count -eq 0 }
+
+    # -----------------------------------------------------------------------
     # 13. Installer wiring
     # -----------------------------------------------------------------------
     $install = Get-Content -Raw -Path (Join-Path $installerDir "install.ps1")
@@ -517,6 +562,12 @@ public static class Stub {
     Check "install.ps1 reads the saved postgres password when none was typed" ($install -match '(?s)\$saved = Join-Path \$DataDir "postgres-superuser\.txt".*?if \(-not \$PgSuperPassword\).*?Test-Path \$saved')
     Check "install.ps1's PostgreSQL sign-in failure names postgres-superuser.txt and the INSTALL.md section" ($install -match "Could not sign in to PostgreSQL as 'postgres'[^`r`n]*postgres-superuser\.txt[^`r`n]*INSTALL\.md")
     Check "install.ps1 Find-Psql makes the same test: bin\psql.exe under Program Files\PostgreSQL, then psql on PATH" ($install -match '(?s)function Find-Psql.*?ProgramFiles\\PostgreSQL.*?bin\\psql\.exe.*?Get-Command psql')
+    $pgBranch = [regex]::Match($install, "(?s)if \(-not \`$Psql -and -not \`$IsUpgrade\) \{.*?\`$pgProc = Start-Process").Value
+    Check "install.ps1 clears leftovers of an uninstalled PostgreSQL before it installs a new one (only when no psql.exe exists)" ($pgBranch.Length -gt 0 -and $pgBranch -match "Clear-PostgresLeftovers")
+    Check "install.ps1 passes --serviceaccount and --servicepassword only when it reset a leftover postgres account" ($install -match '(?s)\$pgSvcPassword = @\(Clear-PostgresLeftovers\).*?if \(\$pgSvcPassword\).*?--serviceaccount postgres --servicepassword')
+    Check "install.ps1 removes a dead service entry with sc.exe delete, resets the account with Set-LocalUser, and moves old data aside" ($install -match 'sc\.exe delete' -and $install -match 'Set-LocalUser' -and $install -match 'Move-PgDataAside')
+    Check "install.ps1 never deletes the account or the old data (no Remove-LocalUser, no Remove-Item on the data folder)" ($install -notmatch 'Remove-LocalUser' -and $install -notmatch 'net user postgres /delete' -and $install -notmatch 'Remove-Item[^\r\n]*PgDataDir')
+    Check "install.ps1 saves the service account password under data\ before it resets the account" ($install -match '(?s)postgres-service-account\.txt.*?Set-LocalUser')
     Check "install.ps1 reads appVersion and writes version.json" ($install -match 'Answer "appVersion"' -and $install -match 'version\.json' -and $install -match 'installed_at')
     Check "install.ps1 names the task F7FIVE0-Update" ($install -match '\$UpdateTask = "F7FIVE0-Update"')
     Check "install.ps1 registers it as SYSTEM" ($install -match '(?s)New-ScheduledTaskPrincipal -UserId "SYSTEM".{0,1200}Register-ScheduledTask -TaskName \$UpdateTask')

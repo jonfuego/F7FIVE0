@@ -466,6 +466,69 @@ function Find-Psql {
     if ($c) { return $c.Source }
     return $null
 }
+
+# After an uninstall, PostgreSQL can leave its service entry, the "postgres"
+# Windows account and its data folder behind (see the PostgreSQL leftovers
+# section of common.ps1). Called only when no usable PostgreSQL exists. Returns
+# the password to hand the PostgreSQL installer for the postgres account when a
+# leftover account had to be reset, else "". Nothing that holds data is deleted:
+# a service entry whose program is gone is removed, the account's password is
+# reset, an old data folder is renamed aside. Never fatal.
+function Clear-PostgresLeftovers {
+    $svcPassword = ""
+    try {
+        $all = @(Get-CimInstance Win32_Service -ErrorAction Stop)
+    } catch {
+        Warn "could not list the Windows services to look for PostgreSQL leftovers: $($_.Exception.Message)"
+        return ""
+    }
+    # 1. A service entry whose program is gone would stop the installer from
+    #    creating a service of the same name.
+    foreach ($svc in @(Find-OrphanPgServices $all)) {
+        Info "found a leftover service entry '$($svc.Name)' from a PostgreSQL that was uninstalled; removing the entry"
+        $prev = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        try {
+            Stop-Service -Name $svc.Name -Force -ErrorAction SilentlyContinue
+            & sc.exe delete $svc.Name | Out-Null
+            if ($LASTEXITCODE -ne 0) { Warn "sc.exe delete $($svc.Name) returned $LASTEXITCODE" }
+        } finally { $ErrorActionPreference = $prev }
+    }
+    # 2. An old data folder: a new PostgreSQL must not meet a cluster it did not make.
+    foreach ($oldData in @(Find-PgLeftoverDataDirs (Join-Path $env:ProgramFiles "PostgreSQL"))) {
+        try {
+            $to = Move-PgDataAside $oldData (Get-Date -Format "yyyyMMdd-HHmmss")
+            Warn "an old PostgreSQL data folder was left behind. Moved it to $to (nothing was deleted); copy it back if you still need it."
+        } catch {
+            Warn "could not move the old PostgreSQL data folder $oldData aside ($($_.Exception.Message)). The PostgreSQL install may fail; rename that folder and run Setup again."
+        }
+    }
+    # 3. The "postgres" Windows account. The installer wants its password, and
+    #    by default offers the new superuser password, which will not match.
+    try {
+        $acct = Get-LocalUser -Name "postgres" -ErrorAction SilentlyContinue
+        if ($acct) {
+            if (Test-PgAccountOrphan $all "postgres") {
+                $newPassword = New-Secret 24
+                $note = Join-Path $DataDir "postgres-service-account.txt"
+                # Save the password BEFORE resetting the account, like the superuser one.
+                Set-Content -Path $note -Value "Windows account 'postgres' (runs the PostgreSQL service). F7FIVE0 setup reset its password because an old one was left behind:`r`n$newPassword" -Encoding ASCII
+                Set-PrivateAcl $note
+                Set-LocalUser -Name "postgres" -Password (ConvertTo-SecureString $newPassword -AsPlainText -Force)
+                if (-not $acct.Enabled) { Enable-LocalUser -Name "postgres" }
+                $svcPassword = $newPassword
+                Info "found the 'postgres' Windows account from an earlier PostgreSQL; reset its password so the new PostgreSQL can use it (saved in $note)"
+            } else {
+                Info "the 'postgres' Windows account is still used by a PostgreSQL service that exists; leaving it alone"
+            }
+        }
+    } catch {
+        $svcPassword = ""
+        Warn "could not reset the leftover 'postgres' Windows account ($($_.Exception.Message)). The PostgreSQL install may fail; see INSTALL.md, 'Already have PostgreSQL?'."
+    }
+    return $svcPassword
+}
+
 $Psql = Find-Psql
 $PgInstalledNow = $false
 if (-not $Psql -and -not $IsUpgrade) {
@@ -479,7 +542,11 @@ if (-not $Psql -and -not $IsUpgrade) {
     if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
         Fail "winget is not available. Install 'App Installer' from the Microsoft Store, then run Setup again."
     }
+    # A PostgreSQL that was uninstalled can leave its service entry, the postgres
+    # Windows account and its data behind; clear them so the new install works.
+    $pgSvcPassword = @(Clear-PostgresLeftovers) | Select-Object -Last 1
     $pgOverride = "--mode unattended --unattendedmodeui none --superpassword \`"$PgSuperPassword\`" --serverport 5432 --enable-components server,commandlinetools"
+    if ($pgSvcPassword) { $pgOverride += " --serviceaccount postgres --servicepassword \`"$pgSvcPassword\`"" }
     $pgArgs = "install --id $PostgresWingetId -e --silent --accept-package-agreements --accept-source-agreements --disable-interactivity --override `"$pgOverride`""
     $pgStart = Get-Date
     $pgProc = Start-Process -FilePath "winget" -ArgumentList $pgArgs -NoNewWindow -PassThru

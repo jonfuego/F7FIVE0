@@ -225,6 +225,23 @@ behind; those do not count, and Setup installs a fresh PostgreSQL instead.
 If PostgreSQL has a different password than the one in that file, Setup stops with "Could not sign in to PostgreSQL"; correct or delete the file
 and run Setup again.
 
+### After uninstalling PostgreSQL
+
+PostgreSQL's own uninstaller leaves things behind: the data folder, the
+`postgres` Windows account, and sometimes the `postgresql-x64-16` service entry.
+When Setup finds no working PostgreSQL, it checks for these before it installs a
+new one, and never deletes data:
+
+- A service entry whose program is gone is removed.
+- An old data folder under `C:\Program Files\PostgreSQL\<version>\data` is
+  renamed to `data.f7five0-old-<date-time>`, so the new PostgreSQL does not meet
+  a database it did not make. Copy it back if you need it.
+- The leftover `postgres` Windows account gets a new password, so the new
+  PostgreSQL can use it. The password is saved in
+  `C:\F7FIVE0\data\postgres-service-account.txt` (Administrators only). Setup
+  does this only when no PostgreSQL service that still exists runs as that
+  account.
+
 ## Optional integrations
 
 All of these go in `C:\F7FIVE0\.env`. Restart the services afterward:
