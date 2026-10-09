@@ -108,7 +108,26 @@ INSTALL.md for the operator view.
 - Libraries: when a `*_API_KEY` for Radarr/Sonarr/Lidarr is set, that app
   owns the library (`services/sync.py`). Otherwise `services/scan_library.py`
   scans `LIBRARY_ROOT_*` folders. Never let both write the same library.
-  Requests need Radarr/Sonarr; `/api/client/features` tells clients.
+  Requests need Radarr/Sonarr; `/api/client/features` tells clients (it also
+  reports `arr: {radarr, sonarr, lidarr}`; Admin shows "Run *arr sync now"
+  only when one is set up).
+  The folder scan saves as it goes: it commits every 25 items (`BATCH_SIZE`)
+  and at the end of each library, so rows show up while it runs and a library
+  that fails loses only its open batch (the others still run). Never wrap a
+  whole scan in one `db_session()`, which commits only on exit. Its state is
+  the `app_settings` key `folder_scan_status` (`services/scan_status.py`:
+  `state` idle/running, `current_library`, per-library `seen`, `added`,
+  `probed`, `missing`, `errors`, `last_error`), written at the start, at every
+  batch commit and at the end. API startup turns a stale `running` into `idle`
+  with an "interrupted" note, and one folder scan runs at a time. Admin starts
+  and reads it with `POST` / `GET /api/admin/library/scan` (409 while running);
+  any signed-in user gets only `GET /api/library/scan-state` (`running`,
+  `finished_at`), which the empty library pages use. Enrichment
+  (`schedule_enrich_*`) is scheduled only after the commit that holds the row:
+  the scan and `sync.py` collect ids and hand them over once committed. After
+  each folder scan `scan_library.schedule_catch_up` queues movies, artists and
+  albums that have a TMDB/MusicBrainz id but no `metadata_synced_at`, spaced a
+  second apart.
 - Library folders: several per library (`app/services/library_folders.py`).
   Source is the `libraries` table once Admin > Library folders saves (then for
   every library), else `LIBRARY_ROOT_*` split on `;`. TV and music merge
@@ -138,6 +157,13 @@ INSTALL.md for the operator view.
   `app_settings` wins over `TMDB_API_KEY`; cached per process, refreshed on
   save). Never read `settings.tmdb_api_key` directly. Admin reminder banners
   come from `services/reminders.py`.
+- Logging: no secrets in logs. TMDB takes its key as `api_key=` in the URL and
+  httpx logs request URLs at INFO, so `app/log_redact.py` `install()` runs right
+  after `logging.basicConfig` in `main.py`, `stream.py` and every CLI command.
+  It holds `httpx` and `httpcore` at WARNING and puts `RedactApiKeyFilter` on
+  the root handler, which rewrites `api_key=<value>` to `api_key=***` in every
+  record (message, arguments and traceback text). A new entry point must call
+  `install()`; never log a URL or request that carries a key some other way.
 - Scanner-imported art uses `source_kind` `local` or `tmdb`; admin-set art
   (`upload`, `url`, ...) is never overwritten.
 - Migrations go through Alembic. Keep revision ids stable: existing installs
