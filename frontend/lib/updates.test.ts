@@ -6,7 +6,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   UPDATE_STEPS, blockedText, checkedAgo, encodePasswordHeader, formatBytes,
-  isActivePhase, phaseLabel, runSummary, stepIndex, updateErrorText,
+  UP_TO_DATE, isActivePhase, phaseLabel, runSummary, stepIndex, updateErrorText, upToDateMessages,
 } from "./updates.ts";
 
 test("active phases are the ones that need polling", () => {
@@ -81,4 +81,42 @@ test("run summaries", () => {
   assert.match(runSummary({ phase: "failed", from_version: "1.0.0", to_version: "1.1.0" }) ?? "", /didn't finish/);
   assert.equal(runSummary({ phase: "idle", from_version: null, to_version: null }), null);
   assert.equal(runSummary({ phase: "installing", from_version: "1.0.0", to_version: "1.1.0" }), null);
+});
+
+function occurrences(m: { hint?: string; notice: string | null }): number {
+  return [m.hint, m.notice].filter((t) => t === UP_TO_DATE).length;
+}
+
+test("You're up to date. shows once: as the hint before a check, as the notice after one", () => {
+  assert.equal(UP_TO_DATE, "You're up to date.");
+  const before = upToDateMessages({ latestVersion: "1.0.5", updateAvailable: false, checkError: null, checkedNow: false });
+  assert.equal(before.hint, UP_TO_DATE);
+  assert.equal(before.notice, null);
+  assert.equal(occurrences(before), 1);
+
+  const after = upToDateMessages({ latestVersion: "1.0.5", updateAvailable: false, checkError: null, checkedNow: true });
+  assert.equal(after.notice, UP_TO_DATE);
+  assert.equal(after.hint, undefined);
+  assert.equal(occurrences(after), 1);
+});
+
+test("You're up to date. never shows twice, whatever the state", () => {
+  for (const latestVersion of [null, "1.0.5"]) {
+    for (const updateAvailable of [false, true]) {
+      for (const checkError of [null, "offline"]) {
+        for (const checkedNow of [false, true]) {
+          const m = upToDateMessages({ latestVersion, updateAvailable, checkError, checkedNow });
+          assert.ok(occurrences(m) <= 1, JSON.stringify({ latestVersion, updateAvailable, checkError, checkedNow, m }));
+        }
+      }
+    }
+  }
+});
+
+test("a newer version and a failed check never say up to date", () => {
+  const newer = upToDateMessages({ latestVersion: "1.1.0", updateAvailable: true, checkError: null, checkedNow: true });
+  assert.equal(newer.notice, "Version 1.1.0 is available.");
+  assert.equal(occurrences(newer), 0);
+  const failed = upToDateMessages({ latestVersion: "1.0.5", updateAvailable: false, checkError: "offline", checkedNow: true });
+  assert.equal(failed.notice, null);
 });

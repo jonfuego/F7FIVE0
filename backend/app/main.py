@@ -11,9 +11,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
+from app import log_redact
 from app.config import settings
-from app.db import engine
-from app.services import nas_auth, server_version
+from app.db import db_session, engine
+from app.services import nas_auth, scan_status, server_version
 from app.services.trusted_proxy import real_client_ip
 from app import scheduler
 from app.api import admin as admin_routes
@@ -38,6 +39,8 @@ logging.basicConfig(
     level=settings.log_level,
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
+# httpx logs request URLs at INFO, and a TMDB URL carries the api key.
+log_redact.install()
 log = logging.getLogger("f7five0.api")
 
 
@@ -52,6 +55,14 @@ async def lifespan(app: FastAPI):
     except Exception:
         log.exception("Database connection failed at startup")
         raise
+    # A scan still marked running belongs to a process that no longer exists
+    # (the server was stopped mid-scan): mark it interrupted, not running.
+    try:
+        with db_session() as db:
+            if scan_status.reset_stale(db):
+                log.warning("the last folder scan was interrupted; its status was reset")
+    except Exception:
+        log.warning("could not reset a stale folder scan status", exc_info=True)
     # Connect any saved NAS sign-ins under this process's logon session, so a
     # UNC library share is readable from the first request (LocalSystem has no
     # NAS login of its own). Cheap when already connected; a no-op off Windows.

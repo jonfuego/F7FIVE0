@@ -120,6 +120,14 @@ begin
     Result := RegKeyExists(HKLM, 'SOFTWARE\PostgreSQL\Installations');
 end;
 
+// A first install that stopped partway leaves the postgres password Setup saved
+// itself (install.ps1 writes it before it installs PostgreSQL). A rerun reuses
+// that file, so the wizard must not ask for the password again.
+function SavedPostgresPassword: Boolean;
+begin
+  Result := FileExists(AddBackslash(WizardDirValue) + 'data\postgres-superuser.txt');
+end;
+
 function ReadEnvPort: String;
 var
   Lines: TArrayOfString;
@@ -331,7 +339,7 @@ begin
   if IsUpgrade and ((PageID = MediaPage.ID) or (PageID = AdminPage.ID) or (PageID = PgPage.ID)
       or (PageID = NetPage.ID) or (PageID = OptionsPage.ID) or (PageID = PortsPage.ID)) then
     Result := True
-  else if (PageID = PgPage.ID) and not PostgresInstalled then
+  else if (PageID = PgPage.ID) and (not PostgresInstalled or SavedPostgresPassword) then
     Result := True;
 end;
 
@@ -425,7 +433,6 @@ begin
     Cfg := Cfg +
       JsonPair('adminUser', AdminPage.Values[0], False) +
       JsonPair('adminPassword', AdminPage.Values[1], False) +
-      JsonPair('postgresPassword', PgPage.Values[0], False) +
       JsonPair('moviesDir', MediaPage.Values[0], False) +
       JsonPair('tvDir', MediaPage.Values[1], False) +
       JsonPair('musicDir', MediaPage.Values[2], False) +
@@ -435,6 +442,10 @@ begin
       JsonPair('apiPort', Trim(PortsPage.Values[1]), False) +
       JsonPair('streamPort', Trim(PortsPage.Values[2]), False) +
       JsonPair('tmdbKey', Trim(OptionsPage.Values[0]), False);
+    // Nothing typed (the page was skipped): send no postgresPassword and
+    // install.ps1 reads data\postgres-superuser.txt, or makes its own.
+    if PgPage.Values[0] <> '' then
+      Cfg := Cfg + JsonPair('postgresPassword', PgPage.Values[0], False);
   end;
   // appVersion goes with every run, new install or upgrade: install.ps1 records
   // it in version.json. The rest above is sent only on a new install, so an

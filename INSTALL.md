@@ -216,7 +216,11 @@ documentation for `pg_hba.conf` "trust" mode, then run Setup again.
 
 When Setup installs PostgreSQL itself, it saves the `postgres` password in
 `C:\F7FIVE0\data\postgres-superuser.txt` (readable by Administrators only)
-before the install starts, so it survives a failed or interrupted run.
+before the install starts, so it survives a failed or interrupted run. Run
+Setup again after a failed install and it reuses that saved password without
+asking. If PostgreSQL has a different password than the one in that file,
+Setup stops with "Could not sign in to PostgreSQL"; correct or delete the file
+and run Setup again.
 
 ## Optional integrations
 
@@ -378,7 +382,7 @@ them from Settings > Apps if you don't need them.
 | The `.apk` won't install on Windows | It is the Android phone app. Put it on a phone, or sign in from the phone's browser and use **Account > Download for Android**. |
 | Browser can't reach localhost:3001 | `Get-Service F7FIVE0-*` should show three Running services. Check `C:\F7FIVE0\logs\F7FIVE0-Web.err.log`. |
 | Sign-in page loads but sign-in fails | Check `F7FIVE0-API.err.log`. The API needs PostgreSQL running (`Get-Service postgresql*`). |
-| Library stays empty | Check **Admin > Library folders** (each folder shows whether the server can open it), then `F7FIVE0-API.err.log` for "folder scan". Scans run 30 seconds after start and every 30 minutes. Admins can also trigger a sync from the Admin page. |
+| Library stays empty | Open **Admin > Library folders**. Each folder shows whether the server can open it. Under the folders, the **Folder scan** block shows whether a scan is running, which library it is on, how many files it has seen and added, when the last one finished, and the last error. Click **Scan folders now** to start one. Movies, TV and music appear as the scan finds them (it saves every 25 items), and an empty library page says your library is being scanned while it runs. Scans also run 30 seconds after start and every 30 minutes. If the block shows an error, or `F7FIVE0-API.err.log` has "folder scan" lines, that is where to look. |
 | Network share shows nothing | See "Media on a NAS" above. SYSTEM can't read shares. |
 | Admin > Updates says the updater isn't installed | Run the newer Setup.exe by hand once (it registers the `F7FIVE0-Update` task and keeps a copy of itself). |
 | An update ended with "Went back to the old version" | The new version didn't pass its checks, so the old version and the database from before the update were restored. Open **Details** on the page, or `C:\F7FIVE0\logs\update-<id>.log` and `update-<id>-setup.log`, and tell whoever made the release. |

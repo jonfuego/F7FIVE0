@@ -34,7 +34,9 @@ async function forward(
   // Preserve the query string — list endpoints use limit/offset/q.
   const search = req.nextUrl.search;
   // Strip the browser-side "library/" namespace; backend router is at /api.
-  const path = `/api/${suffix}${search}`;
+  // The scan-state endpoint is the one that keeps its "library/" segment on
+  // the backend (GET /api/library/scan-state).
+  const path = suffix === "scan-state" ? `/api/library/scan-state${search}` : `/api/${suffix}${search}`;
 
   // GET / DELETE do not carry a JSON body. POST / PUT do.
   let body: unknown;

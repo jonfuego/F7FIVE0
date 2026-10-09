@@ -489,6 +489,12 @@ public static class Stub {
     $leaked = @($leak | Where-Object { $afterUpgradeBlock -match [regex]::Escape("JsonPair('$_'") })
     Check "iss: an upgrade sends only appVersion and contactEmail (answers are inside 'if not IsUpgrade')" ($leaked.Count -eq 0 -and $afterUpgradeBlock -match "JsonPair\('appVersion'" -and $afterUpgradeBlock -match "JsonPair\('contactEmail'")
     Check "iss: every answer page is skipped on upgrade" ($iss -match "(?s)function ShouldSkipPage.*?IsUpgrade and \(\(PageID = MediaPage\.ID\).*?PortsPage\.ID\)\)")
+    # A rerun after a failed first install: Setup saved the postgres password
+    # itself, so the wizard must not ask for it again.
+    Check "iss: the saved password is looked for as data\postgres-superuser.txt under the wizard directory" ($iss -match "(?s)function SavedPostgresPassword: Boolean;.*?FileExists\(AddBackslash\(WizardDirValue\) \+ 'data\\postgres-superuser\.txt'\)")
+    Check "iss: the PostgreSQL password page is skipped when that file exists" ($iss -match "(?s)function ShouldSkipPage.*?\(PageID = PgPage\.ID\) and \(not PostgresInstalled or SavedPostgresPassword\)")
+    Check "iss: the PostgreSQL password page is still required when it shows (installed, no saved file)" ($iss -match "(?s)CurPageID = PgPage\.ID.*?PgPage\.Values\[0\] = ''.*?Result := False")
+    Check "iss: a skipped password page sends no postgresPassword" ($iss -match "(?s)if PgPage\.Values\[0\] <> '' then\s+Cfg := Cfg \+ JsonPair\('postgresPassword'")
 
     # -----------------------------------------------------------------------
     # 13. Installer wiring
@@ -500,6 +506,8 @@ public static class Stub {
     Check "iss passes appVersion to install.ps1" ($iss -match "JsonPair\('appVersion', '\{#AppVersion\}'")
     Check "iss copies Setup itself into the updates Setup cache" ($iss -match '(?i)Source: "\{srcexe\}".*data\\updates\\setup.*F7FIVE0-Setup-\{#AppVersion\}\.exe')
     Check "iss skips that copy when Setup runs from the cache itself (a rollback)" ($iss -match 'Check: NotRunningFromSetupCache' -and $iss -match '(?s)function NotRunningFromSetupCache: Boolean;.*CompareText\(ExpandConstant\(''\{srcexe\}''\)')
+    Check "install.ps1 reads the saved postgres password when none was typed" ($install -match '(?s)\$saved = Join-Path \$DataDir "postgres-superuser\.txt".*?if \(-not \$PgSuperPassword\).*?Test-Path \$saved')
+    Check "install.ps1's PostgreSQL sign-in failure names postgres-superuser.txt and the INSTALL.md section" ($install -match "Could not sign in to PostgreSQL as 'postgres'[^`r`n]*postgres-superuser\.txt[^`r`n]*INSTALL\.md")
     Check "install.ps1 reads appVersion and writes version.json" ($install -match 'Answer "appVersion"' -and $install -match 'version\.json' -and $install -match 'installed_at')
     Check "install.ps1 names the task F7FIVE0-Update" ($install -match '\$UpdateTask = "F7FIVE0-Update"')
     Check "install.ps1 registers it as SYSTEM" ($install -match '(?s)New-ScheduledTaskPrincipal -UserId "SYSTEM".{0,1200}Register-ScheduledTask -TaskName \$UpdateTask')

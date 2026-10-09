@@ -18,6 +18,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { apiGet, apiPut, apiDelete, ApiError } from "@/lib/client-api";
+import { ScanStatusBlock } from "./ScanStatusBlock";
 import type {
   LibraryFolder,
   LibraryFolderKind,
@@ -79,6 +80,8 @@ export function LibraryFoldersSection() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  // Bumped after a save: saving folders starts a scan, and the status block looks for it.
+  const [scanRefresh, setScanRefresh] = useState(0);
 
   // NAS sign-in inline form. Keyed by the row it hangs under; the credential
   // itself applies to the whole server.
@@ -150,6 +153,7 @@ export function LibraryFoldersSection() {
       const res = await apiPut<LibraryFolders>("/api/admin/library-folders", { folders: draft });
       setData(res);
       setDraft(toDraft(res));
+      setScanRefresh((n) => n + 1);
       const offline = res.libraries.flatMap((l) => l.folders).filter((f) => !f.reachable).length;
       setStatus(
         offline
@@ -404,6 +408,8 @@ export function LibraryFoldersSection() {
         {status ? <span className="text-xs text-neutral-400">{status}</span> : null}
         {nasNotice ? <span className="text-xs text-neutral-400">{nasNotice}</span> : null}
       </div>
+
+      <ScanStatusBlock refreshKey={scanRefresh} />
     </section>
   );
 }

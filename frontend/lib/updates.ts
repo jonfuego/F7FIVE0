@@ -115,6 +115,28 @@ export function checkedAgo(iso: string | null | undefined, now: number = Date.no
   return days === 1 ? "1 day ago" : `${days} days ago`;
 }
 
+export const UP_TO_DATE = "You're up to date.";
+
+/**
+ * The two places that can say "You're up to date." on Admin > Updates: a hint
+ * under "Latest version" and the notice after "Check now". Only one of them
+ * says it at a time. After a check, the notice wins (it answers the click);
+ * otherwise the hint shows once the latest version is known.
+ */
+export function upToDateMessages(input: {
+  latestVersion: string | null;
+  updateAvailable: boolean;
+  checkError: string | null;
+  checkedNow: boolean;
+}): { hint: string | undefined; notice: string | null } {
+  let notice: string | null = null;
+  if (input.checkedNow && !input.checkError) {
+    notice = input.updateAvailable ? `Version ${input.latestVersion} is available.` : UP_TO_DATE;
+  }
+  const hint = input.latestVersion && !input.updateAvailable && notice !== UP_TO_DATE ? UP_TO_DATE : undefined;
+  return { hint, notice };
+}
+
 /** The admin password rides in a header, so it is percent-encoded UTF-8
  *  (headers carry Latin-1 only). The server decodes it. */
 export function encodePasswordHeader(password: string): string {

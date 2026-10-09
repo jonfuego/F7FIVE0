@@ -14,7 +14,9 @@ import { AlphaRail, alphaLetterOf } from "@/components/AlphaRail";
 import { Grid, GridEmpty } from "@/components/Grid";
 import { apiGet } from "@/lib/client-api";
 import { colorForTitle, hueFromString } from "@/lib/format";
+import { emptyLibraryText } from "@/lib/library-scan";
 import { albumToQueueItems, useQueue } from "@/lib/queue";
+import { useScanState } from "@/lib/use-scan-state";
 import type { Album, AlbumDetail, OverrideOut } from "@/lib/types";
 import { useViewPref } from "@/lib/use-view-pref";
 
@@ -36,6 +38,8 @@ export default function MusicAlbumsPage() {
   const [reloadTick, setReloadTick] = useState(0);
   const [editTarget, setEditTarget] = useState<Album | null>(null);
   const [editInitial, setEditInitial] = useState<EditInitial | null>(null);
+  // While a folder scan runs the list reloads every few seconds.
+  const scan = useScanState();
 
   useEffect(() => {
     let cancelled = false;
@@ -94,7 +98,7 @@ export default function MusicAlbumsPage() {
     return () => {
       cancelled = true;
     };
-  }, [reloadTick]);
+  }, [reloadTick, scan.ticks]);
 
   return (
     <AuthShell>
@@ -124,7 +128,7 @@ export default function MusicAlbumsPage() {
           ))}
         </Grid>
       ) : albums.length === 0 ? (
-        <GridEmpty message="No albums in the library yet." />
+        <GridEmpty message={emptyLibraryText("albums", scan.running)} />
       ) : (
         <Grid variant="square">
           {albums.map((a) => (

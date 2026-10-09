@@ -628,8 +628,10 @@ Step "Database"
 # ---------------------------------------------------------------------------
 $DbPassword = $null
 if (-not $IsUpgrade) {
+    # A rerun after a failed first install reuses the password Setup saved
+    # itself (the wizard skips its password page when this file exists).
+    $saved = Join-Path $DataDir "postgres-superuser.txt"
     if (-not $PgSuperPassword) {
-        $saved = Join-Path $DataDir "postgres-superuser.txt"
         if (Test-Path $saved) { $PgSuperPassword = (Get-Content $saved | Select-Object -Last 1).Trim() }
     }
     if (-not $PgSuperPassword) {
@@ -657,7 +659,7 @@ if (-not $IsUpgrade) {
         if ($script:PsqlExit -eq 0) { $ready = $true; break }
         Start-Sleep -Seconds 2
     }
-    if (-not $ready) { Fail "Could not sign in to PostgreSQL as 'postgres' on 127.0.0.1:5432 ($lastErr). Check the password and that the PostgreSQL service is running." }
+    if (-not $ready) { Fail "Could not sign in to PostgreSQL as 'postgres' on 127.0.0.1:5432 ($lastErr). Check the password and that the PostgreSQL service is running. If Setup reused the password saved in postgres-superuser.txt ($saved) and PostgreSQL has a different one, correct or delete that file and run Setup again; see INSTALL.md, 'Already have PostgreSQL?'." }
     $verb = if ((Psql "SELECT 1 FROM pg_roles WHERE rolname='$DbUser'") -eq "1") { "ALTER" } else { "CREATE" }
     $r = Psql "$verb ROLE $DbUser WITH LOGIN PASSWORD '$DbPassword';"
     if ($script:PsqlExit -ne 0) { Fail "Could not create the database role: $r" }

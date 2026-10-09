@@ -14,6 +14,8 @@ import { AlphaRail, alphaLetterOf } from "@/components/AlphaRail";
 import { Grid, GridEmpty } from "@/components/Grid";
 import { MediaCard } from "@/components/MediaCard";
 import { apiGet } from "@/lib/client-api";
+import { emptyLibraryText } from "@/lib/library-scan";
+import { useScanState } from "@/lib/use-scan-state";
 import { useScrollRestoration } from "@/lib/scroll-restoration";
 import { useViewPref } from "@/lib/use-view-pref";
 import type { Series, OverrideOut } from "@/lib/types";
@@ -34,6 +36,8 @@ export default function SeriesPage() {
   const [reloadTick, setReloadTick] = useState(0);
   const [editTarget, setEditTarget] = useState<Series | null>(null);
   const [editInitial, setEditInitial] = useState<EditInitial | null>(null);
+  // While a folder scan runs the list reloads every few seconds.
+  const scan = useScanState();
 
   useEffect(() => {
     let cancelled = false;
@@ -67,7 +71,7 @@ export default function SeriesPage() {
     return () => {
       cancelled = true;
     };
-  }, [reloadTick]);
+  }, [reloadTick, scan.ticks]);
 
   const onApplied = useCallback(() => setReloadTick((t) => t + 1), []);
 
@@ -144,7 +148,7 @@ export default function SeriesPage() {
         </Grid>
       ) : filtered.length === 0 ? (
         <GridEmpty
-          message={status !== "All" ? "Nothing in F7FIVE0 for that filter." : "No TV shows in the library yet."}
+          message={status !== "All" ? "Nothing in F7FIVE0 for that filter." : emptyLibraryText("tv", scan.running)}
         />
       ) : (
         <Grid>

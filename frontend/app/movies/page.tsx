@@ -14,6 +14,8 @@ import { Grid, GridEmpty } from "@/components/Grid";
 import { MediaCard } from "@/components/MediaCard";
 import { apiGet } from "@/lib/client-api";
 import { pickProgressFor, statusForFile, useProgressMap } from "@/lib/progress";
+import { emptyLibraryText } from "@/lib/library-scan";
+import { useScanState } from "@/lib/use-scan-state";
 import { useScrollRestoration } from "@/lib/scroll-restoration";
 import { useViewPref } from "@/lib/use-view-pref";
 import type { Movie, OverrideOut } from "@/lib/types";
@@ -41,6 +43,9 @@ export default function MoviesPage() {
   const [editTarget, setEditTarget] = useState<Movie | null>(null);
   const [editInitial, setEditInitial] = useState<EditInitial | null>(null);
   const progress = useProgressMap();
+  // While a folder scan runs the list reloads every few seconds, so movies
+  // show up as the scan finds them.
+  const scan = useScanState();
 
   useEffect(() => {
     let cancelled = false;
@@ -74,7 +79,7 @@ export default function MoviesPage() {
     return () => {
       cancelled = true;
     };
-  }, [reloadTick]);
+  }, [reloadTick, scan.ticks]);
 
   const onApplied = useCallback(() => setReloadTick((t) => t + 1), []);
 
@@ -175,7 +180,7 @@ export default function MoviesPage() {
         </Grid>
       ) : filtered.length === 0 ? (
         <GridEmpty
-          message={genre !== "All" ? "Nothing in F7FIVE0 for that filter." : "No movies in the library yet."}
+          message={genre !== "All" ? "Nothing in F7FIVE0 for that filter." : emptyLibraryText("movies", scan.running)}
         />
       ) : (
         <Grid>

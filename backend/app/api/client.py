@@ -80,6 +80,13 @@ def features() -> dict:
         # Hardware (NVENC) transcoding. Without it the web player starts
         # transcoded video at 720p instead of the top of the ladder.
         "transcode": {"hardware": bool(settings.nvenc_enabled)},
+        # Which *arr apps are set up. Admin shows "Run *arr sync now" only when
+        # at least one is; folder libraries have no *arr to sync.
+        "arr": {
+            "radarr": bool(settings.radarr_api_key),
+            "sonarr": bool(settings.sonarr_api_key),
+            "lidarr": bool(settings.lidarr_api_key),
+        },
     }
 
 
