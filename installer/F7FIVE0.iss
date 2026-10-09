@@ -111,13 +111,40 @@ begin
   Result := FileExists(AddBackslash(WizardDirValue) + '.env');
 end;
 
+// Is there a <Root>\<version>\bin\psql.exe? (Root is Program Files\PostgreSQL.)
+function PsqlUnder(const Root: String): Boolean;
+var
+  FindRec: TFindRec;
+begin
+  Result := False;
+  if FindFirst(AddBackslash(Root) + '*', FindRec) then
+  begin
+    try
+      repeat
+        if ((FindRec.Attributes and FILE_ATTRIBUTE_DIRECTORY) <> 0)
+            and (FindRec.Name <> '.') and (FindRec.Name <> '..') then
+          if FileExists(AddBackslash(Root) + FindRec.Name + '\bin\psql.exe') then
+          begin
+            Result := True;
+            Break;
+          end;
+      until not FindNext(FindRec);
+    finally
+      FindClose(FindRec);
+    end;
+  end;
+end;
+
+// A PostgreSQL that install.ps1 can use. This is the test install.ps1 makes
+// (Find-Psql): a psql.exe under Program Files\PostgreSQL\<version>\bin, or on
+// PATH. The registry key and the folder are NOT enough: PostgreSQL's own
+// uninstaller leaves an empty Installations key and the data folder behind, so
+// testing for them asked for the password of a PostgreSQL that was gone while
+// install.ps1 went on to install a new one.
 function PostgresInstalled: Boolean;
 begin
-  if IsWin64 then
-    Result := RegKeyExists(HKLM64, 'SOFTWARE\PostgreSQL\Installations')
-      or DirExists(ExpandConstant('{commonpf64}\PostgreSQL'))
-  else
-    Result := RegKeyExists(HKLM, 'SOFTWARE\PostgreSQL\Installations');
+  Result := PsqlUnder(ExpandConstant('{commonpf64}\PostgreSQL'))
+    or (FileSearch('psql.exe', GetEnv('PATH')) <> '');
 end;
 
 // A first install that stopped partway leaves the postgres password Setup saved
