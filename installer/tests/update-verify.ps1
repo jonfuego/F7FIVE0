@@ -495,6 +495,14 @@ public static class Stub {
     Check "iss: the PostgreSQL password page is skipped when that file exists" ($iss -match "(?s)function ShouldSkipPage.*?\(PageID = PgPage\.ID\) and \(not PostgresInstalled or SavedPostgresPassword\)")
     Check "iss: the PostgreSQL password page is still required when it shows (installed, no saved file)" ($iss -match "(?s)CurPageID = PgPage\.ID.*?PgPage\.Values\[0\] = ''.*?Result := False")
     Check "iss: a skipped password page sends no postgresPassword" ($iss -match "(?s)if PgPage\.Values\[0\] <> '' then\s+Cfg := Cfg \+ JsonPair\('postgresPassword'")
+    # PostgreSQL's own uninstaller leaves an empty HKLM\SOFTWARE\PostgreSQL\Installations key and the
+    # Program Files\PostgreSQL folder (the data directory) behind. Neither means PostgreSQL is installed:
+    # install.ps1 looks for psql.exe, finds none, and installs a new PostgreSQL. The wizard must make the
+    # same test, or it asks for the password of a PostgreSQL that is gone.
+    $pgFn = [regex]::Match($iss, "(?s)function PostgresInstalled: Boolean;.*?\nend;").Value
+    Check "iss: PostgresInstalled finds a real PostgreSQL by bin\psql.exe under Program Files\PostgreSQL" ($pgFn.Length -gt 0 -and $pgFn -match "PsqlUnder\(ExpandConstant\('\{commonpf64\}\\PostgreSQL'\)\)" -and $iss -match "(?s)function PsqlUnder.*?'\\bin\\psql\.exe'")
+    Check "iss: PostgresInstalled does not count the registry key or folder an uninstalled PostgreSQL leaves behind" ($pgFn.Length -gt 0 -and $pgFn -notmatch "RegKeyExists" -and $pgFn -notmatch "DirExists")
+    Check "iss: PostgresInstalled also accepts psql.exe on PATH, like install.ps1" ($pgFn -match "FileSearch\('psql\.exe', GetEnv\('PATH'\)\)")
 
     # -----------------------------------------------------------------------
     # 13. Installer wiring
@@ -508,6 +516,7 @@ public static class Stub {
     Check "iss skips that copy when Setup runs from the cache itself (a rollback)" ($iss -match 'Check: NotRunningFromSetupCache' -and $iss -match '(?s)function NotRunningFromSetupCache: Boolean;.*CompareText\(ExpandConstant\(''\{srcexe\}''\)')
     Check "install.ps1 reads the saved postgres password when none was typed" ($install -match '(?s)\$saved = Join-Path \$DataDir "postgres-superuser\.txt".*?if \(-not \$PgSuperPassword\).*?Test-Path \$saved')
     Check "install.ps1's PostgreSQL sign-in failure names postgres-superuser.txt and the INSTALL.md section" ($install -match "Could not sign in to PostgreSQL as 'postgres'[^`r`n]*postgres-superuser\.txt[^`r`n]*INSTALL\.md")
+    Check "install.ps1 Find-Psql makes the same test: bin\psql.exe under Program Files\PostgreSQL, then psql on PATH" ($install -match '(?s)function Find-Psql.*?ProgramFiles\\PostgreSQL.*?bin\\psql\.exe.*?Get-Command psql')
     Check "install.ps1 reads appVersion and writes version.json" ($install -match 'Answer "appVersion"' -and $install -match 'version\.json' -and $install -match 'installed_at')
     Check "install.ps1 names the task F7FIVE0-Update" ($install -match '\$UpdateTask = "F7FIVE0-Update"')
     Check "install.ps1 registers it as SYSTEM" ($install -match '(?s)New-ScheduledTaskPrincipal -UserId "SYSTEM".{0,1200}Register-ScheduledTask -TaskName \$UpdateTask')
