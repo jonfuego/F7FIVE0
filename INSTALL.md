@@ -216,7 +216,11 @@ documentation for `pg_hba.conf` "trust" mode, then run Setup again.
 
 When Setup installs PostgreSQL itself, it saves the `postgres` password in
 `C:\F7FIVE0\data\postgres-superuser.txt` (readable by Administrators only)
-before the install starts, so it survives a failed or interrupted run.
+before the install starts, so it survives a failed or interrupted run. Run
+Setup again after a failed install and it reuses that saved password without
+asking. If PostgreSQL has a different password than the one in that file,
+Setup stops with "Could not sign in to PostgreSQL"; correct or delete the file
+and run Setup again.
 
 ## Optional integrations
 
