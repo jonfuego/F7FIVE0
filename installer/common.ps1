@@ -19,6 +19,31 @@ function Fail([string]$msg) {
     throw "${prefix}: $msg"
 }
 
+# Turns off QuickEdit for this script's own console window. With QuickEdit on,
+# one click in the window starts a text selection ("Select" in the title bar)
+# and Windows pauses the script until Esc or Enter: a Setup that looks hung
+# for hours. Only this console changes, only for this run. No console (a
+# scheduled task, redirected output) is fine: it returns $false.
+function Disable-ConsoleQuickEdit {
+    try {
+        if (-not ("F7Five0.ConsoleMode" -as [type])) {
+            Add-Type -Namespace F7Five0 -Name ConsoleMode -MemberDefinition @'
+[DllImport("kernel32.dll", SetLastError = true)] public static extern IntPtr GetStdHandle(int nStdHandle);
+[DllImport("kernel32.dll", SetLastError = true)] public static extern bool GetConsoleMode(IntPtr hConsoleHandle, out uint lpMode);
+[DllImport("kernel32.dll", SetLastError = true)] public static extern bool SetConsoleMode(IntPtr hConsoleHandle, uint dwMode);
+'@
+        }
+        $stdin = [F7Five0.ConsoleMode]::GetStdHandle(-10)
+        $mode = [uint32]0
+        if (-not [F7Five0.ConsoleMode]::GetConsoleMode($stdin, [ref]$mode)) { return $false }
+        # Clear ENABLE_QUICK_EDIT_MODE (0x40); ENABLE_EXTENDED_FLAGS (0x80) makes it stick.
+        $new = ($mode -band (-bnot [uint32]0x40)) -bor [uint32]0x80
+        return [F7Five0.ConsoleMode]::SetConsoleMode($stdin, $new)
+    } catch {
+        return $false
+    }
+}
+
 function Refresh-Path {
     $machine = [Environment]::GetEnvironmentVariable("Path", "Machine")
     $user = [Environment]::GetEnvironmentVariable("Path", "User")

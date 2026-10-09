@@ -373,6 +373,7 @@ them from Settings > Apps if you don't need them.
 |---|---|
 | "Windows protected your PC" when starting Setup | Setup is not code-signed yet. Choose **More info**, then **Run anyway**. |
 | Setup stops or its console window closes | Run Setup again; it picks up where it stopped. Read the last lines of the newest `C:\F7FIVE0\logs\install-*.log` (and `setup-summary.txt` if it exists): the message there says what failed. "winget is not available" means installing **App Installer** from the Microsoft Store first. |
+| Setup looks frozen and the window title starts with "Select" | A click in the window started a text selection, which pauses Setup. Press **Esc**. To bring the window forward, click its title bar, not the text. (Setup 1.0.4 and later turn this off for their own window.) |
 | The zip won't extract ("access denied") | Use Setup.exe instead; the zip is only for installing without the wizard. If you do need it, extract into a folder you own (Downloads or Desktop, not Program Files) and check your antivirus didn't quarantine a file from it. |
 | The `.apk` won't install on Windows | It is the Android phone app. Put it on a phone, or sign in from the phone's browser and use **Account > Download for Android**. |
 | Browser can't reach localhost:3001 | `Get-Service F7FIVE0-*` should show three Running services. Check `C:\F7FIVE0\logs\F7FIVE0-Web.err.log`. |

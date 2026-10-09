@@ -123,6 +123,8 @@ function Step([string]$msg) {
 # Set-EnvKey, Install-Svc, and friends live in common.ps1 (shared with
 # remote-access.ps1).
 . (Join-Path $PSScriptRoot "common.ps1")
+# A click in the Setup console must not pause the install (QuickEdit).
+$null = Disable-ConsoleQuickEdit
 # Every Warn during this run, repeated in the summary at the end.
 $script:Warnings = New-Object System.Collections.Generic.List[string]
 
@@ -726,8 +728,41 @@ if (-not (Test-Path $VenvPy)) {
 # Install the hash-pinned lock (SEC-P0-1): --require-hashes refuses any dist
 # whose SHA-256 is not pinned, so a swapped or tampered wheel fails the
 # install rather than running with SYSTEM/service authority.
-& $VenvPy -m pip install --disable-pip-version-check -q --require-hashes -r (Join-Path $BackendDir "requirements.lock")
-if ($LASTEXITCODE -ne 0) { Fail "pip install failed ($LASTEXITCODE)" }
+# Run pip in its own process with a heartbeat like PostgreSQL's, so a slow
+# download never looks like a hang. --timeout/--retries make a dead
+# connection end in an error; the hard cap stops anything else that sticks.
+# pip's own output goes to logs\pip-install-*.log (shown here on failure).
+$pipStamp = Get-Date -Format "yyyyMMdd-HHmmss"
+$pipOut = Join-Path $LogsDir "pip-install-$pipStamp.log"
+$pipErr = Join-Path $LogsDir "pip-install-$pipStamp.err.log"
+$pipLock = Join-Path $BackendDir "requirements.lock"
+$pipArgs = "-m pip install --disable-pip-version-check --no-input --progress-bar off --timeout 60 --retries 5 --require-hashes -r `"$pipLock`""
+$pipMaxSeconds = 45 * 60
+$pipStart = Get-Date
+$pipProc = Start-Process -FilePath $VenvPy -ArgumentList $pipArgs -NoNewWindow -PassThru -RedirectStandardOutput $pipOut -RedirectStandardError $pipErr
+$null = $pipProc.Handle
+$nextBeat = 30
+while (-not $pipProc.WaitForExit(1000)) {
+    $elapsed = [int]((Get-Date) - $pipStart).TotalSeconds
+    if ($elapsed -ge $pipMaxSeconds) {
+        try { $pipProc.Kill() } catch { }
+        Fail "Python packages did not finish installing in $([int]($pipMaxSeconds / 60)) minutes. Check the internet connection, then run Setup again. pip's output is in $pipOut."
+    }
+    if ($elapsed -ge $nextBeat) {
+        Info ("still installing Python packages ({0}:{1:00} elapsed)" -f [int][math]::Floor($elapsed / 60), ($elapsed % 60))
+        $nextBeat += 30
+    }
+}
+$pipRc = $pipProc.ExitCode
+if ($pipRc -ne 0) {
+    foreach ($f in @($pipErr, $pipOut)) {
+        if ((Test-Path $f) -and (Get-Item $f).Length -gt 0) {
+            Warn "pip output ($f), last lines:"
+            Get-Content $f -Tail 25 | ForEach-Object { Info $_ }
+        }
+    }
+    Fail "pip install failed ($pipRc). Full output: $pipOut"
+}
 # Compile now: a -ServiceUser account can't write __pycache__ in backend\.
 & $VenvPy -m compileall -q (Join-Path $BackendDir "app") | Out-Null
 Ok "Python packages installed"
