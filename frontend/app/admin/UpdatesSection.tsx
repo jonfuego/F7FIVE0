@@ -21,7 +21,7 @@ import type { UpdateRun, UpdatesStatus } from "@/lib/types";
 import { resetUpdateBadge } from "@/lib/update-badge";
 import {
   UPDATE_STEPS, blockedText, checkedAgo, encodePasswordHeader, formatBytes, phaseLabel,
-  runSummary, stepIndex, updateErrorText,
+  runSummary, stepIndex, upToDateMessages, updateErrorText,
 } from "@/lib/updates";
 
 function errorOf(err: unknown): string {
@@ -38,7 +38,7 @@ export function UpdatesSection() {
   const [dismissedRun, setDismissedRun] = useState<string | null>(null);
   const [lostContact, setLostContact] = useState(false);
   const [checking, setChecking] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [checkedNow, setCheckedNow] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -99,19 +99,13 @@ export function UpdatesSection() {
   async function checkNow() {
     setChecking(true);
     setActionError(null);
-    setNotice(null);
+    setCheckedNow(false);
     try {
       const data = await apiPost<UpdatesStatus>("/api/admin/updates/check", {});
       setStatus(data);
       setRun(data.run);
       resetUpdateBadge();
-      if (!data.check_error) {
-        setNotice(
-          data.update_available
-            ? `Version ${data.latest_version} is available.`
-            : "You're up to date.",
-        );
-      }
+      setCheckedNow(true);
     } catch (err) {
       setActionError(errorOf(err));
     } finally {
@@ -204,6 +198,15 @@ export function UpdatesSection() {
 
   const showRun = run !== null && run.phase !== "idle" && run.id !== dismissedRun;
   const blocked = status ? blockedText(status.install_blocked) : null;
+  // "You're up to date." shows in one place: the hint, or the notice after Check now.
+  const upToDate = status
+    ? upToDateMessages({
+        latestVersion: status.latest_version,
+        updateAvailable: status.update_available,
+        checkError: status.check_error,
+        checkedNow,
+      })
+    : null;
   const canUpdate = status !== null && status.can_install && !active && status.rollback_ready;
 
   return (
@@ -240,7 +243,7 @@ export function UpdatesSection() {
               label="Latest version"
               value={status.latest_version ?? "Not known yet"}
               testId="latest-version"
-              hint={status.latest_version && !status.update_available ? "You're up to date." : undefined}
+              hint={upToDate?.hint}
             />
             <Fact label="Last checked" value={checkedAgo(status.checked_at)} testId="last-checked" />
           </dl>
@@ -250,7 +253,7 @@ export function UpdatesSection() {
               The last check didn&apos;t work: {status.check_error}
             </div>
           ) : null}
-          {notice && !status.check_error ? <p className="text-sm text-neutral-300">{notice}</p> : null}
+          {upToDate?.notice ? <p className="text-sm text-neutral-300">{upToDate.notice}</p> : null}
 
           {status.update_available && status.notes ? (
             <div>
