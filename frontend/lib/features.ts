@@ -5,6 +5,8 @@
 
 import { useEffect, useState } from "react";
 
+import type { ArrFeatures } from "./library-scan";
+
 export type Features = {
   requests: { enabled: boolean; movie: boolean; series: boolean };
   /** Address for use away from home (Tailscale / Cloudflare), if set up. */
@@ -13,6 +15,8 @@ export type Features = {
   passkeys?: { enabled: boolean; rp_id: string | null };
   /** Hardware (NVENC) transcoding on the server. */
   transcode?: { hardware: boolean };
+  /** Which *arr apps are set up (Admin hides "Run *arr sync now" without one). */
+  arr?: ArrFeatures;
 };
 
 const NONE: Features = { requests: { enabled: false, movie: false, series: false }, public_url: null, passkeys: { enabled: false, rp_id: null } };

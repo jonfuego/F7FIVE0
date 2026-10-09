@@ -15,7 +15,9 @@ import { AlphaRail, alphaLetterOf } from "@/components/AlphaRail";
 import { Grid, GridEmpty } from "@/components/Grid";
 import { apiGet } from "@/lib/client-api";
 import { colorForTitle, hueFromString } from "@/lib/format";
+import { emptyLibraryText } from "@/lib/library-scan";
 import { useQueue, type QueueItem } from "@/lib/queue";
+import { useScanState } from "@/lib/use-scan-state";
 import { useScrollRestoration } from "@/lib/scroll-restoration";
 import { useViewPref } from "@/lib/use-view-pref";
 import type { MusicArtist, OverrideOut } from "@/lib/types";
@@ -38,6 +40,8 @@ export default function MusicPage() {
   const [reloadTick, setReloadTick] = useState(0);
   const [editTarget, setEditTarget] = useState<MusicArtist | null>(null);
   const [editInitial, setEditInitial] = useState<EditInitial | null>(null);
+  // While a folder scan runs the list reloads every few seconds.
+  const scan = useScanState();
 
   useEffect(() => {
     let cancelled = false;
@@ -96,7 +100,7 @@ export default function MusicPage() {
     return () => {
       cancelled = true;
     };
-  }, [reloadTick]);
+  }, [reloadTick, scan.ticks]);
 
   const filtered = useMemo(() => {
     if (!artists) return null;
@@ -131,9 +135,7 @@ export default function MusicPage() {
           ))}
         </Grid>
       ) : filtered.length === 0 ? (
-        <GridEmpty
-          message={"No artists in the library yet."}
-        />
+        <GridEmpty message={emptyLibraryText("artists", scan.running)} />
       ) : (
         <Grid variant="square">
           {filtered.map((a) => (

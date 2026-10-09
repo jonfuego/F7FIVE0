@@ -14,6 +14,8 @@ import { UpdatesSection } from "./UpdatesSection";
 import { LibraryFoldersSection } from "./LibraryFoldersSection";
 import { MetadataSection } from "./MetadataSection";
 import { apiGet, apiPatch, apiPost, apiDelete, ApiError } from "@/lib/client-api";
+import { useFeatures } from "@/lib/features";
+import { showArrSync } from "@/lib/library-scan";
 import type {
   ActiveTranscode, AdminSession, AdminUser, AuthEvent, Me, ServerHealth,
   WatchHistoryRow,
@@ -348,6 +350,10 @@ function NewUserForm({ onCreated }: { onCreated: (u: AdminUser) => void }) {
 // Library sync
 // ---------------------------------------------------------------------------
 function LibrarySection() {
+  // "Run *arr sync now" only shows when Radarr, Sonarr or Lidarr is set up;
+  // folder libraries are scanned from Admin > Library folders.
+  const features = useFeatures();
+  const showArr = showArrSync(features?.arr);
   const [busy, setBusy] = useState(false);
   const [mvBusy, setMvBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
@@ -384,19 +390,22 @@ function LibrarySection() {
     <section className="rounded-xl border border-neutral-800 bg-neutral-900/40 p-6">
       <h2 className="text-base font-semibold">Library</h2>
       <p className="mt-1 text-xs text-neutral-500">
-        The *arr sync scheduler already runs every 5 minutes. Music videos are
-        scanned off the filesystem on demand; trigger one after dropping new
-        files into the Music Videos share.
+        {showArr ? "The *arr sync scheduler already runs every 5 minutes. " : ""}
+        Music videos are scanned off the filesystem on demand; trigger one
+        after dropping new files into the Music Videos share. Scan the movie,
+        TV and music folders from Library folders above.
       </p>
       <div className="mt-4 flex flex-wrap items-center gap-3">
-        <button
-          type="button"
-          onClick={runSync}
-          disabled={busy}
-          className={primaryButtonCls}
-        >
-          {busy ? "Queuing..." : "Run *arr sync now"}
-        </button>
+        {showArr ? (
+          <button
+            type="button"
+            onClick={runSync}
+            disabled={busy}
+            className={primaryButtonCls}
+          >
+            {busy ? "Queuing..." : "Run *arr sync now"}
+          </button>
+        ) : null}
         <button
           type="button"
           onClick={runMusicVideoScan}
