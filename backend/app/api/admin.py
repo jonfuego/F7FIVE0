@@ -49,7 +49,7 @@ from app.services.arr.sonarr import SonarrClient
 from app.config import settings
 from app.services import (
     android_app, library_folders, nas_auth, reminders, remote_access as ra,
-    server_version, tmdb_key, updates,
+    scan_status, server_version, tmdb_key, updates,
 )
 from app.services.metadata.runner import enrich_album, enrich_artist, enrich_movie
 
@@ -1066,6 +1066,36 @@ def put_library_folders(
     log.info("library folders saved: %s", library_folders.all_folders(db))
     scheduler.trigger_folder_scan_now()
     return _library_folders_out(db)
+
+
+@router.get("/library/scan")
+def get_library_scan(
+    _admin: Annotated[User, Depends(require_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """The folder scan's state: running or idle, which library it is on, counts
+    per library, when the last scan finished, and the last error."""
+    return scan_status.read(db)
+
+
+@router.post("/library/scan", status_code=202)
+def start_library_scan(
+    _admin: Annotated[User, Depends(require_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Scan the library folders now. 409 while a scan is already running. The
+    scan itself runs on the scheduler; poll GET /library/scan to watch it."""
+    if not scan_status.begin(db):
+        raise HTTPException(status_code=409, detail="scan_running")
+    db.commit()
+    try:
+        scheduler.trigger_folder_scan_now()
+    except Exception as exc:
+        log.exception("could not queue the folder scan")
+        scan_status.finish(db, "The scan could not be started.")
+        db.commit()
+        raise HTTPException(status_code=500, detail="scan_not_started") from exc
+    return scan_status.read(db)
 
 
 # ---------------------------------------------------------------------------

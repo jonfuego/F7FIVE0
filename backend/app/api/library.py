@@ -42,6 +42,7 @@ from app.models.playback import WatchProgress
 from app.models.track_play import TrackPlay
 from app.models.tv import Episode, Series
 from app.models.user import User
+from app.services import scan_status
 from app.services.art import resolve_art, resolve_art_batch
 
 
@@ -1929,6 +1930,19 @@ def list_on_deck(
         if len(out) >= limit:
             break
     return out
+
+
+# ---------------------------------------------------------------------------
+# Is a folder scan running? (any signed-in user: the empty library pages use it)
+# ---------------------------------------------------------------------------
+@router.get("/library/scan-state")
+def library_scan_state(
+    _user: Annotated[User, Depends(current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Only whether a scan is running and when the last one finished. The
+    counts and errors stay on the admin endpoint."""
+    return scan_status.scan_state(db)
 
 
 # ---------------------------------------------------------------------------
