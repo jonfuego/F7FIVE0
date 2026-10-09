@@ -35,6 +35,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 from sqlalchemy import update
 from sqlalchemy.orm import Session
 
+from app import log_redact
 from app.config import settings
 from app.db import SessionLocal
 from app.models.media_file import MediaFile, ScanState
@@ -58,6 +59,7 @@ logging.basicConfig(
     level=settings.log_level,
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
+log_redact.install()
 log = logging.getLogger("f7five0.stream")
 
 

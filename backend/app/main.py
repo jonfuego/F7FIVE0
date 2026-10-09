@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
+from app import log_redact
 from app.config import settings
 from app.db import engine
 from app.services import nas_auth, server_version
@@ -38,6 +39,8 @@ logging.basicConfig(
     level=settings.log_level,
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
+# httpx logs request URLs at INFO, and a TMDB URL carries the api key.
+log_redact.install()
 log = logging.getLogger("f7five0.api")
 
 

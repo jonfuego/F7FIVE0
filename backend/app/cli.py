@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import select
 
+from app import log_redact
 from app.config import settings
 from app.db import db_session
 from app.models.art import (
@@ -112,6 +113,7 @@ def cmd_backfill_genres(args: argparse.Namespace) -> int:
     from app.services.sync import _genres  # private helper; reuse so logic matches sync
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
+    log_redact.install()
     log = logging.getLogger("backfill-genres")
 
     artists_touched = 0
@@ -179,6 +181,7 @@ def cmd_backfill_art(args: argparse.Namespace) -> int:
     )
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
+    log_redact.install()
     log = logging.getLogger("backfill-art")
 
     delay_ms = max(0, int(settings.art_download_delay_ms))
@@ -259,6 +262,7 @@ def cmd_scan_art(args: argparse.Namespace) -> int:
     from app.services.art_sources import itunes as itunes_source
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
+    log_redact.install()
     log = logging.getLogger("scan-art")
 
     delay_sec = max(0, settings.art_download_delay_ms) / 1000.0
@@ -365,6 +369,7 @@ def cmd_enrich_metadata(args: argparse.Namespace) -> int:
     )
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
+    log_redact.install()
     log = logging.getLogger("enrich-metadata")
 
     if args.kind == "all":
@@ -419,6 +424,7 @@ def cmd_analyze_audio(args: argparse.Namespace) -> int:
     from app.services import audio_analysis as aa
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
+    log_redact.install()
     log = logging.getLogger("analyze-audio")
 
     target_lufs = float(getattr(args, "target_lufs", aa.TARGET_LUFS))
