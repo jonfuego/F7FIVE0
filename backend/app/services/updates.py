@@ -859,14 +859,22 @@ def begin_run(helper: ra.Helper, to_version: str, source: str, first_phase: str 
 
 
 def begin_apply(db, helper: ra.Helper) -> dict:
-    """Install the latest published release: check the stored answer, reserve
-    the slot, and download + verify in the background. Raises UpdateError."""
-    check = stored_check(db)
+    """Install the latest published release: ask GitHub again, reserve the
+    slot, and download + verify in the background. Raises UpdateError.
+
+    The stored answer is only as new as the last daily check, and this installs
+    what it names, so a server that last checked when 1.0.4 was the latest would
+    install 1.0.4 even after 1.0.6 is out. The check is refreshed first (after
+    the cheap refusals). If GitHub can't be reached the last good answer is kept
+    and used. The caller commits, also when this raises (the fresh answer should
+    be kept)."""
     installed = server_version.installed()
     if not helper.available():
         raise UpdateError("helper_unavailable")
     if is_running():
         raise UpdateError("update_running")
+    check_for_update(db)
+    check = stored_check(db)
     latest = check.get("latest")
     if not latest:
         raise UpdateError("no_update")

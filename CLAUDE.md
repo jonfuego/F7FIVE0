@@ -244,6 +244,11 @@ INSTALL.md for the operator view.
   drafts and prereleases, and stores `{checked_at, latest, notes, setup_url,
   sums_url, error}` in `app_settings` `update_check`; a network error is stored,
   never raised. Admins get a badge on the Admin link when `latest` is newer.
+  The stored answer can be a day old, so "Update now" asks GitHub again
+  before it installs (`updates.begin_apply`), and falls back to the stored
+  answer only when GitHub can't be reached. Updates are not cumulative: each
+  release's Setup is a full installer, so a server can jump from any version to
+  the latest.
   Nothing installs itself: the API verifies the Setup, writes
   `data/updates/request.json {id, setup_path, sha256, version, source}`, and
   starts the SYSTEM scheduled task `F7FIVE0-Update` (startable by the
