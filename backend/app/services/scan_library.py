@@ -38,6 +38,13 @@ Several folders per library: TV and music merge across folders (one show,
 one artist, one album). Movies do not: the same movie found in two folders
 shows as two entries (decision 2026-10-03). The second entry can't share the
 TMDB id (unique), so it copies the details and art of the first.
+
+Saving as it goes: a scan commits every BATCH_SIZE items and at the end of
+each library, so rows show up in the app while the scan runs and a scan that
+stops part way keeps what it saved. Enrichment jobs (TMDB / MusicBrainz) are
+scheduled only after the batch that holds their row has committed; scheduled
+earlier they would run in their own session, not find the row, and never be
+retried. After a pass, `schedule_catch_up` re-queues rows that were missed.
 """
 from __future__ import annotations
 
@@ -46,7 +53,7 @@ import os
 import re
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
-from typing import Iterable, Iterator, Optional
+from typing import Callable, Iterable, Iterator, Optional
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -150,9 +157,74 @@ def any_enabled(db: Optional[Session] = None) -> bool:
     return movies_enabled(db) or tv_enabled(db) or music_enabled(db)
 
 
-def scan_all(db: Session) -> FolderScanStats:
-    """Scan every library this scanner owns. Each runs in its own savepoint
-    so one bad library does not roll back the others."""
+# Items (a movie, an episode, a track: whatever the loop counts) per commit.
+BATCH_SIZE = 25
+
+# Pause between catch-up enrichment jobs, on top of the usual per-item delay,
+# so re-queuing a big library does not hit TMDB / MusicBrainz all at once.
+CATCH_UP_STAGGER_SEC = 1.0
+
+# on_progress(label, state, stats, error): the scan reports each library as it
+# starts, at every batch commit (state "running"), and when it ends ("done" or
+# "failed", with the error text). Admin's scan status is built from this.
+ProgressFn = Callable[..., None]
+
+
+class _Batcher:
+    """Commits a library's scan every BATCH_SIZE items and at its end, and
+    holds enrichment jobs back until the rows they belong to are committed."""
+
+    def __init__(self, db: Session, label: str, stats: "FolderScanStats", on_progress: Optional[ProgressFn] = None) -> None:
+        self.db = db
+        self.label = label
+        self.stats = stats
+        self.on_progress = on_progress
+        self._items = 0
+        self._movies: list = []
+        self._artists: list = []
+        self._albums: list = []
+
+    def enrich_movie(self, movie_id) -> None:
+        self._movies.append(movie_id)
+
+    def enrich_artist(self, artist_id) -> None:
+        self._artists.append(artist_id)
+
+    def enrich_album(self, album_id) -> None:
+        self._albums.append(album_id)
+
+    def item_done(self) -> None:
+        self._items += 1
+        if self._items >= BATCH_SIZE:
+            self.commit()
+
+    def commit(self) -> None:
+        """Save everything so far (rows and scan status together), then queue
+        enrichment for the rows that save made visible."""
+        if self.on_progress is not None:
+            self.on_progress(self.label, "running", self.stats)
+        self.db.commit()
+        self._items = 0
+        movies, artists, albums = self._movies, self._artists, self._albums
+        self._movies, self._artists, self._albums = [], [], []
+        for ids, schedule in (
+            (movies, scheduler.schedule_enrich_movie),
+            (artists, scheduler.schedule_enrich_artist),
+            (albums, scheduler.schedule_enrich_album),
+        ):
+            for item_id in ids:
+                try:
+                    schedule(item_id)
+                except Exception:
+                    log.exception("could not schedule enrichment for %s", item_id)
+
+
+def scan_all(db: Session, on_progress: Optional[ProgressFn] = None) -> FolderScanStats:
+    """Scan every library this scanner owns, saving as it goes.
+
+    Each library commits every BATCH_SIZE items and at its end. A library that
+    raises loses only the batch it was in: what it committed earlier stays, a
+    rollback drops the rest, and the other libraries still run."""
     total = FolderScanStats()
     for label, enabled, fn in (
         ("movies", movies_enabled, scan_movies),
@@ -161,15 +233,59 @@ def scan_all(db: Session) -> FolderScanStats:
     ):
         if not enabled(db):
             continue
+        stats = FolderScanStats()
+        if on_progress is not None:
+            on_progress(label, "running", stats)
+            db.commit()  # Admin shows "scanning" before the first batch is done
+        error = None
         try:
-            with db.begin_nested():
-                s = fn(db)
-            for k in total.__dataclass_fields__:
-                setattr(total, k, getattr(total, k) + getattr(s, k))
-        except Exception:
+            fn(db, stats, on_progress)
+        except Exception as exc:
             log.exception("%s folder scan failed", label)
-            total.errors += 1
+            db.rollback()
+            stats.errors += 1
+            error = f"{label} scan failed: {exc}"
+        if on_progress is not None:
+            on_progress(label, "failed" if error else "done", stats, error)
+        db.commit()
+        for k in total.__dataclass_fields__:
+            setattr(total, k, getattr(total, k) + getattr(stats, k))
     return total
+
+
+def schedule_catch_up(db: Session) -> dict:
+    """Queue enrichment for rows that have a TMDB / MusicBrainz id but were
+    never enriched (`metadata_synced_at` is null). This repairs installs whose
+    first scan lost its enrichment jobs, and it is cheap to run after every
+    scan: enrichment stamps `metadata_synced_at` even when it fails, so a row
+    is queued once, not forever. Jobs keep their `replace_existing` ids and
+    are spaced out so a big library cannot flood the API. Movies are left
+    alone while no TMDB key is set (a run without one would only mark them
+    done). Call it after the scan's commit."""
+    movie_ids = []
+    if tmdb_key.get():
+        movie_ids = list(db.scalars(select(Movie.id).where(
+            Movie.tmdb_id.is_not(None), Movie.metadata_synced_at.is_(None),
+        )))
+    artist_ids = list(db.scalars(select(Artist.id).where(
+        Artist.mbid.is_not(None), Artist.metadata_synced_at.is_(None),
+    )))
+    album_ids = list(db.scalars(select(Album.id).where(
+        Album.mbid.is_not(None), Album.metadata_synced_at.is_(None),
+    )))
+    n = 0
+    for ids, schedule in (
+        (movie_ids, scheduler.schedule_enrich_movie),
+        (artist_ids, scheduler.schedule_enrich_artist),
+        (album_ids, scheduler.schedule_enrich_album),
+    ):
+        for item_id in ids:
+            schedule(item_id, delay_sec=scheduler.ENRICH_DELAY_SEC + n * CATCH_UP_STAGGER_SEC)
+            n += 1
+    if n:
+        log.info("enrichment catch-up: %d movies, %d artists, %d albums queued",
+                 len(movie_ids), len(artist_ids), len(album_ids))
+    return {"movies": len(movie_ids), "artists": len(artist_ids), "albums": len(album_ids)}
 
 
 # ---------------------------------------------------------------------------
@@ -612,18 +728,24 @@ def _copy_movie_art(db: Session, src: Movie, dst: Movie, stats: FolderScanStats)
         _save_art_bytes(db, ENTITY_MOVIE, dst.id, role, data, f"copy:{src.id}", stats)
 
 
-def scan_movies(db: Session) -> FolderScanStats:
-    stats = FolderScanStats()
+def scan_movies(
+    db: Session, stats: Optional[FolderScanStats] = None, on_progress: Optional[ProgressFn] = None,
+) -> FolderScanStats:
+    stats = stats if stats is not None else FolderScanStats()
+    batch = _Batcher(db, "movies", stats, on_progress)
     roots = library_folders.folders(db, "movies")
     prefixes = _root_prefixes(roots)
     for ri, root in _reachable(roots, "movies"):
-        _scan_movies_root(db, root, ri, prefixes, stats)
+        _scan_movies_root(db, root, ri, prefixes, stats, batch)
     db.flush()
     stats.log_summary("movies")
+    batch.commit()
     return stats
 
 
-def _scan_movies_root(db: Session, root: str, ri: int, prefixes: list[str], stats: FolderScanStats) -> None:
+def _scan_movies_root(
+    db: Session, root: str, ri: int, prefixes: list[str], stats: FolderScanStats, batch: _Batcher,
+) -> None:
     seen: set[str] = set()
     for found in discover_movies(root):
         path = _store_path(found.path)
@@ -666,7 +788,7 @@ def _scan_movies_root(db: Session, root: str, ri: int, prefixes: list[str], stat
             released = _parse_date(match.get("release_date"))
             movie.year = movie.year or (released.year if released else None)
         if movie.tmdb_id and new:
-            scheduler.schedule_enrich_movie(movie.id)
+            batch.enrich_movie(movie.id)
 
         _upsert_file(db, kind=MediaKind.movie, ref_id=movie.id, path=path, stats=stats)
 
@@ -682,6 +804,7 @@ def _scan_movies_root(db: Session, root: str, ri: int, prefixes: list[str], stat
         if match:
             _fetch_tmdb_art(db, ENTITY_MOVIE, movie.id, ROLE_POSTER, match.get("poster_path"), stats)
             _fetch_tmdb_art(db, ENTITY_MOVIE, movie.id, ROLE_BACKDROP, match.get("backdrop_path"), stats)
+        batch.item_done()
     _mark_missing_under(db, MediaKind.movie, root, seen, stats)
 
 
@@ -712,19 +835,23 @@ def discover_show(show_dir: str) -> Iterator[FoundEpisode]:
             yield FoundEpisode(os.path.join(dirpath, fname), season, episode, title)
 
 
-def scan_tv(db: Session) -> FolderScanStats:
+def scan_tv(
+    db: Session, stats: Optional[FolderScanStats] = None, on_progress: Optional[ProgressFn] = None,
+) -> FolderScanStats:
     """Shows merge across folders: a show split over two drives is one
     series, and an episode found in both gets two files."""
-    stats = FolderScanStats()
+    stats = stats if stats is not None else FolderScanStats()
+    batch = _Batcher(db, "tv", stats, on_progress)
     art_done: set = set()
     for _ri, root in _reachable(library_folders.folders(db, "tv"), "tv"):
-        _scan_tv_root(db, root, art_done, stats)
+        _scan_tv_root(db, root, art_done, stats, batch)
     db.flush()
     stats.log_summary("tv")
+    batch.commit()
     return stats
 
 
-def _scan_tv_root(db: Session, root: str, art_done: set, stats: FolderScanStats) -> None:
+def _scan_tv_root(db: Session, root: str, art_done: set, stats: FolderScanStats, batch: _Batcher) -> None:
     seen: set[str] = set()
     for show_name in sorted(os.listdir(root)):
         show_dir = os.path.join(root, show_name)
@@ -813,6 +940,7 @@ def _scan_tv_root(db: Session, root: str, art_done: set, stats: FolderScanStats)
                 ep.title = fe.title
             seen.add(path)
             _upsert_file(db, kind=MediaKind.episode, ref_id=ep.id, path=path, stats=stats)
+            batch.item_done()
 
         # One art pick per series per pass: with the show in two folders the
         # first folder's sidecar wins, so the two don't swap every scan.
@@ -930,14 +1058,18 @@ def discover_music(root: str) -> Iterator[FoundTrack]:
             )
 
 
-def scan_music(db: Session) -> FolderScanStats:
+def scan_music(
+    db: Session, stats: Optional[FolderScanStats] = None, on_progress: Optional[ProgressFn] = None,
+) -> FolderScanStats:
     """Artists and albums merge across folders."""
-    stats = FolderScanStats()
+    stats = stats if stats is not None else FolderScanStats()
+    batch = _Batcher(db, "music", stats, on_progress)
     cache = _MusicCache()
     for _ri, root in _reachable(library_folders.folders(db, "music"), "music"):
-        _scan_music_root(db, root, cache, stats)
+        _scan_music_root(db, root, cache, stats, batch)
     db.flush()
     stats.log_summary("music")
+    batch.commit()
     return stats
 
 
@@ -953,7 +1085,7 @@ class _MusicCache:
         self.album_art_done, self.artist_art_done = set(), set()
 
 
-def _scan_music_root(db: Session, root: str, cache: _MusicCache, stats: FolderScanStats) -> None:
+def _scan_music_root(db: Session, root: str, cache: _MusicCache, stats: FolderScanStats, batch: _Batcher) -> None:
     seen: set[str] = set()
     artists = cache.artists
     albums = cache.albums
@@ -976,7 +1108,7 @@ def _scan_music_root(db: Session, root: str, cache: _MusicCache, stats: FolderSc
                 db.flush()
                 stats.artists += 1
                 if artist.mbid:
-                    scheduler.schedule_enrich_artist(artist.id)
+                    batch.enrich_artist(artist.id)
             artists[akey] = artist
 
         bkey = (artist.id, ft.album.lower())
@@ -998,7 +1130,7 @@ def _scan_music_root(db: Session, root: str, cache: _MusicCache, stats: FolderSc
                 db.flush()
                 stats.albums += 1
                 if album.mbid:
-                    scheduler.schedule_enrich_album(album.id)
+                    batch.enrich_album(album.id)
             albums[bkey] = album
 
         path = _store_path(ft.path)
@@ -1042,4 +1174,5 @@ def _scan_music_root(db: Session, root: str, cache: _MusicCache, stats: FolderSc
             if os.path.normcase(os.path.abspath(artist_dir)) != os.path.normcase(os.path.abspath(root)):
                 _import_art_file(db, entity_kind=ENTITY_ARTIST, entity_id=artist.id, role=ROLE_THUMB,
                                  image_path=_find_sidecar(artist_dir, ("artist", "folder", "poster", "thumb")), stats=stats)
+        batch.item_done()
     _mark_missing_under(db, MediaKind.track, root, seen, stats)

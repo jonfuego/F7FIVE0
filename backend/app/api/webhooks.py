@@ -111,13 +111,15 @@ async def radarr_webhook(
         log.warning("radarr webhook %s missing movie.id", event)
         return {"received": True, "event": event, "refreshed": False}
 
+    stats = sync.SyncStats()
     try:
-        movie = sync.refresh_movie(db, radarr_id)
+        movie = sync.refresh_movie(db, radarr_id, stats)
         db.commit()
     except Exception:
         db.rollback()
         log.exception("refresh_movie failed for radarr_id=%s", radarr_id)
         raise HTTPException(status_code=500, detail="refresh_failed")
+    sync.schedule_pending_enrichment(stats)
 
     return {
         "received": True,
@@ -177,13 +179,15 @@ async def lidarr_webhook(
         log.warning("lidarr webhook %s missing artist.id", event)
         return {"received": True, "event": event, "refreshed": False}
 
+    stats = sync.SyncStats()
     try:
-        artist = sync.refresh_artist(db, lidarr_id)
+        artist = sync.refresh_artist(db, lidarr_id, stats)
         db.commit()
     except Exception:
         db.rollback()
         log.exception("refresh_artist failed for lidarr_id=%s", lidarr_id)
         raise HTTPException(status_code=500, detail="refresh_failed")
+    sync.schedule_pending_enrichment(stats)
 
     return {
         "received": True,

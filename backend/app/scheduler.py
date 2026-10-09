@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import random
+import threading
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -15,8 +16,10 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
 from app.config import settings
-from app.db import db_session
-from app.services import library_folders, live_hub, nas_auth, scan_library, scan_music_videos, sync, updates
+from app.db import SessionLocal, db_session
+from app.services import (
+    library_folders, live_hub, nas_auth, scan_library, scan_music_videos, scan_status, sync, updates,
+)
 
 
 log = logging.getLogger("f7five0.scheduler")
@@ -34,18 +37,27 @@ JOB_UPDATE_CHECK = "update_check"
 # at the same second. Checking never installs anything.
 UPDATE_CHECK_JITTER_SEC = 3600
 
-# Defer enrichment far enough that the upsert transaction is committed
-# before the worker reads the row. Five seconds matches the spec.
+# Defer enrichment a few seconds. Callers schedule it only after the row's
+# transaction has committed (the scan and the *arr sync both do); the delay is
+# a spacing, not what makes the row visible.
 ENRICH_DELAY_SEC = 5
+
+# One folder scan at a time in this process: the periodic job, the ad hoc job
+# (Admin, folder save) and a manual start can all be queued together.
+_folder_scan_lock = threading.Lock()
 
 
 def _run_full_sync() -> None:
     """Scheduler-invoked wrapper around sync.full_sync. Owns its own session."""
+    stats = None
     try:
         with db_session() as db:
-            sync.full_sync(db)
+            stats = sync.full_sync(db)
     except Exception:
         log.exception("scheduled full_sync raised")
+        return
+    # The session has committed; the rows are visible to the enrichment jobs.
+    sync.schedule_pending_enrichment(stats)
 
 
 def _run_music_videos_scan() -> None:
@@ -62,21 +74,60 @@ def _run_music_videos_scan() -> None:
         log.exception("music_videos scan raised")
 
 
+def _scan_folders() -> bool:
+    """One pass over the library folders. The scan saves as it goes (every
+    batch and at the end of each library, see scan_library), so this owns its
+    session and does not wrap the pass in one commit-on-exit block. Admin's
+    scan status is written along the way. Returns whether a music-videos
+    folder is configured."""
+    has_music_videos = False
+    error = None
+    db = SessionLocal()
+    try:
+        scan_status.begin(db, force=True)
+        db.commit()
+
+        def progress(label, state, stats, err=None):
+            scan_status.set_library(db, label, state, stats, err)
+
+        # Connect any saved NAS sign-ins before walking folders, so a UNC
+        # share is readable for this scan. Cheap when already connected.
+        nas_auth.ensure_all(db)
+        scan_library.scan_all(db, on_progress=progress)
+        has_music_videos = bool(library_folders.folders(db, "music_videos"))
+        db.commit()
+        # Everything is saved: re-queue enrichment for rows that missed it.
+        try:
+            scan_library.schedule_catch_up(db)
+        except Exception:
+            log.exception("enrichment catch-up raised")
+    except Exception as exc:
+        log.exception("folder scan raised")
+        db.rollback()
+        error = f"The scan stopped: {exc}"
+    finally:
+        try:
+            scan_status.finish(db, error)
+            db.commit()
+        except Exception:
+            log.exception("could not record the end of the folder scan")
+            db.rollback()
+        db.close()
+    return has_music_videos
+
+
 def _run_folder_scan() -> None:
     """Scan the libraries that have no *arr (movies / TV / music folders),
     then the music-videos folder when one is configured. Finally kick off one
     low-priority audio-analysis step so new music gets loudness / waveform /
     similarity filled in without an operator running the CLI."""
-    has_music_videos = False
+    if not _folder_scan_lock.acquire(blocking=False):
+        log.info("a folder scan is already running; skipping this one")
+        return
     try:
-        with db_session() as db:
-            # Connect any saved NAS sign-ins before walking folders, so a UNC
-            # share is readable for this scan. Cheap when already connected.
-            nas_auth.ensure_all(db)
-            scan_library.scan_all(db)
-            has_music_videos = bool(library_folders.folders(db, "music_videos"))
-    except Exception:
-        log.exception("folder scan raised")
+        has_music_videos = _scan_folders()
+    finally:
+        _folder_scan_lock.release()
     if has_music_videos:
         _run_music_videos_scan()
     # One harmless real live-channel event, proving the hub end to end: the
@@ -291,12 +342,13 @@ def _run_enrich_album(album_id: uuid.UUID) -> None:
         log.exception("enrich_album raised for album_id=%s", album_id)
 
 
-def schedule_enrich_movie(movie_id: uuid.UUID) -> None:
-    """Defer an enrich_movie call by ENRICH_DELAY_SEC. No-op when the
-    scheduler isn't running (e.g., during a CLI invocation)."""
+def schedule_enrich_movie(movie_id: uuid.UUID, delay_sec: float = ENRICH_DELAY_SEC) -> None:
+    """Defer an enrich_movie call by `delay_sec` (ENRICH_DELAY_SEC by default).
+    Only call it for a row that is already committed. No-op when the scheduler
+    isn't running (e.g., during a CLI invocation)."""
     if _scheduler is None:
         return
-    when = datetime.now(timezone.utc) + timedelta(seconds=ENRICH_DELAY_SEC)
+    when = datetime.now(timezone.utc) + timedelta(seconds=delay_sec)
     _scheduler.add_job(
         _run_enrich_movie,
         args=[movie_id],
@@ -306,10 +358,10 @@ def schedule_enrich_movie(movie_id: uuid.UUID) -> None:
     )
 
 
-def schedule_enrich_artist(artist_id: uuid.UUID) -> None:
+def schedule_enrich_artist(artist_id: uuid.UUID, delay_sec: float = ENRICH_DELAY_SEC) -> None:
     if _scheduler is None:
         return
-    when = datetime.now(timezone.utc) + timedelta(seconds=ENRICH_DELAY_SEC)
+    when = datetime.now(timezone.utc) + timedelta(seconds=delay_sec)
     _scheduler.add_job(
         _run_enrich_artist,
         args=[artist_id],
@@ -319,10 +371,10 @@ def schedule_enrich_artist(artist_id: uuid.UUID) -> None:
     )
 
 
-def schedule_enrich_album(album_id: uuid.UUID) -> None:
+def schedule_enrich_album(album_id: uuid.UUID, delay_sec: float = ENRICH_DELAY_SEC) -> None:
     if _scheduler is None:
         return
-    when = datetime.now(timezone.utc) + timedelta(seconds=ENRICH_DELAY_SEC)
+    when = datetime.now(timezone.utc) + timedelta(seconds=delay_sec)
     _scheduler.add_job(
         _run_enrich_album,
         args=[album_id],

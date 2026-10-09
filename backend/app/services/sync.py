@@ -12,14 +12,17 @@ Two entry points:
     full_sync(db)                — run everything in order. Used by the scheduler.
     refresh_movie/series/artist  — single-record refreshes. Used by webhooks.
 
-All DB work goes through the caller's Session. Callers commit.
+All DB work goes through the caller's Session. Callers commit. Enrichment
+jobs are not scheduled while the sync runs: the ids are collected on
+`SyncStats` and the caller hands them to `schedule_pending_enrichment` after
+its commit, so a job never runs before the row it enriches is visible.
 """
 from __future__ import annotations
 
 import logging
 import os
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -69,6 +72,10 @@ class SyncStats:
     files_missing: int = 0
     files_pruned: int = 0
     errors: int = 0
+    # Rows to enrich once the caller has committed (see schedule_pending_enrichment).
+    pending_movies: list = field(default_factory=list)
+    pending_artists: list = field(default_factory=list)
+    pending_albums: list = field(default_factory=list)
 
     def log_summary(self) -> None:
         log.info(
@@ -79,6 +86,25 @@ class SyncStats:
             self.files_upserted, self.files_probed, self.files_missing,
             self.files_pruned, self.errors,
         )
+
+
+def schedule_pending_enrichment(stats: Optional[SyncStats]) -> None:
+    """Queue enrichment for the rows this sync collected. Call it after the
+    session that ran the sync has committed. Each id is handed over once."""
+    if stats is None:
+        return
+    movies, artists, albums = stats.pending_movies, stats.pending_artists, stats.pending_albums
+    stats.pending_movies, stats.pending_artists, stats.pending_albums = [], [], []
+    for ids, schedule in (
+        (movies, scheduler.schedule_enrich_movie),
+        (artists, scheduler.schedule_enrich_artist),
+        (albums, scheduler.schedule_enrich_album),
+    ):
+        for item_id in ids:
+            try:
+                schedule(item_id)
+            except Exception:
+                log.exception("could not schedule enrichment for %s", item_id)
 
 
 # ---------------------------------------------------------------------------
@@ -191,7 +217,7 @@ def _upsert_movie(
     stats.movies_upserted += 1
     if tmdb_id is not None:
         _resolve_requests(db, "movie", tmdb_id)
-    scheduler.schedule_enrich_movie(movie.id)
+    stats.pending_movies.append(movie.id)
 
     _throttle_after(
         download_art_on_sync(
@@ -436,7 +462,7 @@ def _upsert_artist(
 
     db.flush()
     stats.artists_upserted += 1
-    scheduler.schedule_enrich_artist(artist.id)
+    stats.pending_artists.append(artist.id)
 
     images = payload.get("images") or []
     thumb = download_art_on_sync(
@@ -509,7 +535,7 @@ def _upsert_album(
 
     db.flush()
     stats.albums_upserted += 1
-    scheduler.schedule_enrich_album(album.id)
+    stats.pending_albums.append(album.id)
 
     album_images = payload.get("images") or []
     cover = download_art_on_sync(
@@ -702,12 +728,13 @@ def _mark_missing_for_ref(
 # ---------------------------------------------------------------------------
 # Single-record webhook refreshers
 # ---------------------------------------------------------------------------
-def refresh_movie(db: Session, radarr_id: int) -> Optional[Movie]:
+def refresh_movie(db: Session, radarr_id: int, stats: Optional[SyncStats] = None) -> Optional[Movie]:
+    """Pass `stats`, then call `schedule_pending_enrichment(stats)` after the commit."""
     if not settings.radarr_api_key:
         return None
     with RadarrClient(settings.radarr_url, settings.radarr_api_key) as rc:
         payload = rc.get_movie(radarr_id)
-    stats = SyncStats()
+    stats = stats if stats is not None else SyncStats()
     return _upsert_movie(db, payload, stats)
 
 
@@ -888,12 +915,13 @@ def _manual_import_spec(candidate: dict[str, Any]) -> dict[str, Any]:
     return spec
 
 
-def refresh_artist(db: Session, lidarr_id: int) -> Optional[Artist]:
+def refresh_artist(db: Session, lidarr_id: int, stats: Optional[SyncStats] = None) -> Optional[Artist]:
+    """Pass `stats`, then call `schedule_pending_enrichment(stats)` after the commit."""
     if not settings.lidarr_api_key:
         return None
     with LidarrClient(settings.lidarr_url, settings.lidarr_api_key) as lc:
         payload = lc.get_artist(lidarr_id)
-        stats = SyncStats()
+        stats = stats if stats is not None else SyncStats()
         artist = _upsert_artist(db, payload, stats)
         track_files = lc.list_track_files(lidarr_id)
         files_by_id = {f["id"]: f for f in track_files}
