@@ -9,9 +9,11 @@
 
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
 import QRCode from "qrcode";
 import { AuthShell } from "@/components/AuthShell";
+import { apiGet } from "@/lib/client-api";
+import { loadMe } from "@/lib/load-me";
 import { useFeatures } from "@/lib/features";
 import { createPasskey, passkeysSupported } from "@/lib/webauthn";
 import type { Me } from "@/lib/types";
@@ -20,27 +22,27 @@ export default function AccountPage() {
   const [me, setMe] = useState<Me | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch("/api/session/me", { cache: "no-store" });
-        if (!res.ok) {
-          // Middleware will bounce actual unauth access. A non-ok here
-          // means something transient; let the user retry.
-          setLoadError("Could not load your profile.");
-          return;
-        }
-        const payload = (await res.json()) as Me | null;
-        if (!cancelled && payload) setMe(payload);
-      } catch {
-        if (!cancelled) setLoadError("Could not load your profile.");
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+  // loadMe goes through apiGet (single-flight refresh + retry), so the page
+  // renders on first navigation even right after the 15-min access token
+  // expired. See lib/load-me.ts for the cause this fixes.
+  const load = useCallback(async (signal?: AbortSignal) => {
+    setLoadError(null);
+    try {
+      const payload = await loadMe(apiGet, signal);
+      if (payload) setMe(payload);
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
+      setLoadError("Could not load your profile.");
+    }
   }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    load(controller.signal);
+    return () => {
+      controller.abort();
+    };
+  }, [load]);
 
   return (
     <AuthShell>
@@ -52,7 +54,14 @@ export default function AccountPage() {
 
         {loadError ? (
           <div className="mt-6 rounded-md border border-red-900/60 bg-red-950/40 px-4 py-3 text-sm text-red-200">
-            {loadError}
+            <p>{loadError}</p>
+            <button
+              type="button"
+              onClick={() => load()}
+              className="mt-3 rounded-md border border-red-800/60 px-3 py-1.5 text-xs text-red-100 hover:border-red-600"
+            >
+              Try again
+            </button>
           </div>
         ) : me === null ? (
           <LoadingSkeleton />
