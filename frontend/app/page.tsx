@@ -6,7 +6,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
 import { AuthShell } from "@/components/AuthShell";
 import { ContinueWatchingCard } from "@/components/ContinueWatchingCard";
@@ -14,6 +14,7 @@ import { MediaCard } from "@/components/MediaCard";
 import { Row } from "@/components/Row";
 import { apiGet, apiPost } from "@/lib/client-api";
 import { colorForTitle, hueFromString, joinMeta } from "@/lib/format";
+import { heroEmptyMessage, resolveHeroState } from "@/lib/hero-state";
 import { resolveHeroPlay } from "@/lib/play-action";
 import {
   pickProgressFor, statusForFile, useProgressMap,
@@ -54,6 +55,25 @@ export default function Home() {
   // New-arrivals badge: items added since the last home visit. We read the
   // count first, then stamp "seen" so the next visit measures from now.
   const [newCount, setNewCount] = useState(0);
+  // Drives the empty-hero copy: admins get a nudge to Admin, members don't.
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/session/me", { cache: "no-store" });
+        if (!res.ok) return;
+        const me = (await res.json()) as { role?: string };
+        if (!cancelled && me?.role === "admin") setIsAdmin(true);
+      } catch {
+        // non-admin stays hidden
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -73,6 +93,20 @@ export default function Home() {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  // Load (and reload, on retry) the home rails. Resets to the loading state
+  // first so a retry after an error puts the hero back on the skeleton while
+  // it re-fetches instead of leaving the error banner up.
+  const [reloadKey, setReloadKey] = useState(0);
+  const retry = useCallback(() => {
+    setState({
+      continueWatching: null,
+      recent: null,
+      recentMusicVideos: null,
+      error: null,
+    });
+    setReloadKey((k) => k + 1);
   }, []);
 
   useEffect(() => {
@@ -101,8 +135,9 @@ export default function Home() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [reloadKey]);
 
+  const heroState = resolveHeroState(state.recent, state.error);
   const featured = state.recent && state.recent.length > 0 ? state.recent[0] : null;
   const recentTail = useMemo(
     () => (state.recent ? state.recent.slice(featured ? 1 : 0) : []),
@@ -127,56 +162,33 @@ export default function Home() {
 
   return (
     <AuthShell>
-      {state.error ? (
-        <div
-          style={{
-            margin: "16px 64px",
-            padding: "12px 16px",
-            border: "1px solid var(--danger)",
-            borderRadius: 4,
-            color: "var(--danger)",
-            fontFamily: "var(--mono)",
-            fontSize: 12,
-            letterSpacing: "0.06em",
-          }}
-        >
-          {state.error}
-        </div>
-      ) : null}
-
-      {featured ? (
+      {heroState.type === "ready" && featured ? (
         <Hero item={featured} continueWatching={state.continueWatching} />
+      ) : heroState.type === "error" ? (
+        <HeroError message={heroState.message} onRetry={retry} />
+      ) : heroState.type === "empty" ? (
+        <HeroEmpty message={heroEmptyMessage(isAdmin)} />
       ) : (
         <HeroSkeleton />
       )}
 
-      <Row
-        title="Continue Watching"
-        seeAllHref="/movies"
-        variant="continue"
-        isEmpty={!!continueVideo && continueVideo.length === 0}
-        emptyMessage="Nothing in progress right now."
-      >
-        {continueVideo
-          ? continueVideo.map((item) => (
-              <ContinueWatchingCard key={item.media_file_id} item={item} />
-            ))
-          : null}
-      </Row>
+      {/* Continue Watching / Listening disappear entirely when empty; an
+          empty rail at the top of the page is just noise. */}
+      {continueVideo && continueVideo.length > 0 ? (
+        <Row title="Continue Watching" seeAllHref="/movies" variant="continue">
+          {continueVideo.map((item) => (
+            <ContinueWatchingCard key={item.media_file_id} item={item} />
+          ))}
+        </Row>
+      ) : null}
 
-      <Row
-        title="Continue Listening"
-        seeAllHref="/music"
-        variant="continue"
-        isEmpty={!!continueAudio && continueAudio.length === 0}
-        emptyMessage="Nothing in progress right now."
-      >
-        {continueAudio
-          ? continueAudio.map((item) => (
-              <ContinueWatchingCard key={item.media_file_id} item={item} />
-            ))
-          : null}
-      </Row>
+      {continueAudio && continueAudio.length > 0 ? (
+        <Row title="Continue Listening" seeAllHref="/music" variant="continue">
+          {continueAudio.map((item) => (
+            <ContinueWatchingCard key={item.media_file_id} item={item} />
+          ))}
+        </Row>
+      ) : null}
 
       <Row
         title="Recent Arrivals"
@@ -426,6 +438,46 @@ function HeroSkeleton() {
       <div className="keyart" />
       <div className="content">
         <h1 style={{ opacity: 0.4 }}>F7FIVE0</h1>
+      </div>
+    </section>
+  );
+}
+
+// Shown when the recent call settled with nothing to feature: an empty
+// library, not a load that is still running. Admins get a nudge toward
+// Admin; members get a plain line (copy from heroEmptyMessage).
+function HeroEmpty({ message }: { message: string }) {
+  return (
+    <section className="hero">
+      <div className="keyart" />
+      <div className="content">
+        <h1 style={{ opacity: 0.4 }}>F7FIVE0</h1>
+        <p className="blurb">{message}</p>
+      </div>
+    </section>
+  );
+}
+
+// Shown when the recent call failed. Says so and offers a retry that
+// re-fetches the home rails.
+function HeroError({
+  message,
+  onRetry,
+}: {
+  message: string;
+  onRetry: () => void;
+}) {
+  return (
+    <section className="hero">
+      <div className="keyart" />
+      <div className="content">
+        <h1 style={{ opacity: 0.4 }}>F7FIVE0</h1>
+        <p className="blurb">Could not load your library. {message}</p>
+        <div className="ctas">
+          <button type="button" className="btn play" onClick={onRetry}>
+            Retry
+          </button>
+        </div>
       </div>
     </section>
   );
