@@ -46,8 +46,10 @@ from webauthn import (
 )
 from webauthn.helpers import base64url_to_bytes, bytes_to_base64url
 from webauthn.helpers.exceptions import (
-    InvalidAuthenticationResponse,
-    InvalidRegistrationResponse,
+    InvalidAttestationObjectStructure,
+    InvalidAuthenticatorDataStructure,
+    InvalidCBORData,
+    InvalidJSONStructure,
 )
 from webauthn.helpers.structs import (
     AuthenticatorSelectionCriteria,
@@ -62,7 +64,9 @@ from app.services import login_throttle
 
 # Passkey logins don't carry a username up front (the credential resolves the
 # user), so they share one throttle bucket under this synthetic account name.
-_PASSKEY_THROTTLE_USER = "\x00passkey"
+# No control characters: PostgreSQL rejects NUL in text columns. "passkey:*"
+# can never match USERNAME_PATTERN, so no real account collides with it.
+_PASSKEY_THROTTLE_USER = "passkey:*"
 from app.api.schemas import (
     PasskeyLoginVerifyRequest, PasskeyOut, PasskeyRegisterVerifyRequest,
     PasskeyRenameRequest, TokenPair,
@@ -73,6 +77,14 @@ from app.models.webauthn import WebAuthnChallenge, WebAuthnCredential
 
 
 log = logging.getLogger("f7five0.api.passkeys")
+
+# Structurally broken payloads (bad JSON/CBOR/authenticator data): 400, not 401.
+_MALFORMED_ERRORS = (
+    InvalidJSONStructure,
+    InvalidCBORData,
+    InvalidAuthenticatorDataStructure,
+    InvalidAttestationObjectStructure,
+)
 
 
 def _require_passkeys() -> None:
@@ -214,9 +226,13 @@ def register_verify(
             expected_origin=settings.webauthn_origins_list,
             require_user_verification=True,
         )
-    except InvalidRegistrationResponse as exc:
+    except _MALFORMED_ERRORS as exc:
         db.commit()  # persist the challenge consumption
-        log.info("passkey registration rejected: %s", exc)
+        log.info("passkey registration malformed: %r", exc)
+        raise HTTPException(status_code=400, detail="invalid_credential")
+    except Exception as exc:  # any other py_webauthn failure is a client error
+        db.commit()
+        log.info("passkey registration rejected: %r", exc)
         raise HTTPException(status_code=400, detail="registration_verification_failed")
 
     credential_id_b64 = bytes_to_base64url(verified.credential_id)
@@ -315,8 +331,12 @@ def login_verify(
             credential_current_sign_count=cred.sign_count,
             require_user_verification=True,
         )
-    except InvalidAuthenticationResponse as exc:
-        log.info("passkey assertion rejected: %s", exc)
+    except _MALFORMED_ERRORS as exc:
+        log.info("passkey assertion malformed: %r", exc)
+        _fail_login(db, client_ip, request, user_id=cred.user_id)
+        raise HTTPException(status_code=400, detail="invalid_credential")
+    except Exception as exc:  # any other py_webauthn failure is a client error
+        log.info("passkey assertion rejected: %r", exc)
         _fail_login(db, client_ip, request, user_id=cred.user_id)
         raise HTTPException(status_code=401, detail="passkey_verification_failed")
 

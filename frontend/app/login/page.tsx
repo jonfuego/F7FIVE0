@@ -9,6 +9,7 @@
 import { Suspense, useEffect, useState, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useFeatures } from "@/lib/features";
+import { passkeyErrorMessage } from "@/lib/passkey-errors";
 import { getPasskeyAssertion, passkeysSupported } from "@/lib/webauthn";
 import { HiveWordmark } from "@/components/HiveWordmark";
 
@@ -75,7 +76,7 @@ function LoginPageInner() {
       });
       if (!res.ok) {
         const payload = await safeJson(res);
-        setError(friendlyError(res.status, payload));
+        setError(passkeyErrorMessage(res.status, payload));
         setPasskeyBusy(false);
         return;
       }
