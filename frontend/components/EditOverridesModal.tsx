@@ -162,8 +162,8 @@ export default function EditOverridesModal({
           if (e.target === e.currentTarget) onClose();
         }}
       >
-        <div className="w-full max-w-3xl rounded-lg bg-neutral-900 shadow-xl ring-1 ring-neutral-800">
-          <header className="flex items-center justify-between border-b border-neutral-800 px-5 py-3">
+        <div className="flex max-h-[calc(100dvh-2rem)] w-full max-w-3xl flex-col rounded-lg bg-neutral-900 shadow-xl ring-1 ring-neutral-800">
+          <header className="flex shrink-0 items-center justify-between border-b border-neutral-800 px-5 py-3">
             <h2
               id="edit-overrides-title"
               className="text-sm font-medium tracking-tight text-neutral-100"
@@ -180,7 +180,7 @@ export default function EditOverridesModal({
             </button>
           </header>
 
-          <div className="grid grid-cols-1 sm:grid-cols-[180px_1fr]">
+          <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[auto_minmax(0,1fr)] sm:grid-cols-[180px_1fr] sm:grid-rows-[minmax(0,1fr)]">
             <nav
               role="tablist"
               aria-label="Edit sections"
@@ -199,7 +199,7 @@ export default function EditOverridesModal({
               ))}
             </nav>
 
-            <div className="px-5 py-4 min-h-[280px]">
+            <div className="min-h-0 overflow-y-auto px-5 py-4 sm:min-h-[280px]">
               {tab === "general" ? (
                 <GeneralTab
                   draft={draft}
@@ -249,7 +249,7 @@ export default function EditOverridesModal({
           </div>
 
           {showSaveBar ? (
-            <footer className="flex items-center justify-end gap-2 border-t border-neutral-800 px-5 py-3">
+            <footer className="flex shrink-0 items-center justify-end gap-2 border-t border-neutral-800 px-5 py-3">
               <button
                 type="button"
                 onClick={onClose}
