@@ -1051,10 +1051,18 @@ def list_recent(
     would give the user a 409 when they click it.
     """
     # Pull 5x the ask so we have room to dedupe by (kind, parent_id).
+    # Exclude music videos in the query, not in the Python loop below:
+    # they get their own home rail and are never returned here. If we let
+    # them fill the overshoot window, a batch of freshly scanned music
+    # videos (newer created_at) can push every movie, episode, and track
+    # out of the window, and the hero that reads recent[0] gets nothing
+    # even though playable movies exist. Filtering here keeps the window
+    # full of eligible rows so a ready movie always shows up as recent.
     overshoot = min(limit * 5, 500)
     files = list(db.scalars(
         select(MediaFile)
         .where(MediaFile.scan_state == ScanState.ready)
+        .where(MediaFile.kind != MediaKind.music_video)
         .order_by(MediaFile.created_at.desc())
         .limit(overshoot)
     ))
