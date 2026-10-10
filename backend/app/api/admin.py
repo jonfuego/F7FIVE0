@@ -1270,13 +1270,15 @@ def apply_update(
     db: Annotated[Session, Depends(get_db)],
     helper: Annotated[ra.Helper, Depends(get_update_helper)],
 ) -> UpdateRunOut:
-    """Update to the latest published release. The server downloads the Setup
-    and SHA256SUMS.txt over https from GitHub, checks the Setup against its
-    line in the checksum list, then starts the SYSTEM updater task. A release
+    """Update to the latest published release. The server asks GitHub for the
+    latest release again first (the stored answer may be a day old), downloads
+    the Setup and SHA256SUMS.txt over https, checks the Setup against its line
+    in the checksum list, then starts the SYSTEM updater task. A release
     without checksums is never installed."""
     try:
         state = updates.begin_apply(db, helper)
     except updates.UpdateError as exc:
+        db.commit()  # keep the answer begin_apply just fetched from GitHub
         raise _update_http(exc) from exc
     _audit_event(db, admin.id, "update_started", request)
     db.commit()

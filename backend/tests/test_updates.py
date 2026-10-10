@@ -48,6 +48,15 @@ def upd_dir(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _github_unreachable_by_default(monkeypatch):
+    """No test reaches the real GitHub. Apply asks GitHub again before it
+    installs; with nothing wired, that ask fails and the stored answer is used."""
+    def boom(request):
+        raise httpx.ConnectError("no network in tests", request=request)
+    monkeypatch.setattr(updates, "_client", lambda: mock_client(boom))
+
+
+@pytest.fixture(autouse=True)
 def _reset_limiter():
     updates.reset_password_limiter()
     yield
@@ -781,7 +790,9 @@ def _apply_files(good_hash: str, setup_host="github.com"):
 
 
 def _wire(monkeypatch, files):
-    monkeypatch.setattr(updates, "_client", lambda: mock_client(github_handler(None, files=files)))
+    # Apply asks GitHub for the latest release again before it installs, so the
+    # latest-release call is served too (these tests all assume v1.1.0).
+    monkeypatch.setattr(updates, "_client", lambda: mock_client(github_handler(release_payload("v1.1.0"), files=files)))
 
 
 def test_apply_downloads_verifies_and_starts_the_update(client, db_session, upd_dir, helper, inline, monkeypatch):
@@ -795,6 +806,49 @@ def test_apply_downloads_verifies_and_starts_the_update(client, db_session, upd_
     assert Path(req["setup_path"]).read_bytes() == SETUP_FILE
     assert Path(req["setup_path"]).parent == upd_dir / "incoming"
     assert client.get("/api/admin/updates/run").json()["phase"] == "queued"
+
+
+def _wire_github(monkeypatch, payload, files):
+    monkeypatch.setattr(updates, "_client", lambda: mock_client(github_handler(payload, files=files)))
+
+
+def test_apply_asks_github_again_so_a_stale_check_cannot_install_an_old_release(client, db_session, upd_dir, helper, inline, monkeypatch):
+    """The stored answer is only as new as the last daily check. A server that
+    checked when 1.0.5 was the latest must install 1.1.0 once that is published,
+    not the 1.0.5 its page still shows."""
+    app_settings.put(db_session, "update_check", stored_check("1.0.5"))
+    _wire_github(monkeypatch, release_payload("v1.1.0"), _apply_files(sha(SETUP_FILE)))
+    r = client.post("/api/admin/updates/apply")
+    assert r.status_code == 202, r.text
+    req = json.loads((upd_dir / "request.json").read_text(encoding="utf-8"))
+    assert req["version"] == "1.1.0" and req["source"] == "github"
+    assert app_settings.get(db_session, "update_check")["latest"] == "1.1.0"
+
+
+def test_apply_uses_the_stored_answer_when_github_cannot_be_reached(client, db_session, upd_dir, helper, inline, monkeypatch):
+    app_settings.put(db_session, "update_check", stored_check("1.1.0"))
+    files = _apply_files(sha(SETUP_FILE))
+
+    def handler(request):
+        if str(request.url) == updates.RELEASES_LATEST_URL:
+            raise httpx.ConnectError("offline", request=request)
+        return files.get(str(request.url), httpx.Response(404))
+
+    monkeypatch.setattr(updates, "_client", lambda: mock_client(handler))
+    r = client.post("/api/admin/updates/apply")
+    assert r.status_code == 202, r.text
+    assert json.loads((upd_dir / "request.json").read_text(encoding="utf-8"))["version"] == "1.1.0"
+
+
+def test_a_refused_apply_still_keeps_the_fresh_check(client, db_session, upd_dir, helper, inline, monkeypatch):
+    """GitHub now says the release has no checksums: apply is refused, and the
+    page must show that, not the older answer with checksums."""
+    app_settings.put(db_session, "update_check", stored_check("1.1.0"))
+    _wire_github(monkeypatch, release_payload("v1.1.0", sums=False), {})
+    r = client.post("/api/admin/updates/apply")
+    assert r.status_code == 409 and r.json()["detail"] == "no_checksums"
+    assert helper.started == 0
+    assert app_settings.get(db_session, "update_check")["sums_url"] is None
 
 
 def test_apply_refuses_a_setup_that_does_not_match_its_checksum(client, db_session, upd_dir, helper, inline, monkeypatch):
@@ -822,10 +876,13 @@ def test_apply_refuses_a_setup_without_a_checksum_line(client, db_session, upd_d
 
 
 def test_apply_refuses_a_download_host_outside_the_allowlist(client, db_session, upd_dir, helper, inline, monkeypatch):
-    check = stored_check("1.1.0")
-    check["setup_url"] = "https://evil.example.com/F7FIVE0-Setup-1.1.0.exe"
-    app_settings.put(db_session, "update_check", check)
-    _wire(monkeypatch, _apply_files(sha(SETUP_FILE)))
+    # Apply asks GitHub again, so the release GitHub names is what carries the bad host.
+    payload = release_payload("v1.1.0")
+    for asset in payload["assets"]:
+        if asset["name"].endswith(".exe"):
+            asset["browser_download_url"] = "https://evil.example.com/F7FIVE0-Setup-1.1.0.exe"
+    app_settings.put(db_session, "update_check", stored_check("1.1.0"))
+    _wire_github(monkeypatch, payload, _apply_files(sha(SETUP_FILE)))
     client.post("/api/admin/updates/apply")
     run = client.get("/api/admin/updates/run").json()
     assert run["phase"] == "failed" and run["error_code"] == "host_not_allowed"
