@@ -98,6 +98,11 @@ class Album(UUIDPKMixin, TimestampMixin, Base):
         default=list,
     )
 
+    # The artist text as it was credited on the record, kept so a merge does
+    # not lose who is on the album (e.g. "2Pac featuring KC and JoJo"). Null
+    # when the credit is just the album's own artist. See services/credits.py.
+    credited_as: Mapped[Optional[str]] = mapped_column(String(512))
+
     # MusicBrainz + Lidarr enrichment
     album_type: Mapped[Optional[str]] = mapped_column(String(32))
     secondary_types: Mapped[list] = mapped_column(
@@ -151,6 +156,10 @@ class Track(UUIDPKMixin, TimestampMixin, Base):
     track_number: Mapped[Optional[int]] = mapped_column(Integer)
     disc_number: Mapped[Optional[int]] = mapped_column(Integer, default=1)
     duration_sec: Mapped[Optional[int]] = mapped_column(Integer)
+    # The artist text as it was credited on this track, kept so a merge does
+    # not lose who is on the record. Null when the credit is just the album
+    # artist. See services/credits.py.
+    credited_as: Mapped[Optional[str]] = mapped_column(String(512))
 
     # Per-row admin overrides; see Artist.overrides.
     overrides: Mapped[dict] = mapped_column(
@@ -270,4 +279,86 @@ class MusicVideo(UUIDPKMixin, TimestampMixin, Base):
             "ix_music_videos_release_disc_track",
             "release_id", "disc_number", "track_number",
         ),
+    )
+
+
+class ArtistAlias(UUIDPKMixin, TimestampMixin, Base):
+    """A merged-away artist name and/or MusicBrainz id, pointing at the artist
+    it was merged into.
+
+    This is the durability record for an artist merge. The folder scan and the
+    Lidarr sync both resolve an incoming artist name and MBID through this table
+    before they create or look up an Artist row, so a rescan or a sync reads the
+    same collaboration tags and routes straight to the target instead of
+    recreating the source artist (for example "2Pac Featuring KC And Jojo"
+    folding back into "2Pac").
+
+    `name_key` is the lowercased source name; `source_mbid` is the source
+    artist's MusicBrainz id when it had one. Either may match an incoming tag.
+    Both are unique so one source maps to exactly one target.
+    """
+
+    __tablename__ = "artist_aliases"
+
+    target_artist_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("artists.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # Lowercased source artist name, for name-based resolution.
+    name_key: Mapped[str] = mapped_column(String(512), nullable=False)
+    # The source name as the user saw it, kept for display in Admin.
+    source_name: Mapped[str] = mapped_column(String(512), nullable=False)
+    # The source artist's MusicBrainz id, when it had one.
+    source_mbid: Mapped[Optional[str]] = mapped_column(String(64))
+
+    __table_args__ = (
+        UniqueConstraint("name_key", name="uq_artist_aliases_name_key"),
+        Index(
+            "ux_artist_aliases_source_mbid",
+            "source_mbid",
+            unique=True,
+            postgresql_where=text("source_mbid IS NOT NULL"),
+        ),
+    )
+
+
+class ArtistMerge(UUIDPKMixin, TimestampMixin, Base):
+    """A record of one artist merge, enough to undo it.
+
+    On merge the source artist's albums and tracks move to the target and the
+    source row is deleted, so undo has to recreate the source artist and move
+    its albums back. `source_snapshot` holds the source artist's columns as
+    JSON (name, mbid, lidarr_id, overview, ...) so the restored row looks like
+    the original. `moved_album_ids` is the list of album ids that moved from
+    the source to the target, so undo moves exactly those back and leaves the
+    target's own albums alone. `undone_at` marks a merge that has been undone;
+    its alias is gone and the row is kept only as history.
+    """
+
+    __tablename__ = "artist_merges"
+
+    target_artist_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("artists.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    source_name: Mapped[str] = mapped_column(String(512), nullable=False)
+    source_mbid: Mapped[Optional[str]] = mapped_column(String(64))
+    source_snapshot: Mapped[dict] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
+        default=dict,
+    )
+    moved_album_ids: Mapped[list] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default=text("'[]'::jsonb"),
+        default=list,
+    )
+    undone_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
     )

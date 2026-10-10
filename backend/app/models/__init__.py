@@ -15,7 +15,8 @@ from app.models.library import Library  # noqa: F401
 from app.models.movie import Movie  # noqa: F401
 from app.models.tv import Series, Season, Episode  # noqa: F401
 from app.models.music import (  # noqa: F401
-    Artist, Album, MusicVideo, MusicVideoRelease, Track,
+    Artist, Album, ArtistAlias, ArtistMerge, MusicVideo, MusicVideoRelease,
+    Track,
 )
 
 # Physical files + playback + transcoding + sharing

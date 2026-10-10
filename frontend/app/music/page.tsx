@@ -11,6 +11,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AuthShell } from "@/components/AuthShell";
 import EditOverridesModal, { algorithmicSortHint } from "@/components/EditOverridesModal";
+import { ArtistMergeDialog } from "@/components/ArtistMergeDialog";
 import { AlphaRail, alphaLetterOf } from "@/components/AlphaRail";
 import { Grid, GridEmpty } from "@/components/Grid";
 import { apiGet } from "@/lib/client-api";
@@ -144,6 +145,7 @@ export default function MusicPage() {
                 artist={a}
                 isAdmin={isAdmin}
                 onEdit={() => openCardEdit(a)}
+                onMerged={onApplied}
               />
             </div>
           ))}
@@ -169,10 +171,12 @@ function ArtistTile({
   artist,
   isAdmin,
   onEdit,
+  onMerged,
 }: {
   artist: MusicArtist;
   isAdmin?: boolean;
   onEdit?: () => void;
+  onMerged?: () => void;
 }) {
   const tint: CSSProperties = {
     ["--pg" as never]: colorForTitle(artist.name),
@@ -180,6 +184,7 @@ function ArtistTile({
   };
   const { playAlbum } = useQueue();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [mergeOpen, setMergeOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -275,6 +280,21 @@ function ArtistTile({
               <button type="button" role="menuitem" onClick={onArtistRadio} style={artistMenuItemStyle}>
                 Artist radio
               </button>
+              {isAdmin ? (
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setMenuOpen(false);
+                    setMergeOpen(true);
+                  }}
+                  style={artistMenuItemStyle}
+                >
+                  Merge into...
+                </button>
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -299,6 +319,17 @@ function ArtistTile({
           {artist.album_count} {artist.album_count === 1 ? "album" : "albums"}
         </div>
       </div>
+      {mergeOpen ? (
+        <ArtistMergeDialog
+          sourceId={artist.id}
+          sourceName={artist.name}
+          onClose={() => setMergeOpen(false)}
+          onMerged={() => {
+            setMergeOpen(false);
+            onMerged?.();
+          }}
+        />
+      ) : null}
     </Link>
   );
 }

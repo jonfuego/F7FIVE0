@@ -40,6 +40,7 @@ from app.models.movie import Movie
 from app.models.music import Album, Artist, Track
 from app.models.tv import Episode, Season, Series
 from app.services import ffprobe
+from app.services.credits import resolve_artist
 from app.services.arr import LidarrClient, RadarrClient, SonarrClient
 from app.services.arr._base import ArrClientError
 from app.services.art import download_art_on_sync
@@ -446,6 +447,19 @@ def _upsert_artist(
 ) -> Artist:
     lidarr_id = payload.get("id")
     mbid = _nullify_sentinel(payload.get("foreignArtistId"))
+    name = payload.get("artistName") or "Unknown Artist"
+
+    # Route the incoming artist through any saved merge alias first. A merged-away
+    # source (a collaboration credit an admin folded into the main artist)
+    # resolves to its target instead of being recreated on the next sync. When an
+    # alias matches, write the sync's fields onto the target row and keep the
+    # target's own mbid / name.
+    res_name, res_mbid, target = resolve_artist(db, name=name, mbid=mbid)
+    if target is not None:
+        artist = target
+        stats.artists_upserted += 1
+        stats.pending_artists.append(artist.id)
+        return artist
 
     artist = db.scalar(select(Artist).where(Artist.lidarr_id == lidarr_id))
     if artist is None and mbid:

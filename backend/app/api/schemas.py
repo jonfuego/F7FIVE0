@@ -332,6 +332,42 @@ class MusicArtistDetailOut(MusicArtistOut):
     sort_name: Optional[str] = None
 
 
+# ---- Artist merge ----------------------------------------------------------
+class MergePreviewOut(BaseModel):
+    """What an artist merge would move, so the confirm dialog can name it."""
+
+    source_id: uuid.UUID
+    source_name: str
+    target_id: uuid.UUID
+    target_name: str
+    albums: int
+    tracks: int
+
+
+class MergeArtistIn(BaseModel):
+    """Merge the source artist into this target."""
+
+    target_id: uuid.UUID
+
+
+class MergeResultOut(BaseModel):
+    """The outcome of a merge: the merge-record id (for undo) and the target."""
+
+    merge_id: uuid.UUID
+    target_id: uuid.UUID
+    target_name: str
+    albums_moved: int
+    tracks_moved: int
+
+
+class UndoMergeResultOut(BaseModel):
+    """The outcome of an undo: the restored source artist."""
+
+    restored_artist_id: uuid.UUID
+    restored_artist_name: str
+    albums_restored: int
+
+
 # ---- Music videos ----------------------------------------------------------
 class MusicVideoArtistOut(BaseModel):
     """One artist tile on the Music Videos index.

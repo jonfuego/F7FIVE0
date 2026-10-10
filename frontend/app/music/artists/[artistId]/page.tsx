@@ -7,16 +7,17 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
-import { notFound, useParams } from "next/navigation";
+import { notFound, useParams, useRouter } from "next/navigation";
 import EditOverridesModal, {
   algorithmicSortHint,
 } from "@/components/EditOverridesModal";
+import { ArtistMergeDialog } from "@/components/ArtistMergeDialog";
 import { AuthShell } from "@/components/AuthShell";
 import { BackButton } from "@/components/BackButton";
 import { AlbumTileMenu } from "@/components/AlbumTileMenu";
 import { Grid, GridEmpty } from "@/components/Grid";
 import { MediaCard } from "@/components/MediaCard";
-import { apiGet, ApiError } from "@/lib/client-api";
+import { apiGet, apiPost, ApiError } from "@/lib/client-api";
 import { loadOverride } from "@/lib/overrides";
 import {
   colorForTitle,
@@ -33,6 +34,7 @@ const BIO_WORD_LIMIT = 200;
 
 export default function MusicArtistPage() {
   const params = useParams<{ artistId: string }>();
+  const router = useRouter();
   const artistId = params?.artistId;
   const [data, setData] = useState<MusicArtistDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -133,6 +135,8 @@ export default function MusicArtistPage() {
           onEdit={openEdit}
           editBusy={editLoading}
           editError={editError}
+          onMerged={() => router.push("/music")}
+          onUndone={onApplied}
         />
       )}
       {editInitial && data ? (
@@ -155,13 +159,20 @@ function ArtistHero({
   onEdit,
   editBusy,
   editError,
+  onMerged,
+  onUndone,
 }: {
   detail: MusicArtistDetail;
   isAdmin: boolean;
   onEdit: () => void;
   editBusy: boolean;
   editError: string | null;
+  // After a merge the source artist is gone, so the caller navigates away.
+  onMerged: () => void;
+  // After an undo the restored artist exists again; the caller reloads.
+  onUndone: () => void;
 }) {
+  const [mergeOpen, setMergeOpen] = useState(false);
   const tint: CSSProperties = {
     ["--pg" as never]: colorForTitle(detail.name),
     ["--ph" as never]: String(hueFromString(detail.name)),
@@ -187,16 +198,27 @@ function ArtistHero({
         <div className="info">
           <div className="kicker">
             {isAdmin ? (
-              <button
-                type="button"
-                onClick={onEdit}
-                disabled={editBusy}
-                className="admin-edit"
-                style={{ position: "static", opacity: 1, marginLeft: "auto" }}
-                aria-label="Edit artist metadata"
-              >
-                {editBusy ? "Loading..." : "Edit"}
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={onEdit}
+                  disabled={editBusy}
+                  className="admin-edit"
+                  style={{ position: "static", opacity: 1, marginLeft: "auto" }}
+                  aria-label="Edit artist metadata"
+                >
+                  {editBusy ? "Loading..." : "Edit"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMergeOpen(true)}
+                  className="admin-edit"
+                  style={{ position: "static", opacity: 1, marginLeft: 8 }}
+                  aria-label="Merge this artist into another"
+                >
+                  Merge into...
+                </button>
+              </>
             ) : null}
             {isAdmin && editError ? (
               <span
@@ -208,6 +230,20 @@ function ArtistHero({
             ) : null}
           </div>
           <h1>{detail.name}</h1>
+          {isAdmin ? (
+            <UndoMergePanel artistId={detail.id} onUndone={onUndone} />
+          ) : null}
+          {mergeOpen ? (
+            <ArtistMergeDialog
+              sourceId={detail.id}
+              sourceName={detail.name}
+              onClose={() => setMergeOpen(false)}
+              onMerged={() => {
+                setMergeOpen(false);
+                onMerged();
+              }}
+            />
+          ) : null}
           {meta ? <MetaRow text={meta} /> : null}
           {originLine ? <div className="origin-line">{originLine}</div> : null}
           <ArtistMixActions artistId={detail.id} />
@@ -390,6 +426,93 @@ function ArtistMixActions({ artistId }: { artistId: string }) {
             color: "var(--danger)",
           }}
         >
+          {error}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+// Admin-only. Lists the artists that were merged into this one and offers an
+// Undo for each, which removes the alias and restores the source artist with
+// the albums and tracks that moved.
+function UndoMergePanel({
+  artistId,
+  onUndone,
+}: {
+  artistId: string;
+  onUndone: () => void;
+}) {
+  type MergeRow = { merge_id: string; source_name: string; albums: number };
+  const [merges, setMerges] = useState<MergeRow[] | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const rows = await apiGet<MergeRow[]>(
+          `/api/admin/artists/${encodeURIComponent(artistId)}/merges`,
+        );
+        if (!cancelled) setMerges(rows);
+      } catch {
+        if (!cancelled) setMerges([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [artistId]);
+
+  async function undo(mergeId: string) {
+    setBusy(mergeId);
+    setError(null);
+    try {
+      await apiPost(`/api/admin/artists/merges/${encodeURIComponent(mergeId)}/undo`, {});
+      setMerges((rows) => (rows ? rows.filter((r) => r.merge_id !== mergeId) : rows));
+      onUndone();
+    } catch (err) {
+      setError(
+        err instanceof ApiError ? `Undo failed (${err.status}).` : "Undo failed.",
+      );
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  if (!merges || merges.length === 0) return null;
+  return (
+    <div
+      style={{
+        marginTop: 12,
+        fontFamily: "var(--grotesk)",
+        fontSize: 13,
+        color: "var(--ink-2)",
+      }}
+    >
+      <div style={{ marginBottom: 6 }}>Merged in:</div>
+      {merges.map((m) => (
+        <div
+          key={m.merge_id}
+          style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}
+        >
+          <span>
+            {m.source_name} ({m.albums} {m.albums === 1 ? "album" : "albums"})
+          </span>
+          <button
+            type="button"
+            className="admin-edit"
+            style={{ position: "static", opacity: 1 }}
+            disabled={busy === m.merge_id}
+            onClick={() => undo(m.merge_id)}
+          >
+            {busy === m.merge_id ? "Undoing..." : "Undo merge"}
+          </button>
+        </div>
+      ))}
+      {error ? (
+        <span style={{ color: "var(--danger)", fontFamily: "var(--mono)", fontSize: 12 }}>
           {error}
         </span>
       ) : null}
