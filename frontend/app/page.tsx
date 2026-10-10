@@ -14,6 +14,7 @@ import { MediaCard } from "@/components/MediaCard";
 import { Row } from "@/components/Row";
 import { apiGet, apiPost } from "@/lib/client-api";
 import { colorForTitle, hueFromString, joinMeta } from "@/lib/format";
+import { heroSubtitleParts, pickFeatured } from "@/lib/featured";
 import { heroEmptyMessage, resolveHeroState } from "@/lib/hero-state";
 import { resolveHeroPlay } from "@/lib/play-action";
 import {
@@ -138,9 +139,9 @@ export default function Home() {
   }, [reloadKey]);
 
   const heroState = resolveHeroState(state.recent, state.error);
-  const featured = state.recent && state.recent.length > 0 ? state.recent[0] : null;
+  const featured = pickFeatured(state.recent);
   const recentTail = useMemo(
-    () => (state.recent ? state.recent.slice(featured ? 1 : 0) : []),
+    () => (state.recent ? state.recent.filter((it) => it !== featured) : []),
     [state.recent, featured],
   );
   // Split continue-watching into video (movie + series) and audio (album)
@@ -162,14 +163,15 @@ export default function Home() {
 
   return (
     <AuthShell>
-      {heroState.type === "ready" && featured ? (
-        <Hero item={featured} continueWatching={state.continueWatching} />
+      {heroState.type === "loading" ? (
+        <HeroSkeleton />
       ) : heroState.type === "error" ? (
         <HeroError message={heroState.message} onRetry={retry} />
-      ) : heroState.type === "empty" ? (
-        <HeroEmpty message={heroEmptyMessage(isAdmin)} />
+      ) : featured ? (
+        <Hero item={featured} continueWatching={state.continueWatching} />
       ) : (
-        <HeroSkeleton />
+        // Loaded but nothing to feature: never fall back to the skeleton.
+        <HeroEmpty message={heroEmptyMessage(isAdmin)} />
       )}
 
       {/* Continue Watching / Listening disappear entirely when empty; an
@@ -301,11 +303,7 @@ function Hero({
     ["--pg" as never]: colorForTitle(item.title),
     ["--ph" as never]: String(hueFromString(item.title)),
   };
-  const meta = joinMeta([
-    item.year,
-    item.subtitle,
-    item.kind === "series" ? "Series" : item.kind === "album" ? "Album" : null,
-  ]);
+  const [artistId, setArtistId] = useState<string | null>(null);
   // Pull the synopsis from the matching detail endpoint on mount. Falls
   // back to no blurb if the detail call fails or the row has no
   // overview text. Cheap second call, runs once per featured change.
@@ -321,18 +319,24 @@ function Hero({
       : item.kind === "series"
         ? `series/${item.id}`
         : `albums/${item.id}`;
-    apiGet<{ overview?: string | null; backdrop_path?: string | null }>(
+    apiGet<{
+      overview?: string | null;
+      backdrop_path?: string | null;
+      artist_id?: string | null;
+    }>(
       `/api/library/${path}`,
     )
       .then((data) => {
         if (cancelled) return;
         setOverview(data.overview ?? null);
         setBackdrop(data.backdrop_path ?? null);
+        setArtistId(item.kind === "album" ? data.artist_id ?? null : null);
       })
       .catch(() => {
         if (cancelled) return;
         setOverview(null);
         setBackdrop(null);
+        setArtistId(null);
       });
     return () => {
       cancelled = true;
@@ -375,22 +379,33 @@ function Hero({
         />
       ) : null}
       <div className="content">
-        <h1>{item.title}</h1>
-        {meta ? <div className="meta">{splitMeta(meta)}</div> : null}
-        {overview ? <p className="blurb">{overview}</p> : null}
-        <div className="ctas">
-          <button
-            type="button"
-            className="btn play"
-            onClick={onPlay}
-            disabled={playBusy}
-            aria-label={`Play ${item.title}`}
-          >
-            <span className="tri" /> Play
-          </button>
-          <Link className="btn ghost" href={detailHref(item.kind, item.id)}>
-            + Details
-          </Link>
+        <div className="band">
+          <h1 className={item.title.length > 22 ? "long" : undefined}>
+            {item.title}
+          </h1>
+          <div className="meta">
+            {heroSubtitleParts(item, artistId).map((part, i) => (
+              <span key={i}>
+                {i > 0 ? <span className="dot" aria-hidden>•</span> : null}
+                {part.href ? <Link href={part.href}>{part.text}</Link> : part.text}
+              </span>
+            ))}
+          </div>
+          {overview ? <p className="blurb">{overview}</p> : null}
+          <div className="ctas">
+            <button
+              type="button"
+              className="btn play"
+              onClick={onPlay}
+              disabled={playBusy}
+              aria-label={`Play ${item.title}`}
+            >
+              <span className="tri" /> Play
+            </button>
+            <Link className="btn ghost" href={detailHref(item.kind, item.id)}>
+              + Details
+            </Link>
+          </div>
         </div>
       </div>
     </section>
@@ -421,15 +436,6 @@ async function resolveVideoFileId(
     }
   }
   return null;
-}
-
-function splitMeta(meta: string) {
-  return meta.split(" • ").map((part, i, arr) => (
-    <span key={i}>
-      {part}
-      {i < arr.length - 1 ? <span aria-hidden style={{ margin: "0 12px", color: "var(--ink-3)" }}>•</span> : null}
-    </span>
-  ));
 }
 
 function HeroSkeleton() {
