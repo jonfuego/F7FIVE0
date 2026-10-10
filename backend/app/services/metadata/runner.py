@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Literal, Optional
 
 from sqlalchemy.orm import Session
@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.models.movie import Movie
 from app.models.music import Album, Artist
+from app.models.tv import Series
 from app.services.metadata._base import ProviderError
 from app.services.metadata.musicbrainz import MusicBrainzClient
 from app.services.metadata.tmdb import TMDBClient
@@ -297,3 +298,80 @@ def enrich_album(
     album.metadata_status = "ok"
     db.commit()
     return MetadataResult(status="ok", provider="musicbrainz")
+
+
+# ---------------------------------------------------------------------------
+# enrich_series
+# ---------------------------------------------------------------------------
+def _parse_date(value) -> Optional[date]:
+    """Parse a `YYYY-MM-DD` string into a date, else None."""
+    if not isinstance(value, str) or len(value) < 10:
+        return None
+    try:
+        return date.fromisoformat(value[:10])
+    except ValueError:
+        return None
+
+
+def enrich_series(
+    db: Session, series_id: uuid.UUID, force: bool = False,
+) -> MetadataResult:
+    """Populate a series from TMDB when it has a tmdb_id.
+
+    Series are normally mirrored from Sonarr, which owns the next sync.
+    This path gives Fix Match something to populate when Sonarr is not set
+    up: it writes the canonical overview and first-aired date from TMDB and
+    pulls a TMDB poster/backdrop into the art system when the series has no
+    art yet (admin-set art is never overwritten). No external id or no key
+    is a clean no-op, not a failure.
+    """
+    series = db.get(Series, series_id)
+    if series is None:
+        return MetadataResult(status="failed", notes="series_not_found")
+    if not series.tmdb_id:
+        return MetadataResult(status="no_external_id")
+
+    try:
+        with TMDBClient() as cli:
+            payload = cli.get_series(int(series.tmdb_id))
+    except ProviderError as exc:
+        log.warning("tmdb tv fetch failed for series %s: %s", series.id, exc)
+        return MetadataResult(status="failed", provider="tmdb", notes=str(exc))
+
+    if payload is None:
+        # Key unset or TMDB 404 for this id. Nothing to write.
+        return MetadataResult(status="no_external_id", provider="tmdb")
+
+    overview = payload.get("overview")
+    if overview:
+        series.overview = overview
+    aired = _parse_date(payload.get("first_air_date"))
+    if aired is not None:
+        series.first_aired = aired
+    db.commit()
+
+    # Pull TMDB art only when the series has none; never clobber admin art.
+    from app.models.art import ENTITY_SERIES, ROLE_BACKDROP, ROLE_POSTER
+    from app.services.art import (
+        SYSTEM_USER_ID, ArtValidationError, fetch_and_save_url,
+    )
+    from app.models.art import ArtOverride
+
+    def _fetch_art(role: str, tmdb_path, size: str) -> None:
+        if not tmdb_path:
+            return
+        if db.get(ArtOverride, (ENTITY_SERIES, series.id, role)) is not None:
+            return
+        try:
+            fetch_and_save_url(
+                db, entity_kind=ENTITY_SERIES, entity_id=series.id, role=role,
+                url=f"https://image.tmdb.org/t/p/{size}{tmdb_path}",
+                set_by_user_id=SYSTEM_USER_ID, source_kind="tmdb",
+            )
+        except ArtValidationError as exc:
+            log.warning("tmdb art skipped for series %s %s: %s", series.id, role, exc)
+
+    _fetch_art(ROLE_POSTER, payload.get("poster_path"), "w780")
+    _fetch_art(ROLE_BACKDROP, payload.get("backdrop_path"), "w1280")
+    db.commit()
+    return MetadataResult(status="ok", provider="tmdb")

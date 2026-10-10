@@ -104,6 +104,73 @@ class TMDBClient:
         cache_write(self.PROVIDER, key, payload)
         return payload
 
+    def get_series(self, tmdb_id: int) -> Optional[dict]:
+        """Return the parsed TMDB TV record for `tmdb_id`.
+
+        None when no key is configured or the upstream returns 404. Raises
+        ProviderError on other HTTP failures. Used by the Fix Match apply
+        path to populate a series from TMDB when Sonarr is not set up.
+        """
+        api_key = tmdb_key.get()
+        if not api_key:
+            return None
+        key = f"tv_{int(tmdb_id)}"
+        cached = cache_read(self.PROVIDER, key)
+        if cached is not None:
+            return None if is_negative(cached) else cached
+
+        _rate_wait()
+        try:
+            resp = self._client.get(
+                f"{self.BASE_URL}/tv/{int(tmdb_id)}",
+                params={"api_key": api_key},
+            )
+        except Exception as exc:
+            raise ProviderError(
+                f"tmdb GET tv/{tmdb_id} failed: {exc}",
+            ) from exc
+
+        if resp.status_code == 404:
+            cache_write(self.PROVIDER, key, {"status": "not_found"})
+            return None
+        if resp.status_code >= 400:
+            raise ProviderError(
+                f"tmdb returned {resp.status_code} for tv/{tmdb_id}",
+            )
+        payload = resp.json()
+        cache_write(self.PROVIDER, key, payload)
+        return payload
+
+    def search_many(self, kind: str, query: str, limit: int = 10) -> list[dict]:
+        """Return up to `limit` TMDB search hits for `kind` ("movie"/"tv").
+
+        [] when no key is set, the kind is unknown, or the query is empty.
+        Unlike `search`, this returns the full result list so Fix Match can
+        show the admin several candidates to choose from. Not disk-cached:
+        the result feeds an interactive picker, not the batch enricher.
+        """
+        api_key = tmdb_key.get()
+        query = (query or "").strip()
+        if not api_key or kind not in ("movie", "tv") or not query:
+            return []
+        _rate_wait()
+        try:
+            resp = self._client.get(
+                f"{self.BASE_URL}/search/{kind}",
+                params={
+                    "api_key": api_key,
+                    "query": query,
+                    "include_adult": "false",
+                },
+            )
+        except Exception as exc:
+            raise ProviderError(f"tmdb search/{kind} failed: {exc}") from exc
+        if resp.status_code >= 400:
+            raise ProviderError(f"tmdb returned {resp.status_code} for search/{kind}")
+        results = (resp.json() or {}).get("results") or []
+        hits = [r for r in results if isinstance(r, dict)]
+        return hits[:limit]
+
     def search(self, kind: str, title: str, year: Optional[int] = None) -> Optional[dict]:
         """Best title/year match for `kind` ("movie" or "tv"), or None.
 

@@ -15,8 +15,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "@/components/Icon";
 import { X } from "lucide-react";
 import { ArtOverrideModal, ArtKind, ArtRole } from "@/components/ArtOverrideModal";
+import { SourceCallouts, SourceTag } from "@/components/SourceTag";
 import type {
   MatchCandidate,
+  MatchCandidatesOut,
   OverrideKind,
   OverrideOut,
   OverrideUpdate,
@@ -498,6 +500,7 @@ function FixMatchTab({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<MatchCandidate[] | null>(null);
+  const [notes, setNotes] = useState<string[]>([]);
   const [confirming, setConfirming] = useState<MatchCandidate | null>(null);
   const [applying, setApplying] = useState(false);
 
@@ -507,6 +510,7 @@ function FixMatchTab({
     setBusy(true);
     setError(null);
     setResults(null);
+    setNotes([]);
     setConfirming(null);
     try {
       const res = await fetch(
@@ -517,8 +521,9 @@ function FixMatchTab({
         setError(await extractError(res));
         return;
       }
-      const body = (await res.json()) as MatchCandidate[];
-      setResults(Array.isArray(body) ? body : []);
+      const body = (await res.json()) as MatchCandidatesOut;
+      setResults(Array.isArray(body.candidates) ? body.candidates : []);
+      setNotes(Array.isArray(body.notes) ? body.notes : []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Search failed.");
     } finally {
@@ -583,6 +588,8 @@ function FixMatchTab({
         </button>
       </div>
 
+      <SourceCallouts notes={notes} />
+
       {results === null ? (
         <p className="mt-3 text-xs text-neutral-500">
           Type a search term and press Enter.
@@ -617,8 +624,11 @@ function FixMatchTab({
                     </span>
                   ) : null}
                 </div>
-                <div className="text-[10px] uppercase tracking-wider text-neutral-500">
-                  {c.source}: {c.ref}
+                <div className="mt-0.5 flex items-center gap-2">
+                  <SourceTag source={c.source} />
+                  <span className="truncate text-[10px] uppercase tracking-wider text-neutral-500">
+                    {c.ref}
+                  </span>
                 </div>
                 {c.summary ? (
                   <p className="mt-1 line-clamp-2 text-xs text-neutral-400">

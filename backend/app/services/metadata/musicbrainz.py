@@ -103,6 +103,46 @@ class MusicBrainzClient:
             f"release_group_{mbid}",
         )
 
+    def search_artists(self, query: str, limit: int = 10) -> list[dict]:
+        """Return artist search hits for a free-text query. [] on no match.
+
+        No key is needed; MusicBrainz search is open. The result shape is
+        the raw `artists` list from the search endpoint (each entry has
+        `id`, `name`, `disambiguation`, `country`, `type`, ...).
+        """
+        query = (query or "").strip()
+        if not query:
+            return []
+        payload = self._fetch(
+            "artist",
+            {"query": query, "limit": str(limit), "fmt": "json"},
+            f"search_artist_{query.lower()}_{limit}",
+        )
+        if not payload:
+            return []
+        return [a for a in (payload.get("artists") or []) if isinstance(a, dict)]
+
+    def search_release_groups(self, query: str, limit: int = 10) -> list[dict]:
+        """Return release-group search hits for a free-text query.
+
+        [] on no match. Each entry has `id`, `title`, `primary-type`,
+        `first-release-date`, and an `artist-credit` list.
+        """
+        query = (query or "").strip()
+        if not query:
+            return []
+        payload = self._fetch(
+            "release-group",
+            {"query": query, "limit": str(limit), "fmt": "json"},
+            f"search_rg_{query.lower()}_{limit}",
+        )
+        if not payload:
+            return []
+        return [
+            g for g in (payload.get("release-groups") or [])
+            if isinstance(g, dict)
+        ]
+
 
 def _smoke(argv: list[str]) -> int:
     if len(argv) < 3:
