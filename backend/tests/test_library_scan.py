@@ -102,6 +102,11 @@ def _count(factory, model) -> int:
         return other.scalar(select(func.count()).select_from(model))
 
 
+def _all(factory, model) -> list:
+    with factory() as other:
+        return other.scalars(select(model)).all()
+
+
 # ---------------------------------------------------------------------------
 # Batch saves
 # ---------------------------------------------------------------------------
@@ -303,6 +308,62 @@ def test_status_runs_then_goes_idle_with_counts(file_db, libs, monkeypatch):
     movies = final["libraries"]["movies"]
     assert movies["state"] == "done"
     assert (movies["seen"], movies["added"], movies["probed"], movies["missing"], movies["errors"]) == (30, 30, 30, 0, 0)
+
+
+def test_one_bad_music_file_does_not_stop_the_others(file_db, libs, monkeypatch):
+    from sqlalchemy.exc import DataError
+
+    from app.models.music import Track
+    from app.services import scan_status
+
+    # Three artists, one track each. The middle one fails the way the real bug
+    # did: a tag value too long for its column (a SQLAlchemy DataError whose dump
+    # carries "INSERT INTO" and the SQLAlchemy name). The scan must skip only
+    # that file, keep the other two, and end "done with an error", not "failed".
+    for name in ("Aretha", "Bob", "Cher"):
+        _touch(libs["music"] / name / "Album" / "01 - Song.flac")
+
+    def tags(path):
+        name = Path(path).parts[-3]
+        return {"albumartist": name, "album": "Album", "title": "Song", "tracknumber": "1"}
+
+    monkeypatch.setattr(scan_library, "read_tags", tags)
+    _fake_probe(monkeypatch)
+
+    real_upsert = scan_library._upsert_file
+    bad_path_part = os.path.join("Bob", "Album")
+
+    def flaky_upsert(db, **kw):
+        if bad_path_part in kw.get("path", ""):
+            raise DataError(
+                "INSERT INTO artists (id, name, mbid) VALUES (?, ?, ?)",
+                {"mbid": "x" * 73},
+                Exception("value too long for type character varying(64)"),
+            )
+        return real_upsert(db, **kw)
+
+    monkeypatch.setattr(scan_library, "_upsert_file", flaky_upsert)
+
+    scheduler._run_folder_scan()
+
+    # Two tracks survived; the scan did not die on the first failure.
+    assert _count(file_db, Track) == 2
+    names = {a.name for a in _all(file_db, Artist)}
+    assert "Aretha" in names and "Cher" in names
+    assert "Bob" not in names, "the failed file's artist was rolled back"
+
+    with file_db() as db:
+        status = scan_status.read(db)
+    music = status["libraries"]["music"]
+    assert status["state"] == "idle"
+    assert music["state"] == "done", "a skipped file is an error count, not a failed library"
+    assert music["errors"] >= 1
+    # The admin-facing error names the file and a short reason, not the SQL dump.
+    last = status["last_error"] or ""
+    assert bad_path_part in last
+    assert "value too long" in last
+    for leak in ("sqlalchemy", "INSERT INTO", "StringDataRightTruncation", "[SQL:"):
+        assert leak not in last, f"raw SQL leaked into the admin status: {leak!r}"
 
 
 def test_status_records_a_failed_library(file_db, libs, monkeypatch):

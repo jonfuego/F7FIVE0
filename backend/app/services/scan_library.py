@@ -51,6 +51,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import uuid
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from typing import Callable, Iterable, Iterator, Optional
@@ -127,6 +128,9 @@ class FolderScanStats:
     files_missing: int = 0
     art_imported: int = 0
     errors: int = 0
+    # A short one-line reason for the most recent per-file error (file path plus
+    # a one-line cause), safe to show an admin. Never the raw SQL dump.
+    last_error: Optional[str] = None
 
     def log_summary(self, label: str) -> None:
         log.info(
@@ -202,7 +206,7 @@ class _Batcher:
         """Save everything so far (rows and scan status together), then queue
         enrichment for the rows that save made visible."""
         if self.on_progress is not None:
-            self.on_progress(self.label, "running", self.stats)
+            self.on_progress(self.label, "running", self.stats, self.stats.last_error)
         self.db.commit()
         self._items = 0
         movies, artists, albums = self._movies, self._artists, self._albums
@@ -245,10 +249,15 @@ def scan_all(db: Session, on_progress: Optional[ProgressFn] = None) -> FolderSca
             db.rollback()
             stats.errors += 1
             error = f"{label} scan failed: {exc}"
+        # A library that raised is "failed"; one that finished but skipped bad
+        # files is "done" with an error count and the last per-file reason.
         if on_progress is not None:
-            on_progress(label, "failed" if error else "done", stats, error)
+            on_progress(label, "failed" if error else "done", stats, error or stats.last_error)
         db.commit()
         for k in total.__dataclass_fields__:
+            if k == "last_error":
+                total.last_error = stats.last_error or total.last_error
+                continue
             setattr(total, k, getattr(total, k) + getattr(stats, k))
     return total
 
@@ -394,6 +403,58 @@ def _first(tags: dict, *keys: str) -> Optional[str]:
         if v is not None and str(v).strip():
             return str(v).strip()
     return None
+
+
+# One MusicBrainz id tag can hold several ids joined by whitespace, "/", ";",
+# or "," (a collaboration track lists every credited artist). Artist.mbid and
+# the other mbid columns are String(64); a joined pair is 73 chars and used to
+# make the whole scan fail. Keep the first token that is a real UUID.
+_MBID_SPLIT_RE = re.compile(r"[\s/;,]+")
+
+
+def normalize_mbid(value) -> Optional[str]:
+    """Return the first valid MusicBrainz UUID in a tag value, else None.
+
+    Accepts a string, a list/tuple (first element), or None. Splits on
+    whitespace, "/", ";", and "," and keeps the first token that parses as a
+    UUID, so a tag with two ids joined together stores one id, not both."""
+    if isinstance(value, (list, tuple)):
+        value = value[0] if value else None
+    if value is None:
+        return None
+    for token in _MBID_SPLIT_RE.split(str(value).strip()):
+        if not token:
+            continue
+        try:
+            return str(uuid.UUID(token))
+        except ValueError:
+            continue
+    return None
+
+
+def _short_reason(exc: Exception) -> str:
+    """A one-line, admin-safe cause from an exception. Never the raw SQL dump:
+    an SQLAlchemy error carries the full statement and parameters, which leaks
+    "INSERT INTO ...", column truncation internals and the like. Take the DB
+    driver's own short message when there is one, else the exception type."""
+    orig = getattr(exc, "orig", None)
+    if orig is not None:
+        text = str(orig).strip().splitlines()[0] if str(orig).strip() else ""
+    else:
+        text = str(exc).strip().splitlines()[0] if str(exc).strip() else ""
+    low = text.lower()
+    if not text or "insert into" in low or "update " in low or "sqlalchemy" in low or "[sql:" in low:
+        text = type(exc).__name__
+    return text[:200]
+
+
+def _record_file_error(path: str, exc: Exception, stats: FolderScanStats) -> None:
+    """Note one file's failure without leaking the SQL dump. Full detail goes to
+    the API log; the admin-facing status gets the file path and a short reason."""
+    reason = _short_reason(exc)
+    log.exception("skipping music file after an error: %s", path)
+    stats.errors += 1
+    stats.last_error = f"{path}: {reason}"
 
 
 def _is_skip_dir(name: str) -> bool:
@@ -1051,9 +1112,9 @@ def discover_music(root: str) -> Iterator[FoundTrack]:
                 disc=_num(tags.get("discnumber")) or folder_disc or f_disc or 1,
                 year=_num(year_tag) if year_tag else album_year,
                 genre=_first(tags, "genre"),
-                artist_mbid=_first(tags, "musicbrainz_albumartistid", "musicbrainz_artistid"),
-                album_mbid=_first(tags, "musicbrainz_releasegroupid"),
-                track_mbid=_first(tags, "musicbrainz_trackid"),
+                artist_mbid=normalize_mbid(_first(tags, "musicbrainz_albumartistid", "musicbrainz_artistid")),
+                album_mbid=normalize_mbid(_first(tags, "musicbrainz_releasegroupid")),
+                track_mbid=normalize_mbid(_first(tags, "musicbrainz_trackid")),
                 album_dir=album_dir,
             )
 
@@ -1093,86 +1154,118 @@ def _scan_music_root(db: Session, root: str, cache: _MusicCache, stats: FolderSc
     artist_art_done = cache.artist_art_done
 
     for ft in discover_music(root):
-        akey = ft.artist.lower()
-        artist = artists.get(akey)
-        if artist is None:
-            if ft.artist_mbid:
-                artist = db.scalar(select(Artist).where(Artist.mbid == ft.artist_mbid))
-            if artist is None:
-                artist = db.scalars(select(Artist).where(func.lower(Artist.name) == akey)).first()
-            if artist is None:
-                artist = Artist(name=ft.artist)
-                if ft.artist_mbid:
-                    artist.mbid = ft.artist_mbid
-                db.add(artist)
-                db.flush()
-                stats.artists += 1
-                if artist.mbid:
-                    batch.enrich_artist(artist.id)
-            artists[akey] = artist
-
-        bkey = (artist.id, ft.album.lower())
-        album = albums.get(bkey)
-        if album is None:
-            if ft.album_mbid:
-                album = db.scalar(select(Album).where(Album.mbid == ft.album_mbid))
-            if album is None:
-                album = db.scalars(select(Album).where(Album.artist_id == artist.id, func.lower(Album.title) == ft.album.lower())).first()
-            if album is None:
-                album = Album(artist_id=artist.id, title=ft.album)
-                if ft.album_mbid:
-                    album.mbid = ft.album_mbid
-                if ft.year:
-                    album.release_date = date(ft.year, 1, 1)
-                if ft.genre:
-                    album.genres = [ft.genre]
-                db.add(album)
-                db.flush()
-                stats.albums += 1
-                if album.mbid:
-                    batch.enrich_album(album.id)
-            albums[bkey] = album
-
-        path = _store_path(ft.path)
-        seen.add(path)
-        track = None
-        ref = _existing_ref(db, path, MediaKind.track)
-        if ref is not None:
-            track = db.get(Track, ref)
-        if track is None and ft.track is not None:
-            track = db.scalars(select(Track).where(
-                Track.album_id == album.id, Track.disc_number == ft.disc, Track.track_number == ft.track,
-            )).first()
-        if track is None:
-            track = Track(album_id=album.id, title=ft.title, track_number=ft.track, disc_number=ft.disc)
-            if ft.track_mbid and db.scalar(select(Track).where(Track.mbid == ft.track_mbid)) is None:
-                track.mbid = ft.track_mbid
-            db.add(track)
-            db.flush()
-            stats.tracks += 1
-        else:
-            track.album_id = album.id
-            track.title = ft.title or track.title
-            track.track_number = ft.track
-            track.disc_number = ft.disc
-        mf = _upsert_file(db, kind=MediaKind.track, ref_id=track.id, path=path, stats=stats)
-        if mf.duration_sec and not track.duration_sec:
-            track.duration_sec = mf.duration_sec
-
-        if album.id not in album_art_done:
-            album_art_done.add(album.id)
-            side = _find_sidecar(ft.album_dir, ("cover", "folder", "front", "album"))
-            if side:
-                _import_art_file(db, entity_kind=ENTITY_ALBUM, entity_id=album.id, role=ROLE_COVER, image_path=side, stats=stats)
-            elif not _has_art(db, ENTITY_ALBUM, album.id, ROLE_COVER):
-                data = embedded_cover(ft.path)
-                if data:
-                    _save_art_bytes(db, ENTITY_ALBUM, album.id, ROLE_COVER, data, f"embedded:{path}", stats)
-        if artist.id not in artist_art_done:
-            artist_art_done.add(artist.id)
-            artist_dir = os.path.dirname(ft.album_dir)
-            if os.path.normcase(os.path.abspath(artist_dir)) != os.path.normcase(os.path.abspath(root)):
-                _import_art_file(db, entity_kind=ENTITY_ARTIST, entity_id=artist.id, role=ROLE_THUMB,
-                                 image_path=_find_sidecar(artist_dir, ("artist", "folder", "poster", "thumb")), stats=stats)
+        # Each file processes inside a SAVEPOINT. One bad file (for example a tag
+        # that makes a row too long for its column) rolls back just that file's
+        # work, is recorded with its path and a short reason, counted, and the
+        # scan keeps going. The library ends "done" with an error count, never
+        # "failed". The caches are shared across files, so any entry a failed
+        # file added is pruned on rollback and a later good file re-creates it.
+        artist_keys_before = set(artists)
+        album_keys_before = set(albums)
+        sp = db.begin_nested()
+        try:
+            _import_one_track(db, root, ft, cache, stats, batch, seen)
+            sp.commit()
+        except Exception as exc:  # noqa: BLE001
+            sp.rollback()
+            for k in set(artists) - artist_keys_before:
+                del artists[k]
+            for k in set(albums) - album_keys_before:
+                del albums[k]
+            _record_file_error(ft.path, exc, stats)
         batch.item_done()
     _mark_missing_under(db, MediaKind.track, root, seen, stats)
+
+
+def _import_one_track(
+    db: Session, root: str, ft: "FoundTrack", cache: _MusicCache,
+    stats: FolderScanStats, batch: _Batcher, seen: set[str],
+) -> None:
+    """Import one music file: its artist, album, track, media file, and art.
+    Runs inside the caller's savepoint so a failure undoes only this file."""
+    artists = cache.artists
+    albums = cache.albums
+    album_art_done = cache.album_art_done
+    artist_art_done = cache.artist_art_done
+
+    akey = ft.artist.lower()
+    artist = artists.get(akey)
+    if artist is None:
+        if ft.artist_mbid:
+            artist = db.scalar(select(Artist).where(Artist.mbid == ft.artist_mbid))
+        if artist is None:
+            artist = db.scalars(select(Artist).where(func.lower(Artist.name) == akey)).first()
+        if artist is None:
+            artist = Artist(name=ft.artist)
+            if ft.artist_mbid:
+                artist.mbid = ft.artist_mbid
+            db.add(artist)
+            db.flush()
+            stats.artists += 1
+            if artist.mbid:
+                batch.enrich_artist(artist.id)
+        artists[akey] = artist
+
+    bkey = (artist.id, ft.album.lower())
+    album = albums.get(bkey)
+    if album is None:
+        if ft.album_mbid:
+            album = db.scalar(select(Album).where(Album.mbid == ft.album_mbid))
+        if album is None:
+            album = db.scalars(select(Album).where(Album.artist_id == artist.id, func.lower(Album.title) == ft.album.lower())).first()
+        if album is None:
+            album = Album(artist_id=artist.id, title=ft.album)
+            if ft.album_mbid:
+                album.mbid = ft.album_mbid
+            if ft.year:
+                album.release_date = date(ft.year, 1, 1)
+            if ft.genre:
+                album.genres = [ft.genre]
+            db.add(album)
+            db.flush()
+            stats.albums += 1
+            if album.mbid:
+                batch.enrich_album(album.id)
+        albums[bkey] = album
+
+    path = _store_path(ft.path)
+    seen.add(path)
+    track = None
+    ref = _existing_ref(db, path, MediaKind.track)
+    if ref is not None:
+        track = db.get(Track, ref)
+    if track is None and ft.track is not None:
+        track = db.scalars(select(Track).where(
+            Track.album_id == album.id, Track.disc_number == ft.disc, Track.track_number == ft.track,
+        )).first()
+    if track is None:
+        track = Track(album_id=album.id, title=ft.title, track_number=ft.track, disc_number=ft.disc)
+        if ft.track_mbid and db.scalar(select(Track).where(Track.mbid == ft.track_mbid)) is None:
+            track.mbid = ft.track_mbid
+        db.add(track)
+        db.flush()
+        stats.tracks += 1
+    else:
+        track.album_id = album.id
+        track.title = ft.title or track.title
+        track.track_number = ft.track
+        track.disc_number = ft.disc
+    mf = _upsert_file(db, kind=MediaKind.track, ref_id=track.id, path=path, stats=stats)
+    if mf.duration_sec and not track.duration_sec:
+        track.duration_sec = mf.duration_sec
+
+    if album.id not in album_art_done:
+        album_art_done.add(album.id)
+        side = _find_sidecar(ft.album_dir, ("cover", "folder", "front", "album"))
+        if side:
+            _import_art_file(db, entity_kind=ENTITY_ALBUM, entity_id=album.id, role=ROLE_COVER, image_path=side, stats=stats)
+        elif not _has_art(db, ENTITY_ALBUM, album.id, ROLE_COVER):
+            data = embedded_cover(ft.path)
+            if data:
+                _save_art_bytes(db, ENTITY_ALBUM, album.id, ROLE_COVER, data, f"embedded:{path}", stats)
+    if artist.id not in artist_art_done:
+        artist_art_done.add(artist.id)
+        artist_dir = os.path.dirname(ft.album_dir)
+        if os.path.normcase(os.path.abspath(artist_dir)) != os.path.normcase(os.path.abspath(root)):
+            _import_art_file(db, entity_kind=ENTITY_ARTIST, entity_id=artist.id, role=ROLE_THUMB,
+                             image_path=_find_sidecar(artist_dir, ("artist", "folder", "poster", "thumb")), stats=stats)
