@@ -78,9 +78,12 @@ log = logging.getLogger("f7five0.scan_library")
 
 SOURCE_LOCAL = "local"
 SOURCE_TMDB = "tmdb"
+# A still grabbed from the video itself (music videos with no other art).
+# The weakest art there is: any scanner source replaces it.
+SOURCE_FRAME = "frame"
 # Art rows this scanner may refresh. Anything else (upload, url, *arr,
 # fanart, musicbrainz) belongs to someone else and is left alone.
-_SCANNER_SOURCES = frozenset({SOURCE_LOCAL, SOURCE_TMDB})
+_SCANNER_SOURCES = frozenset({SOURCE_LOCAL, SOURCE_TMDB, SOURCE_FRAME})
 
 VIDEO_EXTS = {"mkv", "mp4", "m4v", "avi", "mov", "webm", "ts", "m2ts", "wmv", "mpg", "mpeg"}
 AUDIO_EXTS = {"flac", "mp3", "m4a", "aac", "ogg", "oga", "opus", "wav", "wma", "alac", "aiff", "aif", "ape", "wv"}

@@ -253,3 +253,138 @@ def test_discovered_video_dataclass_fields():
     )
     assert v.disc_number == 1
     assert v.title == "X"
+
+
+# ---------------------------------------------------------------------------
+# Frame-grab thumbnails (DB-backed)
+# ---------------------------------------------------------------------------
+def _jpeg_bytes() -> bytes:
+    import io
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new("RGB", (32, 18), (200, 30, 30)).save(buf, "JPEG")
+    return buf.getvalue()
+
+
+@pytest.fixture()
+def mv_scan_env(db_session, tmp_path, monkeypatch):
+    """One artist/release/video on disk, ffprobe faked, art root in tmp."""
+    from app.config import settings
+    from app.models.user import User
+    from app.services import ffprobe, library_folders, scan_music_videos
+    from app.services.art import SYSTEM_USER_ID
+
+    db_session.add(User(
+        id=SYSTEM_USER_ID, username="system", display_name="System",
+        password_hash="x", role="member", is_active=False,
+    ))
+    db_session.commit()
+    root = tmp_path / "mv"
+    video = root / "New Order" / "Substance" / "01 - Blue Monday.mp4"
+    video.parent.mkdir(parents=True)
+    video.write_bytes(b"x" * 64)
+    monkeypatch.setattr(settings, "art_root", tmp_path / "art")
+    monkeypatch.setattr(library_folders, "folders", lambda db, kind: [str(root)])
+    monkeypatch.setattr(
+        ffprobe, "probe",
+        lambda path, timeout=30.0: ffprobe.ProbeResult(
+            container="mp4", size_bytes=64, duration_sec=200, bitrate_kbps=1000,
+            video_codec="h264", audio_codec="aac", audio_channels=2,
+            width=1920, height=1080,
+        ),
+    )
+    return scan_music_videos, video
+
+
+def _fake_ffmpeg(monkeypatch, calls, rc=0):
+    import subprocess
+
+    def run(cmd, **kw):
+        calls.append(cmd)
+        if rc == 0:
+            with open(cmd[-1], "wb") as fh:
+                fh.write(_jpeg_bytes())
+        return subprocess.CompletedProcess(cmd, rc, b"", b"boom")
+
+    monkeypatch.setattr("app.services.scan_music_videos.subprocess.run", run)
+
+
+def _thumb_row(db):
+    from sqlalchemy import select
+    from app.models.art import ArtOverride
+    return db.scalars(select(ArtOverride)).first()
+
+
+def test_video_without_art_gets_a_frame_grab(mv_scan_env, db_session, monkeypatch):
+    scan_mod, _video = mv_scan_env
+    calls: list = []
+    _fake_ffmpeg(monkeypatch, calls)
+    scan_mod.scan(db_session)
+    row = _thumb_row(db_session)
+    assert row is not None
+    assert (row.entity_kind, row.role, row.source_kind) == ("music_video", "thumb", "frame")
+    assert len(calls) == 1
+    # ~10% of the 200 second probe duration.
+    assert calls[0][calls[0].index("-ss") + 1] == "20.000"
+    # A second scan does not grab again.
+    scan_mod.scan(db_session)
+    assert len(calls) == 1
+
+
+def test_existing_art_is_never_replaced_by_a_frame(mv_scan_env, db_session, monkeypatch):
+    from sqlalchemy import select
+    from app.models.art import ArtOverride
+    from app.models.music import MusicVideo
+    scan_mod, _video = mv_scan_env
+    calls: list = []
+    _fake_ffmpeg(monkeypatch, calls)
+    scan_mod.scan(db_session)  # creates the row (and a frame)
+    mv = db_session.scalars(select(MusicVideo)).first()
+    row = db_session.get(ArtOverride, ("music_video", mv.id, "thumb"))
+    row.source_kind = "upload"  # admin art
+    db_session.commit()
+    calls.clear()
+    scan_mod.scan(db_session)
+    assert calls == []
+    assert db_session.get(ArtOverride, ("music_video", mv.id, "thumb")).source_kind == "upload"
+
+
+def test_sidecar_art_replaces_a_frame_grab(mv_scan_env, db_session, monkeypatch):
+    scan_mod, video = mv_scan_env
+    calls: list = []
+    _fake_ffmpeg(monkeypatch, calls)
+    scan_mod.scan(db_session)
+    assert _thumb_row(db_session).source_kind == "frame"
+    (video.parent / "01 - Blue Monday.jpg").write_bytes(_jpeg_bytes())
+    scan_mod.scan(db_session)
+    assert _thumb_row(db_session).source_kind == "local"
+
+
+def test_ffmpeg_failure_does_not_break_the_scan(mv_scan_env, db_session, monkeypatch):
+    scan_mod, _video = mv_scan_env
+    _fake_ffmpeg(monkeypatch, [], rc=1)
+    stats = scan_mod.scan(db_session)
+    assert stats.videos_upserted == 1
+    assert stats.errors == 0
+    assert _thumb_row(db_session) is None
+
+
+def test_ffmpeg_missing_or_timeout_does_not_break_the_scan(mv_scan_env, db_session, monkeypatch):
+    import subprocess
+    scan_mod, _video = mv_scan_env
+
+    def boom(cmd, **kw):
+        raise subprocess.TimeoutExpired(cmd, 30)
+
+    monkeypatch.setattr("app.services.scan_music_videos.subprocess.run", boom)
+    stats = scan_mod.scan(db_session)
+    assert stats.videos_upserted == 1 and stats.errors == 0
+    assert _thumb_row(db_session) is None
+
+    def missing(cmd, **kw):
+        raise FileNotFoundError(cmd[0])
+
+    monkeypatch.setattr("app.services.scan_music_videos.subprocess.run", missing)
+    stats = scan_mod.scan(db_session)
+    assert stats.errors == 0
+    assert _thumb_row(db_session) is None
