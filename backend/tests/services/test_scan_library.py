@@ -16,9 +16,13 @@ from app.models.music import Album, Artist, Track
 from app.models.tv import Episode, Series
 from app.services import ffprobe, scan_library
 from app.services.scan_library import (
-    parse_episode, parse_season_dir, parse_title_year, parse_tmdb_tag,
-    parse_track_filename,
+    normalize_mbid, parse_episode, parse_season_dir, parse_title_year,
+    parse_tmdb_tag, parse_track_filename,
 )
+
+
+_UUID_A = "7d7a5fdd-0d04-4c36-8bee-906feeae239c"
+_UUID_B = "fdc6fc49-9a35-4727-8a55-c3db6cd808b4"
 
 
 # ---------------------------------------------------------------------------
@@ -69,6 +73,24 @@ def test_parse_season_dir(name, expected):
 ])
 def test_parse_track_filename(fname, expected):
     assert parse_track_filename(fname) == expected
+
+
+@pytest.mark.parametrize("value,expected", [
+    (_UUID_A, _UUID_A),
+    (f"{_UUID_A} {_UUID_B}", _UUID_A),          # two ids joined by a space
+    (f"{_UUID_A}/{_UUID_B}", _UUID_A),          # by a slash
+    (f"{_UUID_A};{_UUID_B}", _UUID_A),          # by a semicolon
+    (f"{_UUID_A},{_UUID_B}", _UUID_A),          # by a comma
+    (f"  {_UUID_A}  ", _UUID_A),                # surrounding whitespace
+    ([f"{_UUID_A} {_UUID_B}"], _UUID_A),        # a list value from the tag lib
+    (f"not-a-uuid {_UUID_B}", _UUID_B),         # skip junk, keep the first UUID
+    ("not-a-uuid", None),
+    ("", None),
+    (None, None),
+    ([], None),
+])
+def test_normalize_mbid(value, expected):
+    assert normalize_mbid(value) == expected
 
 
 # ---------------------------------------------------------------------------
@@ -294,6 +316,36 @@ def test_scan_music_folder_names(db_session, libs, fake_probe, system_user):
     assert tracks["Disc Two"].disc_number == 2
     assert tracks["Opener"].duration_sec == 120
     assert db_session.get(ArtOverride, ("album", albums["Great Album"].id, "cover")) is not None
+
+
+def test_scan_music_stores_first_mbid_when_tag_holds_two(db_session, libs, fake_probe, system_user, monkeypatch):
+    # A collaboration track's musicbrainz_artistid tag holds two ids joined by a
+    # space (73 chars). Artist.mbid is String(64); the whole id used to go in and
+    # overflow the column. The first id must be stored, the second dropped.
+    album_dir = libs["music"] / "Damon Albarn" / "Everyday Robots (2014)"
+    _touch(album_dir / "01 - Lonely Press Play.flac")
+
+    def tags(_path):
+        return {
+            "albumartist": "Damon Albarn",
+            "album": "Everyday Robots",
+            "title": "Lonely Press Play",
+            "tracknumber": "1",
+            "musicbrainz_albumartistid": f"{_UUID_A} {_UUID_B}",
+            "musicbrainz_releasegroupid": f"{_UUID_A} {_UUID_B}",
+            "musicbrainz_trackid": f"{_UUID_A} {_UUID_B}",
+        }
+
+    monkeypatch.setattr(scan_library, "read_tags", tags)
+    scan_library.scan_music(db_session)
+
+    artist = db_session.scalar(select(Artist))
+    assert artist.name == "Damon Albarn"
+    assert artist.mbid == _UUID_A
+    album = db_session.scalar(select(Album))
+    assert album.mbid == _UUID_A
+    track = db_session.scalar(select(Track))
+    assert track.mbid == _UUID_A
 
 
 # ---------------------------------------------------------------------------
