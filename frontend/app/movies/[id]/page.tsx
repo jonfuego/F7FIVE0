@@ -14,16 +14,17 @@ import EditOverridesModal, {
 import { AuthShell } from "@/components/AuthShell";
 import { BackButton } from "@/components/BackButton";
 import { Backdrop } from "@/components/Backdrop";
+import { FileInfoMenuButton } from "@/components/FileInfoSheet";
 import { MarkWatchedButton } from "@/components/MarkWatchedButton";
 import { apiGet, ApiError } from "@/lib/client-api";
 import { loadOverride } from "@/lib/overrides";
 import {
   colorForTitle,
-  formatBytes,
   formatRuntime,
   hueFromString,
   joinMeta,
 } from "@/lib/format";
+import { movieActivityLine } from "@/lib/movie-activity";
 import { useProgressMap } from "@/lib/progress";
 import type { CastMember, MediaFile, MovieDetail, OverrideOut } from "@/lib/types";
 
@@ -219,9 +220,13 @@ function MovieHero({
                 {editError}
               </span>
             ) : null}
+            {primary ? (
+              <FileInfoMenuButton file={primary} label={movie.title} isAdmin={isAdmin} />
+            ) : null}
           </div>
           <h1>{movie.title}</h1>
           {movie.tagline ? <div className="tagline">{movie.tagline}</div> : null}
+          <ActivityLine file={primary} />
           {meta ? <MetaRow text={meta} /> : null}
           {movie.overview ? <Blurb text={movie.overview} /> : null}
           <div className="ctas">
@@ -244,9 +249,6 @@ function MovieHero({
             </div>
           ) : null}
           {sortedCast.length ? <CastRow cast={sortedCast} /> : null}
-
-          {primary ? <TechnicalCard file={primary} /> : null}
-          <ActivityCard file={primary} />
         </div>
       </div>
     </section>
@@ -300,36 +302,17 @@ function CastRow({ cast }: { cast: CastMember[] }) {
   );
 }
 
-function TechnicalCard({ file }: { file: MediaFile }) {
-  return (
-    <div className="cards font-sans">
-      <div className="card">
-        <h4>File Information</h4>
-        <div className="row"><span>Codec</span><span>{file.video_codec?.toUpperCase() ?? "—"}</span></div>
-        <div className="row"><span>Bitrate</span><span>{file.bitrate_kbps ? `${(file.bitrate_kbps / 1000).toFixed(1)} Mbps` : "—"}</span></div>
-        <div className="row"><span>Container</span><span>{file.container?.toUpperCase() ?? "—"}</span></div>
-        <div className="row"><span>Resolution</span><span>{file.width && file.height ? `${file.width}×${file.height}` : "—"}</span></div>
-        <div className="row"><span>Audio</span><span>{file.audio_codec?.toUpperCase() ?? "—"}</span></div>
-        <div className="row"><span>File size</span><span>{formatBytes(file.size_bytes)}</span></div>
-        <div className="row"><span>File path</span><span style={{ fontSize: 11 }}>{file.path}</span></div>
-      </div>
-    </div>
-  );
-}
-
-function ActivityCard({ file }: { file: MediaFile | null }) {
+// File information and Activity no longer take two full-width panels. File info
+// moved into the 3-dot menu (FileInfoMenuButton); activity is this single line
+// under the title, shown only when there is any.
+function ActivityLine({ file }: { file: MediaFile | null }) {
   const progress = useProgressMap();
   const row = file ? progress?.get(file.id) : undefined;
-  const lastPlayed = row ? new Date(row.updated_at).toLocaleString() : null;
-  const completed = row?.completed_at ? new Date(row.completed_at).toLocaleString() : null;
+  const text = movieActivityLine(row ?? null);
+  if (!text) return null;
   return (
-    <div className="cards" style={{ marginTop: 28 }}>
-      <div className="card">
-        <h4>Activity</h4>
-        <div className="row"><span>Status</span><span>{completed ? "Watched" : row ? "In progress" : "—"}</span></div>
-        <div className="row"><span>Last touched</span><span>{lastPlayed ?? "—"}</span></div>
-        <div className="row"><span>Completed</span><span>{completed ?? "—"}</span></div>
-      </div>
+    <div className="meta" style={{ color: "var(--ink-3)" }}>
+      <span>{text}</span>
     </div>
   );
 }

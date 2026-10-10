@@ -32,6 +32,23 @@ export function phaseLabel(phase: string): string {
 /** The steps shown as a progress strip, in order. */
 export const UPDATE_STEPS = ["downloading", "verifying", "backup", "installing", "health_check"] as const;
 
+// Short labels for the five phase chips, so they fit the strip instead of
+// being cut off mid-word ("Downloading the", "Checking the"). Ordered to match
+// UPDATE_STEPS.
+const PHASE_CHIP_LABEL: Record<(typeof UPDATE_STEPS)[number], string> = {
+  downloading: "Download",
+  verifying: "Verify",
+  backup: "Back up",
+  installing: "Install",
+  health_check: "Health check",
+};
+
+/** The short chip label for a strip phase: Download, Verify, Back up, Install,
+ * Health check. Falls back to the long label for anything off the strip. */
+export function phaseChipLabel(phase: string): string {
+  return (PHASE_CHIP_LABEL as Record<string, string>)[phase] ?? phaseLabel(phase);
+}
+
 /** Which step is current: 0 to 4, 5 when finished, -1 when the strip doesn't apply. */
 export function stepIndex(phase: string): number {
   if (phase === "queued") return 0;

@@ -6,7 +6,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   UPDATE_STEPS, blockedText, checkedAgo, encodePasswordHeader, formatBytes,
-  UP_TO_DATE, isActivePhase, phaseLabel, runSummary, stepIndex, updateErrorText, upToDateMessages,
+  UP_TO_DATE, isActivePhase, phaseChipLabel, phaseLabel, runSummary, stepIndex,
+  updateErrorText, upToDateMessages,
 } from "./updates.ts";
 
 test("active phases are the ones that need polling", () => {
@@ -22,6 +23,15 @@ test("every phase has a plain-language label", () => {
   assert.equal(phaseLabel("health_check"), "Checking that the new version works");
   assert.equal(phaseLabel("rolled_back"), "Went back to the old version");
   assert.equal(phaseLabel("something_new"), "something_new");
+});
+
+test("the five phase chips use short labels that fit", () => {
+  assert.deepEqual(
+    UPDATE_STEPS.map(phaseChipLabel),
+    ["Download", "Verify", "Back up", "Install", "Health check"],
+  );
+  // Anything off the strip falls back to the long label.
+  assert.equal(phaseChipLabel("done"), phaseLabel("done"));
 });
 
 test("the progress steps run download to health check", () => {

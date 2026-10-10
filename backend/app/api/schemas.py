@@ -1096,6 +1096,19 @@ class UpdateBadgeOut(BaseModel):
     latest_version: Optional[str] = None
 
 
+class UpdateDismissOut(BaseModel):
+    """The dismissed update-run id, saved on the server so Dismiss sticks across
+    reloads, browsers and other admins. None means nothing is dismissed; a new
+    run has a new id, so its result panel shows again."""
+    run_id: Optional[str] = None
+
+
+class UpdateDismissIn(BaseModel):
+    """Set the dismissed update-run id. Pass the id of the finished run to hide
+    its result panel; pass null to clear it."""
+    run_id: Optional[str] = None
+
+
 class UpdatesOut(BaseModel):
     """Admin > Updates. No download URLs: the browser never fetches anything
     itself, the server downloads and verifies."""

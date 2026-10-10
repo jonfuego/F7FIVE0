@@ -7,8 +7,9 @@
 
 "use client";
 
-import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { AuthShell } from "@/components/AuthShell";
+import { CollapsibleSection } from "@/components/CollapsibleSection";
 import { RemoteAccessSection } from "./RemoteAccessSection";
 import { UpdatesSection } from "./UpdatesSection";
 import { LibraryFoldersSection } from "./LibraryFoldersSection";
@@ -16,11 +17,61 @@ import { MetadataSection } from "./MetadataSection";
 import { apiGet, apiPatch, apiPost, apiDelete, ApiError } from "@/lib/client-api";
 import { loadMe } from "@/lib/load-me";
 import { useFeatures } from "@/lib/features";
-import { showArrSync } from "@/lib/library-scan";
+import { showArrSync, type FolderScanStatus } from "@/lib/library-scan";
+import { remoteAccessSummary, scanSummary, updatesSummary, type SectionSummary } from "@/lib/admin-sections";
+import { useViewPref } from "@/lib/use-view-pref";
+import type { AdminSectionId } from "@/lib/view-prefs";
 import type {
-  ActiveTranscode, AdminSession, AdminUser, AuthEvent, Me, ServerHealth,
-  WatchHistoryRow,
+  ActiveTranscode, AdminSession, AdminUser, AuthEvent, Me, RemoteAccessStatus,
+  ServerHealth, UpdatesStatus, WatchHistoryRow,
 } from "@/lib/types";
+
+// Lightweight status probes for the section summaries shown when a card is
+// folded. These run whether or not the section is expanded, so a collapsed
+// section can still surface a running scan, a failed scan, an update available
+// or a running update. They are cheap on a home-scale instance; the section
+// bodies keep their own fetches for the full view.
+type SectionStatuses = {
+  updates: SectionSummary;
+  remote: SectionSummary;
+  scan: SectionSummary;
+};
+
+function useSectionSummaries(enabled: boolean): SectionStatuses {
+  const [updates, setUpdates] = useState<UpdatesStatus | null>(null);
+  const [remote, setRemote] = useState<RemoteAccessStatus | null>(null);
+  const [scan, setScan] = useState<FolderScanStatus | null>(null);
+
+  useEffect(() => {
+    if (!enabled) return;
+    let cancelled = false;
+    const load = async () => {
+      const [u, r, s] = await Promise.allSettled([
+        apiGet<UpdatesStatus>("/api/admin/updates"),
+        apiGet<RemoteAccessStatus>("/api/admin/remote-access"),
+        apiGet<FolderScanStatus>("/api/admin/library/scan"),
+      ]);
+      if (cancelled) return;
+      if (u.status === "fulfilled") setUpdates(u.value);
+      if (r.status === "fulfilled") setRemote(r.value);
+      if (s.status === "fulfilled") setScan(s.value);
+    };
+    void load();
+    // Refresh so a scan or update that starts while the admin watches shows up
+    // in a folded summary.
+    const id = window.setInterval(() => void load(), 10_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [enabled]);
+
+  return {
+    updates: updatesSummary(updates),
+    remote: remoteAccessSummary(remote),
+    scan: scanSummary(scan),
+  };
+}
 
 export default function AdminPage() {
   const [me, setMe] = useState<Me | null>(null);
@@ -51,6 +102,30 @@ export default function AdminPage() {
     };
   }, [load]);
 
+  const isAdmin = me?.role === "admin";
+  // Collapsed sections, remembered per user on the server (admin.collapsed).
+  const [collapsedList, setCollapsedList] = useViewPref("admin.collapsed");
+  const collapsed = useMemo(() => new Set<string>(collapsedList), [collapsedList]);
+  const toggle = useCallback(
+    (id: string) => {
+      setCollapsedList(
+        (collapsed.has(id)
+          ? collapsedList.filter((x) => x !== id)
+          : [...collapsedList, id]) as AdminSectionId[],
+      );
+    },
+    [collapsed, collapsedList, setCollapsedList],
+  );
+
+  const summaries = useSectionSummaries(isAdmin);
+
+  // A reminder banner links to /admin#metadata: force Metadata open on that hash
+  // so a collapsed card can't hide where the admin was sent.
+  const [metadataHash, setMetadataHash] = useState(false);
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.location.hash === "#metadata") setMetadataHash(true);
+  }, []);
+
   if (forbidden) {
     return (
       <AuthShell>
@@ -66,8 +141,8 @@ export default function AdminPage() {
 
   return (
     <AuthShell>
-      <div className="mx-auto max-w-5xl space-y-8">
-        <header>
+      <div className="mx-auto max-w-5xl">
+        <header className="mb-4">
           <h1 className="text-2xl font-semibold tracking-tight">Admin</h1>
           <p className="mt-1 text-sm text-neutral-500">
             Manage users, updates, remote access, and library folders, trigger library sync, inspect active streams and recent history.
@@ -75,20 +150,73 @@ export default function AdminPage() {
         </header>
 
         {me ? (
-          <>
-            <UsersSection me={me} />
-            <UpdatesSection />
-            <RemoteAccessSection />
-            <LibraryFoldersSection />
-            <MetadataSection />
-            <LibrarySection />
-            <AudioAnalysisSection />
-            <HealthSection />
-            <ActiveStreamsSection />
-            <SessionsSection />
-            <AuthEventsSection />
-            <RecentHistorySection />
-          </>
+          <div className="space-y-3">
+            <CollapsibleSection id="users" title="Users" collapsed={collapsed.has("users")} onToggle={toggle}>
+              <UsersSection me={me} />
+            </CollapsibleSection>
+            <CollapsibleSection
+              id="updates"
+              title="Updates"
+              collapsed={collapsed.has("updates")}
+              onToggle={toggle}
+              summary={summaries.updates.text}
+              attention={summaries.updates.attention}
+              forceOpen={summaries.updates.attention}
+            >
+              <UpdatesSection />
+            </CollapsibleSection>
+            <CollapsibleSection
+              id="remote-access"
+              title="Remote access"
+              collapsed={collapsed.has("remote-access")}
+              onToggle={toggle}
+              summary={summaries.remote.text}
+              attention={summaries.remote.attention}
+            >
+              <RemoteAccessSection />
+            </CollapsibleSection>
+            <CollapsibleSection
+              id="library-folders"
+              title="Library folders"
+              collapsed={collapsed.has("library-folders")}
+              onToggle={toggle}
+              summary={summaries.scan.text}
+              attention={summaries.scan.attention}
+              forceOpen={summaries.scan.attention}
+            >
+              <LibraryFoldersSection />
+            </CollapsibleSection>
+            <CollapsibleSection
+              id="metadata"
+              title="Metadata"
+              collapsed={collapsed.has("metadata")}
+              onToggle={toggle}
+              forceOpen={metadataHash}
+            >
+              <MetadataSection />
+            </CollapsibleSection>
+            <CollapsibleSection id="library" title="Library" collapsed={collapsed.has("library")} onToggle={toggle}>
+              <LibrarySection />
+            </CollapsibleSection>
+            <CollapsibleSection id="audio-analysis" title="Audio analysis" collapsed={collapsed.has("audio-analysis")} onToggle={toggle}>
+              <AudioAnalysisSection />
+            </CollapsibleSection>
+            <CollapsibleSection id="health" title="Server health" collapsed={collapsed.has("health")} onToggle={toggle}>
+              <HealthSection />
+            </CollapsibleSection>
+            <CollapsibleSection id="active-streams" title="Active streams" collapsed={collapsed.has("active-streams")} onToggle={toggle}>
+              <ActiveStreamsSection />
+            </CollapsibleSection>
+            <CollapsibleSection id="sessions" title="Active sessions" collapsed={collapsed.has("sessions")} onToggle={toggle}>
+              <SessionsSection />
+            </CollapsibleSection>
+            <CollapsibleSection id="auth-events" title="Auth events" collapsed={collapsed.has("auth-events")} onToggle={toggle}>
+              <AuthEventsSection />
+            </CollapsibleSection>
+            <CollapsibleSection id="history" title="Recent history" collapsed={collapsed.has("history")} onToggle={toggle}>
+              <RecentHistorySection />
+            </CollapsibleSection>
+          </div>
         ) : loadError ? (
           <div className="rounded-xl border border-red-900/60 bg-red-950/40 px-4 py-6 text-sm text-red-200">
             <p>{loadError}</p>
@@ -166,11 +294,8 @@ function UsersSection({ me }: { me: Me }) {
   }
 
   return (
-    <section className="rounded-xl border border-neutral-800 bg-neutral-900/40 p-6">
-      <div className="flex items-baseline justify-between gap-4">
-        <h2 className="text-base font-semibold">Users</h2>
-        {notice ? <span className="text-xs text-neutral-400">{notice}</span> : null}
-      </div>
+    <div>
+      {notice ? <div className="mb-2 text-xs text-neutral-400">{notice}</div> : null}
 
       <NewUserForm onCreated={(u) => {
         setUsers((prev) => (prev ? [...prev, u] : [u]));
@@ -251,7 +376,7 @@ function UsersSection({ me }: { me: Me }) {
           </table>
         )}
       </div>
-    </section>
+    </div>
   );
 }
 
@@ -409,9 +534,8 @@ function LibrarySection() {
   }
 
   return (
-    <section className="rounded-xl border border-neutral-800 bg-neutral-900/40 p-6">
-      <h2 className="text-base font-semibold">Library</h2>
-      <p className="mt-1 text-xs text-neutral-500">
+    <div>
+      <p className="text-xs text-neutral-500">
         {showArr ? "The *arr sync scheduler already runs every 5 minutes. " : ""}
         Music videos are scanned off the filesystem on demand; trigger one
         after dropping new files into the Music Videos share. Scan the movie,
@@ -438,7 +562,7 @@ function LibrarySection() {
         </button>
         {status ? <span className="text-xs text-neutral-400">{status}</span> : null}
       </div>
-    </section>
+    </div>
   );
 }
 
@@ -495,9 +619,8 @@ function AudioAnalysisSection() {
       : 0;
 
   return (
-    <section className="rounded-xl border border-neutral-800 bg-neutral-900/40 p-6">
-      <h2 className="text-base font-semibold">Audio analysis</h2>
-      <p className="mt-1 text-xs text-neutral-500">
+    <div>
+      <p className="text-xs text-neutral-500">
         Loudness leveling, the waveform scrubber, and similar-track radio need
         each track analyzed once. New music is analyzed automatically after a
         folder scan, one track at a time. Use this to kick it off right away.
@@ -532,7 +655,7 @@ function AudioAnalysisSection() {
         </div>
       ) : null}
       {status ? <p className="mt-3 text-xs text-neutral-400">{status}</p> : null}
-    </section>
+    </div>
   );
 }
 
@@ -585,9 +708,8 @@ function ActiveStreamsSection() {
   }, [load]);
 
   return (
-    <section className="rounded-xl border border-neutral-800 bg-neutral-900/40 p-6">
-      <div className="flex items-baseline justify-between gap-3">
-        <h2 className="text-base font-semibold">Active streams</h2>
+    <div>
+      <div className="flex items-baseline justify-end gap-3">
         <button
           type="button"
           onClick={load}
@@ -642,7 +764,7 @@ function ActiveStreamsSection() {
           </table>
         )}
       </div>
-    </section>
+    </div>
   );
 }
 
@@ -668,9 +790,8 @@ function RecentHistorySection() {
   }, [load]);
 
   return (
-    <section className="rounded-xl border border-neutral-800 bg-neutral-900/40 p-6">
-      <div className="flex items-baseline justify-between gap-3">
-        <h2 className="text-base font-semibold">Recent history</h2>
+    <div>
+      <div className="flex items-baseline justify-end gap-3">
         <button
           type="button"
           onClick={load}
@@ -717,7 +838,7 @@ function RecentHistorySection() {
           </table>
         )}
       </div>
-    </section>
+    </div>
   );
 }
 
@@ -750,9 +871,8 @@ function HealthSection() {
       : 0;
 
   return (
-    <section className="rounded-xl border border-neutral-800 bg-neutral-900/40 p-6">
-      <div className="flex items-baseline justify-between gap-3">
-        <h2 className="text-base font-semibold">Server health</h2>
+    <div>
+      <div className="flex items-baseline justify-end gap-3">
         <button
           type="button"
           onClick={load}
@@ -802,7 +922,7 @@ function HealthSection() {
           </HealthStat>
         </div>
       )}
-    </section>
+    </div>
   );
 }
 
@@ -851,9 +971,8 @@ function SessionsSection() {
   }
 
   return (
-    <section className="rounded-xl border border-neutral-800 bg-neutral-900/40 p-6">
-      <div className="flex items-baseline justify-between gap-3">
-        <h2 className="text-base font-semibold">Active sessions</h2>
+    <div>
+      <div className="flex items-baseline justify-end gap-3">
         <button
           type="button"
           onClick={load}
@@ -920,7 +1039,7 @@ function SessionsSection() {
           </table>
         )}
       </div>
-    </section>
+    </div>
   );
 }
 
@@ -946,9 +1065,8 @@ function AuthEventsSection() {
   }, [load]);
 
   return (
-    <section className="rounded-xl border border-neutral-800 bg-neutral-900/40 p-6">
-      <div className="flex items-baseline justify-between gap-3">
-        <h2 className="text-base font-semibold">Auth events</h2>
+    <div>
+      <div className="flex items-baseline justify-end gap-3">
         <button
           type="button"
           onClick={load}
@@ -991,7 +1109,7 @@ function AuthEventsSection() {
           </table>
         )}
       </div>
-    </section>
+    </div>
   );
 }
 

@@ -107,15 +107,10 @@ export function LibraryFoldersSection() {
   }, [load]);
 
   if (!data || !draft) {
-    return (
-      <section className="rounded-xl border border-neutral-800 bg-neutral-900/40 p-6">
-        <h2 className="text-base font-semibold">Library folders</h2>
-        {error ? (
-          <p className="mt-2 text-xs text-red-400">{error}</p>
-        ) : (
-          <div className="mt-4 h-24 animate-pulse rounded-lg bg-neutral-900" />
-        )}
-      </section>
+    return error ? (
+      <p className="text-xs text-red-400">{error}</p>
+    ) : (
+      <div className="h-24 animate-pulse rounded-lg bg-neutral-900" />
     );
   }
 
@@ -232,9 +227,8 @@ export function LibraryFoldersSection() {
   }
 
   return (
-    <section className="rounded-xl border border-neutral-800 bg-neutral-900/40 p-6">
-      <h2 className="text-base font-semibold">Library folders</h2>
-      <p className="mt-1 text-xs text-neutral-500">
+    <div>
+      <p className="text-xs text-neutral-500">
         Each library can use more than one folder, on this PC or a network share
         (like <code>\\nas\media\Movies</code>). Type the path as the server sees it.
         Removing a folder takes its items out of the library; nothing is deleted.
@@ -410,7 +404,7 @@ export function LibraryFoldersSection() {
       </div>
 
       <ScanStatusBlock refreshKey={scanRefresh} />
-    </section>
+    </div>
   );
 }
 
