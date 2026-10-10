@@ -18,7 +18,7 @@ _DATA_ROOT = _REPO_ROOT / "data"
 
 # Public project URL. Used as the contact in outbound User-Agent strings
 # (MusicBrainz requires one) when no operator email is configured.
-PROJECT_URL = "https://github.com/F7FIVE0/F7FIVE0"
+PROJECT_URL = "https://github.com/jonfuego/F7FIVE0"
 
 # SHA-256 fingerprint of the certificate that signs official F7FIVE0 APKs
 # (release key made 2026-10-04; scripts/release-apk.ps1 prints it as "Release
