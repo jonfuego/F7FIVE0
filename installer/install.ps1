@@ -878,10 +878,17 @@ $bind = if ($OpenFirewall -eq "1" -or $lanRule) { "0.0.0.0" } else { "127.0.0.1"
 # traffic (Caddy sends it as X-F7five0-Proxy) from a direct LAN browser and
 # forward client-IP headers only on the trusted path. Read the effective value
 # from .env (an existing one wins over the freshly generated one above).
+# The launcher (server-wrapper.js) reads PUBLIC_URL / HOME_URL /
+# APP_ALLOWED_HOSTS from this .env at start so the web origin helper
+# (lib/origin.ts) keeps redirects and the CSRF self-origin on the configured
+# public host instead of falling back to 127.0.0.1. Point it at the install-root
+# .env; remote-access.ps1 rewrites PUBLIC_URL there and restarts F7FIVE0-Web, so
+# a new address is picked up on the restart with no service-env change.
 $webEnv = @(
     "NODE_ENV=production", "PORT=$WebPort", "HOSTNAME=$bind",
     "API_ORIGIN=http://127.0.0.1:$ApiPort", "STREAM_ORIGIN=http://127.0.0.1:$StreamPort",
     "F7FIVE0_DOWNLOADS_DIR=$(Join-Path $DataDir 'downloads')",
+    "F7FIVE0_ENV_FILE=$EnvFile",
     "TRUSTED_PROXY_SECRET=$(Get-EnvValue 'TRUSTED_PROXY_SECRET')",
     "NEXT_TELEMETRY_DISABLED=1"
 )
