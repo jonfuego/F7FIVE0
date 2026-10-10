@@ -62,16 +62,40 @@ def _run_full_sync() -> None:
 
 def _run_music_videos_scan() -> None:
     """Scheduler-invoked wrapper around the music-videos filesystem scan.
-    Owns its own session. The walk touches the NAS on every iteration so
-    callers should not block on it."""
+    Owns its own session and writes its status block as it goes (the file total
+    up front, then a running count at every batch, then the finished time), the
+    same way the folder scan does. The walk touches the NAS on every iteration
+    so callers should not block on it."""
+    error = None
+    stats = None
+    db = SessionLocal()
     try:
-        with db_session() as db:
-            # Connect any saved NAS sign-ins before walking folders, so a UNC
-            # share is readable for this scan. Cheap when already connected.
-            nas_auth.ensure_all(db)
-            scan_music_videos.scan(db)
-    except Exception:
+        scan_status.mv_begin(db, force=True)
+        db.commit()
+
+        def progress(st, err=None):
+            # Save the rows found so far together with the status, so Admin's
+            # count never runs ahead of what the library holds.
+            scan_status.mv_progress(db, st, err)
+            db.commit()
+
+        # Connect any saved NAS sign-ins before walking folders, so a UNC
+        # share is readable for this scan. Cheap when already connected.
+        nas_auth.ensure_all(db)
+        stats = scan_music_videos.scan(db, on_progress=progress)
+        db.commit()
+    except Exception as exc:
         log.exception("music_videos scan raised")
+        db.rollback()
+        error = f"The scan stopped: {exc}"
+    finally:
+        try:
+            scan_status.mv_finish(db, stats, error)
+            db.commit()
+        except Exception:
+            log.exception("could not record the end of the music_videos scan")
+            db.rollback()
+        db.close()
 
 
 def _scan_folders() -> bool:

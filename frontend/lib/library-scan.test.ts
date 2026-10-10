@@ -5,7 +5,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  SCAN_POLL_MS, SCANNING_TEXT, countsText, emptyLibraryText, scanHeadline, shouldPollScan, showArrSync,
+  SCAN_POLL_MS, SCANNING_TEXT, countsText, emptyLibraryText, mvCountsText, mvScanHeadline,
+  ofTotalText, scanHeadline, scanPercent, shouldPollScan, showArrSync,
 } from "./library-scan.ts";
 
 test("empty library pages say a scan is running while one is", () => {
@@ -58,4 +59,38 @@ test("counts read as a short sentence", () => {
   );
   assert.equal(countsText({ state: "done", seen: 1, added: 0, probed: 0, missing: 0, errors: 2 }), "1 file seen, 0 added, 2 errors");
   assert.equal(countsText({ state: "queued" }), "Waiting");
+});
+
+test("the progress bar percent is a clamped, rounded count over total", () => {
+  assert.equal(scanPercent(0, 0), 0, "no total yet reads empty, not full");
+  assert.equal(scanPercent(5, 0), 0);
+  assert.equal(scanPercent(undefined, 10), 0);
+  assert.equal(scanPercent(5, 10), 50);
+  assert.equal(scanPercent(1, 3), 33);
+  assert.equal(scanPercent(10, 10), 100);
+  assert.equal(scanPercent(11, 10), 100, "a stray count past the total never overflows");
+});
+
+test("the x-of-y text shows the total when known, else just the count", () => {
+  assert.equal(ofTotalText(12, 240), "12 of 240");
+  assert.equal(ofTotalText(0, 240), "0 of 240");
+  assert.equal(ofTotalText(12, 0), "12");
+  assert.equal(ofTotalText(0, 0), "");
+  assert.equal(ofTotalText(undefined, undefined), "");
+});
+
+test("the music videos block headline mirrors the folder scan", () => {
+  const mvBase = { started_at: null, total: 0, count: 0, added: 0, missing: 0, errors: 0, last_error: null };
+  assert.equal(mvScanHeadline({ ...mvBase, state: "running", finished_at: null }, NOW), "Scanning music videos");
+  assert.equal(
+    mvScanHeadline({ ...mvBase, state: "idle", finished_at: "2026-10-08T11:55:00Z" }, NOW),
+    "Last scan finished 5 minutes ago",
+  );
+  assert.equal(mvScanHeadline({ ...mvBase, state: "idle", finished_at: null }, NOW), "No scan has run yet");
+});
+
+test("the music videos counts read as a short sentence", () => {
+  const mvBase = { state: "running", started_at: null, finished_at: null, total: 100, count: 40, last_error: null };
+  assert.equal(mvCountsText({ ...mvBase, added: 38, missing: 1, errors: 1 }), "38 added, 1 missing, 1 error");
+  assert.equal(mvCountsText({ ...mvBase, added: 40, missing: 0, errors: 0 }), "40 added");
 });

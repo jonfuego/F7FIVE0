@@ -6,6 +6,7 @@ thing that mutates library rows.
 """
 from __future__ import annotations
 
+import logging
 import uuid
 from typing import Annotated, Iterable, Optional
 
@@ -129,6 +130,8 @@ MIN_PROGRESS_SECONDS = 30
 
 
 router = APIRouter()
+
+log = logging.getLogger("f7five0.library")
 
 
 def _ready_files_subq(parent_id_col, kind: MediaKind):
@@ -1968,16 +1971,36 @@ def trigger_sync_now(
     return {"status": "enqueued"}
 
 
+@router.get("/music-videos/scan")
+def get_music_videos_scan(
+    _admin: Annotated[User, Depends(require_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """The music-videos scan's state: running or idle, the file total and a
+    running count, when the last scan finished, and the last error."""
+    return scan_status.mv_read(db)
+
+
 @router.post("/sync/music-videos", status_code=202)
 def trigger_music_videos_scan(
     _admin: Annotated[User, Depends(require_admin)],
+    db: Annotated[Session, Depends(get_db)],
 ) -> dict:
-    """Walk the music-videos NAS root and reconcile DB rows. Runs out of
-    band on the scheduler's executor so the admin UI gets a 202 straight
-    back. Progress shows up in logs; the UI polls list endpoints for the
-    new rows."""
-    scheduler.trigger_music_videos_scan_now()
-    return {"status": "enqueued"}
+    """Walk the music-videos NAS root and reconcile DB rows. One scan at a
+    time: 409 while one is already running. Runs out of band on the scheduler's
+    executor so the admin UI gets its status straight back; poll
+    GET /library/music-videos/scan to watch it."""
+    if not scan_status.mv_begin(db):
+        raise HTTPException(status_code=409, detail="scan_running")
+    db.commit()
+    try:
+        scheduler.trigger_music_videos_scan_now()
+    except Exception as exc:
+        log.exception("could not queue the music-videos scan")
+        scan_status.mv_finish(db, error="The scan could not be started.")
+        db.commit()
+        raise HTTPException(status_code=500, detail="scan_not_started") from exc
+    return scan_status.mv_read(db)
 
 
 @router.post("/series/{series_id}/rescan", status_code=202)

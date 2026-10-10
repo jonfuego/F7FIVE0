@@ -13,6 +13,7 @@ import { CollapsibleSection } from "@/components/CollapsibleSection";
 import { RemoteAccessSection } from "./RemoteAccessSection";
 import { UpdatesSection } from "./UpdatesSection";
 import { LibraryFoldersSection } from "./LibraryFoldersSection";
+import { MusicVideosScanBlock } from "./MusicVideosScanBlock";
 import { MetadataSection } from "./MetadataSection";
 import { apiGet, apiPatch, apiPost, apiDelete, ApiError } from "@/lib/client-api";
 import { loadMe } from "@/lib/load-me";
@@ -498,11 +499,11 @@ function NewUserForm({ onCreated }: { onCreated: (u: AdminUser) => void }) {
 // ---------------------------------------------------------------------------
 function LibrarySection() {
   // "Run *arr sync now" only shows when Radarr, Sonarr or Lidarr is set up;
-  // folder libraries are scanned from Admin > Library folders.
+  // folder libraries are scanned from Admin > Library folders. Music videos
+  // are scanned off the filesystem on demand, in their own status block below.
   const features = useFeatures();
   const showArr = showArrSync(features?.arr);
   const [busy, setBusy] = useState(false);
-  const [mvBusy, setMvBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
 
   async function runSync() {
@@ -519,20 +520,6 @@ function LibrarySection() {
     }
   }
 
-  async function runMusicVideoScan() {
-    if (mvBusy) return;
-    setMvBusy(true);
-    setStatus(null);
-    try {
-      await apiPost("/api/admin/library/music-videos", {});
-      setStatus("Music videos scan queued. Watch the logs for progress.");
-    } catch (err) {
-      setStatus(err instanceof Error ? err.message : "Failed to enqueue scan.");
-    } finally {
-      setMvBusy(false);
-    }
-  }
-
   return (
     <div>
       <p className="text-xs text-neutral-500">
@@ -541,8 +528,8 @@ function LibrarySection() {
         after dropping new files into the Music Videos share. Scan the movie,
         TV and music folders from Library folders above.
       </p>
-      <div className="mt-4 flex flex-wrap items-center gap-3">
-        {showArr ? (
+      {showArr ? (
+        <div className="mt-4 flex flex-wrap items-center gap-3">
           <button
             type="button"
             onClick={runSync}
@@ -551,17 +538,11 @@ function LibrarySection() {
           >
             {busy ? "Queuing..." : "Run *arr sync now"}
           </button>
-        ) : null}
-        <button
-          type="button"
-          onClick={runMusicVideoScan}
-          disabled={mvBusy}
-          className={smallButtonCls}
-        >
-          {mvBusy ? "Queuing..." : "Scan music videos"}
-        </button>
-        {status ? <span className="text-xs text-neutral-400">{status}</span> : null}
-      </div>
+          {status ? <span className="text-xs text-neutral-400">{status}</span> : null}
+        </div>
+      ) : null}
+
+      <MusicVideosScanBlock />
     </div>
   );
 }

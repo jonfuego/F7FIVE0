@@ -30,7 +30,7 @@ import os
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Iterable, Iterator, Optional
+from typing import Callable, Iterable, Iterator, Optional
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -72,6 +72,10 @@ class ScanStats:
     artists_upserted: int = 0
     releases_upserted: int = 0
     videos_upserted: int = 0
+    # Video files walked in the folder, counted up front for the `x of y` bar.
+    files_total: int = 0
+    # Video files seen so far this pass (the running count against files_total).
+    files_seen: int = 0
     files_upserted: int = 0
     files_probed: int = 0
     files_missing: int = 0
@@ -80,11 +84,35 @@ class ScanStats:
     def log_summary(self) -> None:
         log.info(
             "music_videos scan complete: artists=%d releases=%d videos=%d "
-            "files=%d probed=%d missing=%d errors=%d",
+            "files=%d/%d probed=%d missing=%d errors=%d",
             self.artists_upserted, self.releases_upserted,
-            self.videos_upserted, self.files_upserted,
+            self.videos_upserted, self.files_seen, self.files_total,
             self.files_probed, self.files_missing, self.errors,
         )
+
+
+# on_progress(stats, error): called with the file count up front, then at every
+# batch (state "running"), so Admin's music-videos block fills in as it goes.
+ProgressFn = Callable[..., None]
+
+# Save progress (rows and status together) every this many files, so the block
+# advances and a stopped scan keeps what it committed.
+BATCH_SIZE = 25
+
+
+def count_video_files(roots: Iterable[str]) -> int:
+    """A cheap pre-count of video files under the reachable roots, for the
+    `x of y` bar. Walks names and extensions only (no ffprobe, no DB)."""
+    total = 0
+    for root in roots:
+        if not root or not os.path.isdir(root):
+            continue
+        for _dirpath, _dirnames, filenames in os.walk(root):
+            for name in filenames:
+                ext = os.path.splitext(name)[1].lstrip(".").lower()
+                if ext in _VIDEO_EXTS:
+                    total += 1
+    return total
 
 
 # ---------------------------------------------------------------------------
@@ -245,18 +273,38 @@ def discover_artist(artist_dir: str) -> Iterator[DiscoveredRelease]:
 # ---------------------------------------------------------------------------
 # Scan entry point (DB)
 # ---------------------------------------------------------------------------
-def scan(db: Session) -> ScanStats:
+def scan(db: Session, on_progress: Optional[ProgressFn] = None) -> ScanStats:
     """Walk every music-videos folder and reconcile DB state with disk.
     Artists and releases merge across folders. A folder that can't be
-    opened is skipped and its files are left as they are."""
+    opened is skipped and its files are left as they are.
+
+    Counts the video files up front (cheap), then imports with a running count.
+    When `on_progress(stats, error)` is given it is called with the total first,
+    then at every batch of BATCH_SIZE files (the caller commits), so Admin's
+    music-videos block shows `x of y` while the scan runs."""
     stats = ScanStats()
     roots = library_folders.folders(db, "music_videos")
     if not roots:
         log.warning("no music videos folder configured; skipping scan")
+        if on_progress is not None:
+            on_progress(stats)
         return stats
+
+    stats.files_total = count_video_files(roots)
+    if on_progress is not None:
+        on_progress(stats)
 
     seen_paths: set[str] = set()
     skipped: list[str] = []
+    since_commit = [0]
+
+    def item_done() -> None:
+        stats.files_seen += 1
+        since_commit[0] += 1
+        if since_commit[0] >= BATCH_SIZE and on_progress is not None:
+            since_commit[0] = 0
+            on_progress(stats)
+
     for root in roots:
         if not os.path.isdir(root):
             log.warning("music videos folder not found, skipped this pass: %s", root)
@@ -269,14 +317,19 @@ def scan(db: Session) -> ScanStats:
             stats.errors += 1
             skipped.append(root)
             continue
-        _scan_root(db, root, artist_entries, seen_paths, stats)
+        _scan_root(db, root, artist_entries, seen_paths, stats, item_done)
 
     _mark_missing(db, seen_paths, stats, skip_under=skipped)
     stats.log_summary()
+    if on_progress is not None:
+        on_progress(stats)
     return stats
 
 
-def _scan_root(db: Session, root: str, artist_entries: list[str], seen_paths: set[str], stats: ScanStats) -> None:
+def _scan_root(
+    db: Session, root: str, artist_entries: list[str], seen_paths: set[str],
+    stats: ScanStats, item_done: Callable[[], None],
+) -> None:
     for artist_dir in artist_entries:
         artist_path = os.path.join(root, artist_dir)
         if not os.path.isdir(artist_path):
@@ -294,6 +347,7 @@ def _scan_root(db: Session, root: str, artist_entries: list[str], seen_paths: se
                 stored_path = translate_path(v.abs_path) or v.abs_path
                 seen_paths.add(stored_path)
                 _upsert_media_file(db, mv, stored_path, stats)
+                item_done()
 
 
 # ---------------------------------------------------------------------------

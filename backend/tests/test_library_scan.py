@@ -366,6 +366,88 @@ def test_one_bad_music_file_does_not_stop_the_others(file_db, libs, monkeypatch)
         assert leak not in last, f"raw SQL leaked into the admin status: {leak!r}"
 
 
+def test_music_videos_scan_writes_total_count_and_finishes(file_db, libs, monkeypatch):
+    """The music-videos scan runs on the sibling status key: it counts the files
+    first (a total), reports a running count during the slow part, and ends with
+    a finished time and an error count, like the folder scan."""
+    from app.services import library_folders, scan_music_videos, scan_status
+
+    mv_root = libs["movies"].parent / "music_videos"
+    mv_root.mkdir()
+    monkeypatch.setattr(settings, "library_root_music_videos", str(mv_root))
+    monkeypatch.setattr(library_folders, "folders", lambda db, kind: [str(mv_root)] if kind == "music_videos" else [])
+
+    # 30 videos across one artist / one release, enough to cross a batch so the
+    # running count is written mid-scan, not only at the end.
+    for i in range(1, 31):
+        _touch(mv_root / "New Order" / "Substance" / f"{i:02d} - Song {i}.mp4")
+
+    mid = {}
+
+    def hook(n):
+        # After the first batch of 25 has committed its status (the music-videos
+        # scan saves every 25 files), another session sees a running count.
+        if n == 28:
+            with file_db() as other:
+                mid["status"] = scan_status.mv_read(other)
+
+    _fake_probe(monkeypatch, hook)
+    scheduler._run_music_videos_scan()
+
+    running = mid["status"]
+    assert running["state"] == "running"
+    assert running["total"] == 30, "the file total is counted up front"
+    assert running["count"] >= 25, "a running count shows before the scan ends"
+    assert running["count"] < 30
+    assert running["started_at"]
+
+    with file_db() as db:
+        final = scan_status.mv_read(db)
+    assert final["state"] == "idle"
+    assert final["finished_at"] and final["started_at"]
+    assert final["total"] == 30
+    assert final["count"] == 30
+    assert final["added"] == 30
+    assert final["errors"] == 0
+    assert final["last_error"] is None
+
+
+def test_music_videos_scan_answers_409_while_running(authed, monkeypatch):
+    client, admin_h, _member_h = authed
+    triggered = []
+    monkeypatch.setattr(scheduler, "trigger_music_videos_scan_now", lambda: triggered.append(True))
+
+    first = client.post("/api/sync/music-videos", headers=admin_h)
+    assert first.status_code in (200, 202)
+    assert first.json()["state"] == "running"
+    assert triggered == [True]
+
+    second = client.post("/api/sync/music-videos", headers=admin_h)
+    assert second.status_code == 409
+    assert triggered == [True], "a running music-videos scan must not start twice"
+
+    r = client.get("/api/music-videos/scan", headers=admin_h)
+    assert r.status_code == 200
+    assert r.json()["state"] == "running"
+
+
+def test_a_stale_running_music_videos_status_becomes_idle_on_startup(db_session):
+    from app.services import app_settings, scan_status
+
+    app_settings.put(db_session, scan_status.MV_KEY, {
+        "state": "running", "started_at": "2026-10-08T10:00:00+00:00", "finished_at": None,
+        "total": 10, "count": 3, "added": 3, "missing": 0, "errors": 0, "last_error": None,
+    })
+    db_session.commit()
+
+    assert scan_status.mv_reset_stale(db_session) is True
+    db_session.commit()
+    after = scan_status.mv_read(db_session)
+    assert after["state"] == "idle"
+    assert "interrupted" in after["last_error"]
+    assert scan_status.mv_reset_stale(db_session) is False
+
+
 def test_status_records_a_failed_library(file_db, libs, monkeypatch):
     from app.services import scan_status
 
