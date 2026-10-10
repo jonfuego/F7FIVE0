@@ -28,6 +28,8 @@ from __future__ import annotations
 import logging
 import os
 import re
+import subprocess
+import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Callable, Iterable, Iterator, Optional
@@ -35,9 +37,11 @@ from typing import Callable, Iterable, Iterator, Optional
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.config import settings
+from app.models.art import ENTITY_MUSIC_VIDEO, ROLE_THUMB, ArtOverride
 from app.models.media_file import MediaFile, MediaKind, ScanState
 from app.models.music import Artist, MusicVideo, MusicVideoRelease
-from app.services import ffprobe, library_folders
+from app.services import ffprobe, library_folders, scan_library
 from app.services.path_map import translate as translate_path
 
 
@@ -54,6 +58,12 @@ _THUMB_EXTS = ("jpg", "jpeg", "png", "webp")
 # Release-level cover sidecars, checked in order.
 _COVER_STEMS = ("cover", "folder")
 _COVER_EXTS = ("jpg", "jpeg", "png", "webp")
+
+# Frame-grab fallback: how far into the video to grab, the width to scale to,
+# and how long ffmpeg may run before the grab is abandoned.
+_FRAME_FRACTION = 0.10
+_FRAME_WIDTH = 640
+_FRAME_TIMEOUT_SEC = 30.0
 
 # Matches `Disc 01`, `Disc 1`, `CD1`, `CD 02`, `DVD 1`, `BD 02`, etc.
 _DISC_RE = re.compile(r"^(disc|cd|dvd|bd)[\s_-]*0*(\d+)$", re.IGNORECASE)
@@ -346,7 +356,8 @@ def _scan_root(
                 mv = _upsert_music_video(db, artist, release, v, stats)
                 stored_path = translate_path(v.abs_path) or v.abs_path
                 seen_paths.add(stored_path)
-                _upsert_media_file(db, mv, stored_path, stats)
+                mf = _upsert_media_file(db, mv, stored_path, stats)
+                _ensure_thumb(db, mv, mf, v)
                 item_done()
 
 
@@ -464,6 +475,81 @@ def _upsert_media_file(
     if mf.scan_state != ScanState.ready or mf.probed_at is None:
         _probe(db, mf, stats)
     return mf
+
+
+def grab_frame(path: str, duration_sec: Optional[float]) -> Optional[bytes]:
+    """One JPEG still from the video, ~10% in (1 second in when the duration
+    is unknown), or None. Never raises; logs and returns None on failure.
+    Runs in the scan only, never in the stream worker."""
+    seek = max(1.0, float(duration_sec) * _FRAME_FRACTION) if duration_sec else 1.0
+    with tempfile.TemporaryDirectory(prefix="f7-frame-") as tmp:
+        out = os.path.join(tmp, "frame.jpg")
+        cmd = [
+            settings.ffmpeg_bin, "-hide_banner", "-loglevel", "error",
+            "-ss", f"{seek:.3f}", "-i", path,
+            "-frames:v", "1", "-vf", f"scale={_FRAME_WIDTH}:-2",
+            "-q:v", "3", "-y", out,
+        ]
+        try:
+            proc = subprocess.run(
+                cmd, capture_output=True, timeout=_FRAME_TIMEOUT_SEC, check=False,
+            )
+        except FileNotFoundError:
+            log.warning("ffmpeg binary not found at %s; no frame grab", settings.ffmpeg_bin)
+            return None
+        except subprocess.TimeoutExpired:
+            log.warning("ffmpeg frame grab timed out on %s", path)
+            return None
+        except OSError as exc:
+            log.warning("ffmpeg frame grab failed on %s: %s", path, exc)
+            return None
+        if proc.returncode != 0 or not os.path.isfile(out):
+            log.warning("ffmpeg frame grab failed rc=%s on %s", proc.returncode, path)
+            return None
+        try:
+            with open(out, "rb") as fh:
+                return fh.read() or None
+        except OSError:
+            return None
+
+
+def _ensure_thumb(
+    db: Session, mv: MusicVideo, mf: MediaFile, v: DiscoveredVideo,
+) -> None:
+    """Give the video a thumbnail. A sidecar image is imported as `local` art;
+    failing that, a frame grabbed from the video is saved as `frame` art.
+    Admin, matched, local and tmdb art is never overwritten by a frame grab,
+    and a frame grab is replaced as soon as better art turns up. Never raises,
+    so one bad video cannot stop the scan."""
+    try:
+        stats = scan_library.FolderScanStats()
+        with db.begin_nested():
+            if v.thumb_path:
+                scan_library._import_art_file(
+                    db, entity_kind=ENTITY_MUSIC_VIDEO, entity_id=mv.id,
+                    role=ROLE_THUMB, image_path=v.thumb_path, stats=stats,
+                )
+            if db.get(ArtOverride, (ENTITY_MUSIC_VIDEO, mv.id, ROLE_THUMB)) is not None:
+                return
+            if mf.scan_state != ScanState.ready or not os.path.exists(mf.path):
+                return
+            data = grab_frame(mf.path, mf.duration_sec)
+            if data is None:
+                return
+            from app.services.art import (
+                SYSTEM_USER_ID, ArtValidationError, save_upload_bytes,
+            )
+            try:
+                save_upload_bytes(
+                    db, entity_kind=ENTITY_MUSIC_VIDEO, entity_id=mv.id,
+                    role=ROLE_THUMB, data=data, set_by_user_id=SYSTEM_USER_ID,
+                    source_kind=scan_library.SOURCE_FRAME,
+                    source_ref=f"frame|{os.path.basename(mf.path)}|{mf.size_bytes}",
+                )
+            except ArtValidationError as exc:
+                log.warning("frame grab skipped for %s: %s", mf.path, exc)
+    except Exception:
+        log.exception("thumbnail step failed for %s", mf.path)
 
 
 def _probe(db: Session, mf: MediaFile, stats: ScanStats) -> None:

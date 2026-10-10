@@ -235,6 +235,11 @@ export default function Home() {
   );
 }
 
+// One tile shape for every tile in the rail, placeholder included.
+// The width is fixed too, so a tile without art is as wide as one with art.
+const MUSIC_VIDEO_TILE_ASPECT = "16 / 9";
+const MUSIC_VIDEO_TILE_WIDTH = 280;
+
 function RecentMusicVideoTile({ mv }: { mv: RecentMusicVideo }) {
   const tint: CSSProperties = {
     ["--pg" as never]: colorForTitle(mv.title),
@@ -245,12 +250,12 @@ function RecentMusicVideoTile({ mv }: { mv: RecentMusicVideo }) {
     <Link
       href={`/watch/${mv.media_file_id}`}
       className="poster"
-      style={{ ...tint, width: "auto" }}
+      style={{ ...tint, width: MUSIC_VIDEO_TILE_WIDTH }}
       aria-label={mv.title}
     >
       <div
         className="frame"
-        style={{ aspectRatio: "16/9", borderRadius: 6 }}
+        style={{ aspectRatio: MUSIC_VIDEO_TILE_ASPECT, borderRadius: 6 }}
       >
         <div className="keyart-mini" />
         {mv.thumb_path ? (
