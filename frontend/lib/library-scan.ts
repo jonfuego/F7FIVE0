@@ -32,6 +32,7 @@ export function showArrSync(arr: ArrFeatures | null | undefined): boolean {
 
 export type LibraryScanCounts = {
   state: string;
+  total?: number;
   seen?: number;
   added?: number;
   probed?: number;
@@ -88,5 +89,50 @@ export function countsText(c: LibraryScanCounts): string {
   const parts = [`${plural(c.seen, "file", "files")} seen`, `${c.added ?? 0} added`];
   if (c.missing) parts.push(`${c.missing} missing`);
   if (c.errors) parts.push(plural(c.errors, "error", "errors"));
+  return parts.join(", ");
+}
+
+/** Percent done (0..100, rounded) from a count against a total. 0 when there
+ *  is no total yet, so a bar reads empty instead of full before the count is
+ *  known. Clamped so a stray count over the total never overflows the bar. */
+export function scanPercent(count: number | undefined, total: number | undefined): number {
+  if (!total || total <= 0) return 0;
+  const done = count ?? 0;
+  return Math.min(100, Math.max(0, Math.round((done / total) * 100)));
+}
+
+/** "12 of 240" when a total is known, else "12" (or "" before any count). */
+export function ofTotalText(count: number | undefined, total: number | undefined): string {
+  const done = count ?? 0;
+  if (!total || total <= 0) return done ? `${done}` : "";
+  return `${done} of ${total}`;
+}
+
+/** GET /api/library/music-videos/scan: the sibling block for the music-videos
+ *  scan. One walk, so a flat total and running count rather than per-library. */
+export type MusicVideosScanStatus = {
+  state: "idle" | "running" | string;
+  started_at: string | null;
+  finished_at: string | null;
+  total: number;
+  count: number;
+  added: number;
+  missing: number;
+  errors: number;
+  last_error: string | null;
+};
+
+/** "Scanning music videos", or when the last scan finished. */
+export function mvScanHeadline(status: MusicVideosScanStatus, now: number = Date.now()): string {
+  if (status.state === "running") return "Scanning music videos";
+  if (status.finished_at) return `Last scan finished ${ago(status.finished_at, now)}`;
+  return "No scan has run yet";
+}
+
+/** The music-videos counts as a short sentence. */
+export function mvCountsText(status: MusicVideosScanStatus): string {
+  const parts = [`${status.added} added`];
+  if (status.missing) parts.push(`${status.missing} missing`);
+  if (status.errors) parts.push(plural(status.errors, "error", "errors"));
   return parts.join(", ");
 }

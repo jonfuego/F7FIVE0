@@ -124,6 +124,10 @@ class FolderScanStats:
     artists: int = 0
     albums: int = 0
     tracks: int = 0
+    # Media files walked for this library before the slow part, so Admin can
+    # draw an `x of y` bar. 0 means "not counted" (an old record or a library
+    # with no reachable folder).
+    files_total: int = 0
     files_seen: int = 0
     files_probed: int = 0
     files_missing: int = 0
@@ -231,14 +235,17 @@ def scan_all(db: Session, on_progress: Optional[ProgressFn] = None) -> FolderSca
     raises loses only the batch it was in: what it committed earlier stays, a
     rollback drops the rest, and the other libraries still run."""
     total = FolderScanStats()
-    for label, enabled, fn in (
-        ("movies", movies_enabled, scan_movies),
-        ("tv", tv_enabled, scan_tv),
-        ("music", music_enabled, scan_music),
+    for label, enabled, fn, exts in (
+        ("movies", movies_enabled, scan_movies, VIDEO_EXTS),
+        ("tv", tv_enabled, scan_tv, VIDEO_EXTS),
+        ("music", music_enabled, scan_music, AUDIO_EXTS),
     ):
         if not enabled(db):
             continue
         stats = FolderScanStats()
+        # Count files first (cheap: names and extensions, no ffprobe) so Admin
+        # can show `x of y` from the first poll.
+        stats.files_total = count_media_files(library_folders.folders(db, label), exts)
         if on_progress is not None:
             on_progress(label, "running", stats)
             db.commit()  # Admin shows "scanning" before the first batch is done
@@ -573,6 +580,24 @@ def _reachable(roots: list[str], label: str) -> list[tuple[int, str]]:
         else:
             log.warning("%s folder not found, skipped this pass: %r", label, root)
     return out
+
+
+def count_media_files(roots: Iterable[str], exts: set[str]) -> int:
+    """A cheap pre-count of media files under the reachable roots, for the
+    `x of y` bar. Just walks names and extensions (no ffprobe, no DB), skipping
+    the bonus-material folders the real scan skips. A folder that can't be
+    opened contributes 0."""
+    total = 0
+    for root in roots:
+        if not root or not os.path.isdir(root):
+            continue
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = [d for d in dirnames if d.strip().lower() not in _SKIP_DIRS]
+            for name in filenames:
+                ext = os.path.splitext(name)[1].lstrip(".").lower()
+                if ext in exts:
+                    total += 1
+    return total
 
 
 def _root_prefixes(roots: list[str]) -> list[str]:

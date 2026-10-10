@@ -159,32 +159,36 @@ def test_music_videos_scan_connects_first(monkeypatch):
     never walks a UNC share that hasn't been connected yet. Matches the order
     in `_run_folder_scan`.
     """
-    from contextlib import contextmanager
-
     from app import scheduler
 
-    sentinel = object()
-    calls: list[tuple[str, object]] = []
+    order: list[str] = []
 
-    @contextmanager
-    def fake_db_session():
-        yield sentinel
+    class FakeSession:
+        def commit(self):
+            pass
 
-    monkeypatch.setattr(scheduler, "db_session", fake_db_session)
+        def rollback(self):
+            pass
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(scheduler, "SessionLocal", lambda: FakeSession())
+    # The status writes are side effects we do not care about here.
+    monkeypatch.setattr(scheduler.scan_status, "mv_begin", lambda db, **kw: True)
+    monkeypatch.setattr(scheduler.scan_status, "mv_finish", lambda db, *a, **kw: None)
     monkeypatch.setattr(
         scheduler.nas_auth, "ensure_all",
-        lambda db: calls.append(("ensure_all", db)),
+        lambda db: order.append("ensure_all"),
     )
     monkeypatch.setattr(
         scheduler.scan_music_videos, "scan",
-        lambda db: calls.append(("scan", db)),
+        lambda db, **kw: order.append("scan"),
     )
 
     scheduler._run_music_videos_scan()
 
-    assert ("ensure_all", sentinel) in calls
-    assert ("scan", sentinel) in calls
-    assert calls.index(("ensure_all", sentinel)) < calls.index(("scan", sentinel))
+    assert order == ["ensure_all", "scan"], "connect the share before walking it"
 
 
 # ---------------------------------------------------------------------------

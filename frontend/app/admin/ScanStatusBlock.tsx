@@ -11,8 +11,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiGet, apiPost, ApiError } from "@/lib/client-api";
 import {
-  LIBRARY_LABEL, SCAN_POLL_MS, countsText, scanHeadline, shouldPollScan, type FolderScanStatus,
+  LIBRARY_LABEL, SCAN_POLL_MS, countsText, ofTotalText, scanHeadline, scanPercent,
+  shouldPollScan, type FolderScanStatus,
 } from "@/lib/library-scan";
+import { ScanBar } from "./ScanBar";
 
 const LIBRARY_ORDER = ["movies", "tv", "music"];
 
@@ -112,22 +114,30 @@ export function ScanStatusBlock({ refreshKey = 0 }: { refreshKey?: number }) {
         <ul className="mt-3 space-y-1.5">
           {libraries.map((key) => {
             const lib = status.libraries[key];
+            const ofTotal = ofTotalText(lib.seen, lib.total);
+            const showBar = lib.state === "running" || (!!lib.total && lib.total > 0);
             return (
               <li
                 key={key}
-                className="flex flex-wrap items-baseline justify-between gap-x-4 rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-2"
+                className="rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-2"
               >
-                <span className="text-sm text-neutral-200">
-                  {LIBRARY_LABEL[key] ?? key}
-                  <span
-                    className={`ml-2 text-xs ${
-                      lib.state === "running" ? "text-emerald-400" : lib.state === "failed" ? "text-amber-400" : "text-neutral-500"
-                    }`}
-                  >
-                    {stateLabel(lib.state)}
+                <div className="flex flex-wrap items-baseline justify-between gap-x-4">
+                  <span className="text-sm text-neutral-200">
+                    {LIBRARY_LABEL[key] ?? key}
+                    <span
+                      className={`ml-2 text-xs ${
+                        lib.state === "running" ? "text-emerald-400" : lib.state === "failed" ? "text-amber-400" : "text-neutral-500"
+                      }`}
+                    >
+                      {stateLabel(lib.state)}
+                    </span>
                   </span>
-                </span>
-                <span className="text-xs text-neutral-400">{countsText(lib)}</span>
+                  <span className="text-xs text-neutral-400">
+                    {ofTotal ? <span className="mr-2 text-neutral-300">{ofTotal}</span> : null}
+                    {countsText(lib)}
+                  </span>
+                </div>
+                {showBar ? <ScanBar percent={scanPercent(lib.seen, lib.total)} /> : null}
               </li>
             );
           })}
