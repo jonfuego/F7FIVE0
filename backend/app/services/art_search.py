@@ -1,10 +1,20 @@
-"""Aggregate candidate art from the *arr stack.
+"""Aggregate candidate art from every configured source.
 
-For a given (kind, entity_id) pair, this asks the appropriate *arr which
-images it knows about for the entity, normalizes them into a flat list of
+For a given (kind, entity_id) pair, this asks each source that applies to
+the kind for images, normalizes them into a flat list of
 `{source, ref, url, label}` dicts, and returns it. The frontend renders
-each candidate as a tile in the modal's Search tab; the admin clicks one
-and the backend downloads it through the existing `fetch_and_save_url`.
+each candidate as a tile in the modal's Search tab (the `source` tag
+labels the tile); the admin clicks one and the backend downloads it
+through the existing `fetch_and_save_url`.
+
+Sources per kind:
+  artist / music video -> Lidarr, TheAudioDB, iTunes (iTunes is music-video
+    only, see `_artist_candidates`).
+  movie                -> Radarr, TMDB.
+  series               -> Sonarr, TMDB.
+  album                -> Lidarr, Cover Art Archive.
+*arr is one source among several, not the gatekeeper: with no *arr key set,
+the other sources still answer.
 
 Each *arr exposes an `images` array on its detail endpoint with entries
 shaped like `{coverType, url, remoteUrl}`. We prefer `remoteUrl` because
@@ -18,28 +28,33 @@ title as the search term. The first result's images become the candidate
 list. Lookup is best-effort: a missing match returns an empty list, not
 an error, so the modal can show a clean "No candidates" state.
 
-`ArrClientError` propagates so the caller (the API layer) can degrade to
-[] when an *arr is unconfigured or down rather than 500'ing the modal.
+`search_candidates` returns the flat list (used by the apply path to re-
+derive a picked URL). `search_candidates_with_notes` returns the same
+list plus friendly, human-readable notes about sources that failed or are
+not set up, for the modal's callouts. One source failing never drops the
+others: each source is tried independently and its failure becomes a note.
 """
 from __future__ import annotations
 
 import logging
 import uuid
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models.art import (
-    ENTITY_ARTIST, ENTITY_MOVIE, ENTITY_MUSIC_VIDEO, ENTITY_SERIES,
+    ENTITY_ALBUM, ENTITY_ARTIST, ENTITY_MOVIE, ENTITY_MUSIC_VIDEO,
+    ENTITY_SERIES,
 )
 from app.models.movie import Movie
-from app.models.music import Artist, MusicVideo
+from app.models.music import Album, Artist, MusicVideo
 from app.models.tv import Series
 from app.services import tmdb_key
 from app.services.arr import LidarrClient, RadarrClient, SonarrClient
 from app.services.arr._base import ArrClientError
 from app.services.art_sources import audiodb as audiodb_source
+from app.services.art_sources import coverart as coverart_source
 from app.services.art_sources import itunes as itunes_source
 from app.services.art_sources import tmdb as tmdb_source
 
@@ -56,14 +71,33 @@ def search_candidates(
     """Return a flat list of candidate art for the entity.
 
     Each entry: `{source, ref, url, label}`. `source` is the provider
-    name (`lidarr` / `radarr` / `sonarr`). `ref` is the candidate's
-    upstream identifier (the `remoteUrl` itself today). `url` is the
-    resolvable image URL. `label` is the display string the modal puts
-    under the thumbnail.
+    name (`lidarr` / `radarr` / `sonarr` / `tmdb` / `audiodb` / `itunes` /
+    `coverart`). `ref` is the candidate's upstream identifier (the image
+    URL itself today). `url` is the resolvable image URL. `label` is the
+    display string the modal puts under the thumbnail.
 
-    Empty list when the relevant *arr is unconfigured or returns nothing
-    useful. Raises `ArrClientError` only on hard failures the API layer
-    will catch and convert to [].
+    Empty list when no source returns anything useful. Individual source
+    failures are swallowed here; use `search_candidates_with_notes` when
+    the caller wants to surface them.
+    """
+    candidates, _notes = search_candidates_with_notes(
+        db, kind=kind, entity_id=entity_id,
+    )
+    return candidates
+
+
+def search_candidates_with_notes(
+    db: Session,
+    *,
+    kind: str,
+    entity_id: uuid.UUID,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Return `(candidates, notes)` for the entity.
+
+    `notes` are short, friendly strings for the modal to show as callouts:
+    a source that did not answer ("TheAudioDB did not answer.") or one that
+    is not set up ("Movies and TV search TMDB. Add a TMDB key in Admin to
+    search here."). No raw error codes reach this list.
     """
     if kind == ENTITY_ARTIST:
         return _artist_candidates(db, entity_id)
@@ -73,7 +107,9 @@ def search_candidates(
         return _series_candidates(db, entity_id)
     if kind == ENTITY_MUSIC_VIDEO:
         return _music_video_candidates(db, entity_id)
-    return []
+    if kind == ENTITY_ALBUM:
+        return _album_candidates(db, entity_id)
+    return [], []
 
 
 # ---------------------------------------------------------------------------
@@ -81,7 +117,7 @@ def search_candidates(
 # ---------------------------------------------------------------------------
 def _artist_candidates(
     db: Session, entity_id: uuid.UUID,
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], list[str]]:
     """Artist art: real portraits and fanart only.
 
     Lidarr's get_artist returns artist-level images (poster/fanart/
@@ -94,91 +130,209 @@ def _artist_candidates(
     """
     artist = db.get(Artist, entity_id)
     if artist is None:
-        return []
-    out = _lidarr_artist_images(artist.lidarr_id, artist.name)
-    out.extend(_audiodb_artist_images(artist.name))
-    return _dedupe_by_url(out)
+        return [], []
+    out: list[dict[str, Any]] = []
+    notes: list[str] = []
+    _run(
+        notes, "Lidarr",
+        lambda: _lidarr_artist_images(artist.lidarr_id, artist.name),
+        out,
+    )
+    _run(
+        notes, "TheAudioDB",
+        lambda: _audiodb_artist_images(artist.name), out,
+    )
+    if not _lidarr().configured:
+        notes.append(_ARR_MISSING["lidarr"])
+    return _dedupe_by_url(out), notes
 
 
 def _movie_candidates(
     db: Session, entity_id: uuid.UUID,
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], list[str]]:
     movie = db.get(Movie, entity_id)
     if movie is None:
-        return []
+        return [], []
     out: list[dict[str, Any]] = []
-    client = _radarr()
-    if client.configured:
-        images: list[dict[str, Any]] = []
-        try:
-            if movie.radarr_id is not None:
-                payload = client.get_movie(movie.radarr_id)
-                images = list(payload.get("images") or [])
-            if not images and movie.title:
-                results = client.movie_lookup(movie.title)
-                chosen = _pick_lookup_match(
-                    results, imdb_id=movie.imdb_id, tmdb_id=movie.tmdb_id,
-                )
-                if chosen is not None:
-                    images = list(chosen.get("images") or [])
-        finally:
-            client.close()
-        out.extend(_normalize_images("radarr", "Radarr", images))
+    notes: list[str] = []
+    _run(notes, "Radarr", lambda: _radarr_movie_images(movie), out)
     if movie.tmdb_id and tmdb_key.get():
-        out.extend(tmdb_source.movie_images(tmdb_key.get(), movie.tmdb_id))
-    return _dedupe_by_url(out)
+        _run(
+            notes, "TMDB",
+            lambda: tmdb_source.movie_images(tmdb_key.get(), movie.tmdb_id),
+            out,
+        )
+    elif not tmdb_key.get():
+        notes.append(_TMDB_MISSING)
+    if not _radarr().configured:
+        notes.append(_ARR_MISSING["radarr"])
+    return _dedupe_by_url(out), notes
 
 
 def _series_candidates(
     db: Session, entity_id: uuid.UUID,
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], list[str]]:
     series = db.get(Series, entity_id)
     if series is None:
-        return []
+        return [], []
     out: list[dict[str, Any]] = []
-    client = _sonarr()
-    if client.configured:
-        images: list[dict[str, Any]] = []
-        try:
-            if series.sonarr_id is not None:
-                payload = client.get_series(series.sonarr_id)
-                images = list(payload.get("images") or [])
-            if not images and series.title:
-                results = client.series_lookup(series.title)
-                chosen = _pick_lookup_match(
-                    results, tvdb_id=series.tvdb_id, tmdb_id=series.tmdb_id,
-                )
-                if chosen is not None:
-                    images = list(chosen.get("images") or [])
-        finally:
-            client.close()
-        out.extend(_normalize_images("sonarr", "Sonarr", images))
+    notes: list[str] = []
+    _run(notes, "Sonarr", lambda: _sonarr_series_images(series), out)
     if series.tmdb_id and tmdb_key.get():
-        out.extend(tmdb_source.series_images(tmdb_key.get(), series.tmdb_id))
-    return _dedupe_by_url(out)
+        _run(
+            notes, "TMDB",
+            lambda: tmdb_source.series_images(tmdb_key.get(), series.tmdb_id),
+            out,
+        )
+    elif not tmdb_key.get():
+        notes.append(_TMDB_MISSING)
+    if not _sonarr().configured:
+        notes.append(_ARR_MISSING["sonarr"])
+    return _dedupe_by_url(out), notes
 
 
 def _music_video_candidates(
     db: Session, entity_id: uuid.UUID,
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], list[str]]:
     """Music videos do not have their own *arr representation. Surface
     the parent artist's Lidarr / AudioDB / iTunes images so the admin
     can pick a relevant portrait, fanart, or album cover as the per-
     video thumb."""
     mv = db.get(MusicVideo, entity_id)
     if mv is None:
-        return []
+        return [], []
     artist = db.get(Artist, mv.artist_id)
     if artist is None:
-        return []
-    out = _lidarr_artist_images(artist.lidarr_id, artist.name)
-    out.extend(_audiodb_artist_images(artist.name))
-    out.extend(_itunes_artist_images(artist.name))
-    return _dedupe_by_url(out)
+        return [], []
+    out: list[dict[str, Any]] = []
+    notes: list[str] = []
+    _run(
+        notes, "Lidarr",
+        lambda: _lidarr_artist_images(artist.lidarr_id, artist.name), out,
+    )
+    _run(notes, "TheAudioDB", lambda: _audiodb_artist_images(artist.name), out)
+    _run(notes, "iTunes", lambda: _itunes_artist_images(artist.name), out)
+    if not _lidarr().configured:
+        notes.append(_ARR_MISSING["lidarr"])
+    return _dedupe_by_url(out), notes
+
+
+def _album_candidates(
+    db: Session, entity_id: uuid.UUID,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Album cover art: Lidarr album images plus the Cover Art Archive,
+    keyed by the album's MusicBrainz release-group MBID."""
+    album = db.get(Album, entity_id)
+    if album is None:
+        return [], []
+    out: list[dict[str, Any]] = []
+    notes: list[str] = []
+    _run(notes, "Lidarr", lambda: _lidarr_album_images(album), out)
+    _run(
+        notes, "Cover Art Archive",
+        lambda: coverart_source.release_group_images(album.mbid), out,
+    )
+    if not _lidarr().configured:
+        notes.append(_ARR_MISSING["lidarr"])
+    return _dedupe_by_url(out), notes
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Friendly notes
+# ---------------------------------------------------------------------------
+_TMDB_MISSING = (
+    "Movies and TV search TMDB. Add a TMDB key in Admin to search here."
+)
+_ARR_MISSING = {
+    "lidarr": "Connect Lidarr to also search your Lidarr library.",
+    "radarr": "Connect Radarr to also search your Radarr library.",
+    "sonarr": "Connect Sonarr to also search your Sonarr library.",
+}
+
+
+def _run(
+    notes: list[str],
+    display: str,
+    fn: Callable[[], list[dict[str, Any]]],
+    out: list[dict[str, Any]],
+) -> None:
+    """Run one source. On any failure, record a friendly note and move on
+    so a single dead source never drops the others' results."""
+    # Broad catch on purpose: a source is best-effort. ArrClientError,
+    # ProviderError, and any transport error all become one friendly note
+    # so one dead source never drops the others' results.
+    try:
+        out.extend(fn())
+    except Exception as exc:  # noqa: BLE001
+        log.warning("art source %s failed: %s", display, exc)
+        notes.append(f"{display} did not answer.")
+
+
+# ---------------------------------------------------------------------------
+# *arr image helpers
+# ---------------------------------------------------------------------------
+def _radarr_movie_images(movie: Movie) -> list[dict[str, Any]]:
+    client = _radarr()
+    if not client.configured:
+        return []
+    images: list[dict[str, Any]] = []
+    try:
+        if movie.radarr_id is not None:
+            payload = client.get_movie(movie.radarr_id)
+            images = list(payload.get("images") or [])
+        if not images and movie.title:
+            results = client.movie_lookup(movie.title)
+            chosen = _pick_lookup_match(
+                results, imdb_id=movie.imdb_id, tmdb_id=movie.tmdb_id,
+            )
+            if chosen is not None:
+                images = list(chosen.get("images") or [])
+    finally:
+        client.close()
+    return _normalize_images("radarr", "Radarr", images)
+
+
+def _sonarr_series_images(series: Series) -> list[dict[str, Any]]:
+    client = _sonarr()
+    if not client.configured:
+        return []
+    images: list[dict[str, Any]] = []
+    try:
+        if series.sonarr_id is not None:
+            payload = client.get_series(series.sonarr_id)
+            images = list(payload.get("images") or [])
+        if not images and series.title:
+            results = client.series_lookup(series.title)
+            chosen = _pick_lookup_match(
+                results, tvdb_id=series.tvdb_id, tmdb_id=series.tmdb_id,
+            )
+            if chosen is not None:
+                images = list(chosen.get("images") or [])
+    finally:
+        client.close()
+    return _normalize_images("sonarr", "Sonarr", images)
+
+
+def _lidarr_album_images(album: Album) -> list[dict[str, Any]]:
+    client = _lidarr()
+    if not client.configured:
+        return []
+    images: list[dict[str, Any]] = []
+    try:
+        if album.mbid:
+            results = client.album_lookup(album.title or album.mbid)
+            chosen = _pick_lookup_match(results, foreignAlbumId=album.mbid)
+            if chosen is None and results:
+                chosen = results[0]
+            if chosen is not None:
+                images = list((chosen or {}).get("images") or [])
+    finally:
+        client.close()
+    return _normalize_images("lidarr", "Lidarr", images)
+
+
+# ---------------------------------------------------------------------------
+# Art-source helpers
 # ---------------------------------------------------------------------------
 def _itunes_artist_images(name: Optional[str]) -> list[dict[str, Any]]:
     """Best-effort iTunes album-art fallback for an artist."""
@@ -295,4 +449,6 @@ def _sonarr() -> SonarrClient:
     return SonarrClient(settings.sonarr_url, settings.sonarr_api_key)
 
 
-__all__ = ["search_candidates", "ArrClientError"]
+__all__ = [
+    "search_candidates", "search_candidates_with_notes", "ArrClientError",
+]

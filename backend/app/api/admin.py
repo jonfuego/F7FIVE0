@@ -32,8 +32,8 @@ from app.api.schemas import (
     ReminderOut, ReminderSnoozeIn, TmdbKeyCheckOut, TmdbKeyIn,
     TmdbKeyStatusOut, UpdateBadgeOut, UpdateRunOut, UpdatesOut,
     ActiveTranscodeOut, AdminSessionOut, AuthEventOut, MatchApply,
-    MatchCandidate, OverrideOut, OverrideUpdate, ServerHealthOut,
-    SortOverrideOut, SortOverrideUpdate, WatchHistoryRowOut,
+    MatchCandidate, MatchCandidatesOut, OverrideOut, OverrideUpdate,
+    ServerHealthOut, SortOverrideOut, SortOverrideUpdate, WatchHistoryRowOut,
 )
 from app.models.media_file import MediaFile, MediaKind, ScanState
 from app.models.movie import Movie
@@ -51,7 +51,12 @@ from app.services import (
     android_app, library_folders, nas_auth, reminders, remote_access as ra,
     scan_status, server_version, tmdb_key, updates,
 )
-from app.services.metadata.runner import enrich_album, enrich_artist, enrich_movie
+from app.services.metadata._base import ProviderError
+from app.services.metadata.musicbrainz import MusicBrainzClient
+from app.services.metadata.runner import (
+    enrich_album, enrich_artist, enrich_movie, enrich_series,
+)
+from app.services.metadata.tmdb import TMDBClient
 
 log = logging.getLogger("f7five0.admin.override")
 
@@ -823,8 +828,138 @@ def _normalize_lidarr_album(payload: dict) -> Optional[MatchCandidate]:
     )
 
 
+def _normalize_mb_artist(payload: dict) -> Optional[MatchCandidate]:
+    mbid = payload.get("id")
+    if not mbid:
+        return None
+    disamb = payload.get("disambiguation")
+    country = payload.get("country")
+    bits = [b for b in (payload.get("type"), country) if b]
+    summary = payload.get("disambiguation") or (", ".join(bits) or None)
+    label = payload.get("name") or "Untitled"
+    if disamb:
+        label = f"{label} ({disamb})"
+    return MatchCandidate(
+        source="musicbrainz",
+        ref=str(mbid),
+        label=label,
+        year=None,
+        image_url=None,
+        summary=summary,
+    )
+
+
+def _normalize_mb_release_group(payload: dict) -> Optional[MatchCandidate]:
+    mbid = payload.get("id")
+    if not mbid:
+        return None
+    credits = payload.get("artist-credit") or []
+    artist = ""
+    if credits and isinstance(credits[0], dict):
+        artist = (credits[0].get("artist") or {}).get("name") or credits[0].get("name") or ""
+    title = payload.get("title") or "Untitled"
+    label = f"{artist} - {title}" if artist else title
+    year: Optional[int] = None
+    first = payload.get("first-release-date")
+    if isinstance(first, str) and len(first) >= 4 and first[:4].isdigit():
+        year = int(first[:4])
+    return MatchCandidate(
+        source="musicbrainz",
+        ref=str(mbid),
+        label=label,
+        year=year,
+        image_url=None,
+        summary=payload.get("primary-type") or None,
+    )
+
+
+def _normalize_tmdb_movie(payload: dict) -> Optional[MatchCandidate]:
+    tmdb_id = payload.get("id")
+    if not tmdb_id:
+        return None
+    year: Optional[int] = None
+    date = payload.get("release_date")
+    if isinstance(date, str) and len(date) >= 4 and date[:4].isdigit():
+        year = int(date[:4])
+    poster = payload.get("poster_path")
+    image = f"https://image.tmdb.org/t/p/w342{poster}" if poster else None
+    return MatchCandidate(
+        source="tmdb",
+        ref=str(tmdb_id),
+        label=payload.get("title") or payload.get("original_title") or "Untitled",
+        year=year,
+        image_url=image,
+        summary=payload.get("overview") or None,
+    )
+
+
+def _normalize_tmdb_series(payload: dict) -> Optional[MatchCandidate]:
+    tmdb_id = payload.get("id")
+    if not tmdb_id:
+        return None
+    year: Optional[int] = None
+    date = payload.get("first_air_date")
+    if isinstance(date, str) and len(date) >= 4 and date[:4].isdigit():
+        year = int(date[:4])
+    poster = payload.get("poster_path")
+    image = f"https://image.tmdb.org/t/p/w342{poster}" if poster else None
+    return MatchCandidate(
+        source="tmdb",
+        ref=str(tmdb_id),
+        label=payload.get("name") or payload.get("original_name") or "Untitled",
+        year=year,
+        image_url=image,
+        summary=payload.get("overview") or None,
+    )
+
+
+def _dedupe_candidates(items: list[MatchCandidate]) -> list[MatchCandidate]:
+    """De-dupe by (source, ref). First occurrence wins, so a direct source
+    (TMDB / MusicBrainz) sits above the same id surfaced by an *arr."""
+    seen: set[tuple[str, str]] = set()
+    out: list[MatchCandidate] = []
+    for c in items:
+        key = (c.source, c.ref)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(c)
+    return out
+
+
+# Friendly callout lines for a source that would help but is not set up.
+_MATCH_TMDB_MISSING = (
+    "Movies and TV search TMDB. Add a TMDB key in Admin to search here."
+)
+_MATCH_ARR_MISSING = {
+    "lidarr": "Connect Lidarr to also search your Lidarr library.",
+    "radarr": "Connect Radarr to also search your Radarr library.",
+    "sonarr": "Connect Sonarr to also search your Sonarr library.",
+}
+
+
+def _run_source(
+    notes: list[str],
+    display: str,
+    fn,
+    out: list[MatchCandidate],
+) -> None:
+    """Run one search source. On any failure, record a friendly note and
+    keep going so one dead source never drops the others' results."""
+    try:
+        for c in fn():
+            if c is not None:
+                out.append(c)
+    except (ArrClientError, ProviderError) as exc:
+        log.warning("match source %s failed: %s", display, exc)
+        notes.append(f"{display} did not answer.")
+    except Exception as exc:  # noqa: BLE001
+        log.warning("match source %s errored: %s", display, exc)
+        notes.append(f"{display} did not answer.")
+
+
 @router.get(
-    "/match/{kind}/{entity_id}/candidates", response_model=list[MatchCandidate],
+    "/match/{kind}/{entity_id}/candidates", response_model=MatchCandidatesOut,
 )
 def match_candidates(
     kind: str,
@@ -832,12 +967,17 @@ def match_candidates(
     _admin: Annotated[User, Depends(require_admin)],
     db: Annotated[Session, Depends(get_db)],
     q: str = Query(..., min_length=1, max_length=200),
-) -> list[MatchCandidate]:
-    """Search the matching *arr's lookup endpoint and normalize results.
+) -> MatchCandidatesOut:
+    """Search every configured source for the kind and normalize results.
+
+    *arr is optional: artists and albums search MusicBrainz (no key),
+    movies and series search TMDB when a key is set, and each *arr adds its
+    own library when its key is set. Each source is best-effort: a dead or
+    unconfigured source becomes a friendly note, never a raw error, and the
+    other sources still return their results. De-duped by (source, ref).
 
     Tracks return 422 -- a track is matched implicitly through its parent
-    album's MBID. Music_video_release reuses Lidarr's album lookup
-    because release-groups share the MB shape.
+    album's MBID.
     """
     model_cls = _OVERRIDE_KIND_MAP.get(kind)
     if model_cls is None:
@@ -851,38 +991,99 @@ def match_candidates(
     if row is None:
         raise HTTPException(status_code=404, detail=f"{kind}_not_found")
 
-    try:
-        if kind == "movie":
-            with RadarrClient(
-                settings.radarr_url, settings.radarr_api_key,
-            ) as rc:
-                raw = rc.movie_lookup(q)
-            normalized = [_normalize_radarr_movie(p) for p in raw or []]
-        elif kind == "series":
-            with SonarrClient(
-                settings.sonarr_url, settings.sonarr_api_key,
-            ) as sc:
-                raw = sc.series_lookup(q)
-            normalized = [_normalize_sonarr_series(p) for p in raw or []]
-        elif kind == "artist":
-            with LidarrClient(
-                settings.lidarr_url, settings.lidarr_api_key,
-            ) as lc:
-                raw = lc.artist_lookup(q)
-            normalized = [_normalize_lidarr_artist(p) for p in raw or []]
-        elif kind in ("album", "music_video_release"):
-            with LidarrClient(
-                settings.lidarr_url, settings.lidarr_api_key,
-            ) as lc:
-                raw = lc.album_lookup(q)
-            normalized = [_normalize_lidarr_album(p) for p in raw or []]
-        else:
-            raise HTTPException(status_code=422, detail="invalid_kind")
-    except ArrClientError as exc:
-        log.warning("arr lookup failed for %s/%s: %s", kind, entity_id, exc)
-        raise HTTPException(status_code=502, detail=f"arr_lookup_failed: {exc}")
+    out: list[MatchCandidate] = []
+    notes: list[str] = []
 
-    return [c for c in normalized if c is not None]
+    if kind == "movie":
+        if tmdb_key.get():
+            _run_source(
+                notes, "TMDB",
+                lambda: _tmdb_movie_search(q), out,
+            )
+        else:
+            notes.append(_MATCH_TMDB_MISSING)
+        if settings.radarr_api_key:
+            _run_source(notes, "Radarr", lambda: _radarr_search(q), out)
+        else:
+            notes.append(_MATCH_ARR_MISSING["radarr"])
+    elif kind == "series":
+        if tmdb_key.get():
+            _run_source(notes, "TMDB", lambda: _tmdb_series_search(q), out)
+        else:
+            notes.append(_MATCH_TMDB_MISSING)
+        if settings.sonarr_api_key:
+            _run_source(notes, "Sonarr", lambda: _sonarr_search(q), out)
+        else:
+            notes.append(_MATCH_ARR_MISSING["sonarr"])
+    elif kind == "artist":
+        _run_source(notes, "MusicBrainz", lambda: _mb_artist_search(q), out)
+        if settings.lidarr_api_key:
+            _run_source(notes, "Lidarr", lambda: _lidarr_artist_search(q), out)
+        else:
+            notes.append(_MATCH_ARR_MISSING["lidarr"])
+    elif kind in ("album", "music_video_release"):
+        _run_source(notes, "MusicBrainz", lambda: _mb_release_group_search(q), out)
+        if settings.lidarr_api_key:
+            _run_source(notes, "Lidarr", lambda: _lidarr_album_search(q), out)
+        else:
+            notes.append(_MATCH_ARR_MISSING["lidarr"])
+    else:
+        raise HTTPException(status_code=422, detail="invalid_kind")
+
+    return MatchCandidatesOut(candidates=_dedupe_candidates(out), notes=notes)
+
+
+# ---------------------------------------------------------------------------
+# Fix Match source adapters. Each returns a list of MatchCandidate (or None
+# entries, dropped by _run_source) and raises on a hard failure the runner
+# turns into a friendly note.
+# ---------------------------------------------------------------------------
+def _tmdb_movie_search(q: str) -> list[Optional[MatchCandidate]]:
+    with TMDBClient() as cli:
+        raw = cli.search_many("movie", q)
+    return [_normalize_tmdb_movie(p) for p in raw or []]
+
+
+def _tmdb_series_search(q: str) -> list[Optional[MatchCandidate]]:
+    with TMDBClient() as cli:
+        raw = cli.search_many("tv", q)
+    return [_normalize_tmdb_series(p) for p in raw or []]
+
+
+def _mb_artist_search(q: str) -> list[Optional[MatchCandidate]]:
+    with MusicBrainzClient() as mb:
+        raw = mb.search_artists(q)
+    return [_normalize_mb_artist(p) for p in raw or []]
+
+
+def _mb_release_group_search(q: str) -> list[Optional[MatchCandidate]]:
+    with MusicBrainzClient() as mb:
+        raw = mb.search_release_groups(q)
+    return [_normalize_mb_release_group(p) for p in raw or []]
+
+
+def _radarr_search(q: str) -> list[Optional[MatchCandidate]]:
+    with RadarrClient(settings.radarr_url, settings.radarr_api_key) as rc:
+        raw = rc.movie_lookup(q)
+    return [_normalize_radarr_movie(p) for p in raw or []]
+
+
+def _sonarr_search(q: str) -> list[Optional[MatchCandidate]]:
+    with SonarrClient(settings.sonarr_url, settings.sonarr_api_key) as sc:
+        raw = sc.series_lookup(q)
+    return [_normalize_sonarr_series(p) for p in raw or []]
+
+
+def _lidarr_artist_search(q: str) -> list[Optional[MatchCandidate]]:
+    with LidarrClient(settings.lidarr_url, settings.lidarr_api_key) as lc:
+        raw = lc.artist_lookup(q)
+    return [_normalize_lidarr_artist(p) for p in raw or []]
+
+
+def _lidarr_album_search(q: str) -> list[Optional[MatchCandidate]]:
+    with LidarrClient(settings.lidarr_url, settings.lidarr_api_key) as lc:
+        raw = lc.album_lookup(q)
+    return [_normalize_lidarr_album(p) for p in raw or []]
 
 
 @router.post("/match/{kind}/{entity_id}", response_model=OverrideOut)
@@ -942,8 +1143,11 @@ def apply_match(
         else:
             raise HTTPException(status_code=422, detail="source_must_be_tvdb_or_tmdb")
         db.commit()
-        # Series enrichment lives on the next *arr sync cycle; no
-        # synchronous metadata pull here.
+        # With a TMDB id and a key, pull canonical fields and art now so the
+        # match is useful without Sonarr. A TVDB-only match (no TMDB id)
+        # still waits for the next *arr sync; enrich_series no-ops on it.
+        if source == "tmdb":
+            enrich_series(db, row.id, force=True)
     elif kind == "artist":
         if source != "musicbrainz":
             raise HTTPException(status_code=422, detail="source_must_be_musicbrainz")
@@ -1003,7 +1207,11 @@ def refresh_metadata(
         enrich_artist(db, row.id, force=True)
     elif kind == "album":
         enrich_album(db, row.id, force=True)
-    elif kind in ("series", "track", "music_video_release"):
+    elif kind == "series":
+        # TMDB-backed when a tmdb_id is attached; no-ops on a TVDB-only
+        # series, which the *arr sync still owns.
+        enrich_series(db, row.id, force=True)
+    elif kind in ("track", "music_video_release"):
         # No synchronous enrich path; the *arr sync owns these surfaces.
         pass
     db.refresh(row)

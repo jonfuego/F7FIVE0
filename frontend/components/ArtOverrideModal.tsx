@@ -18,6 +18,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon } from "@/components/Icon";
 import { X } from "lucide-react";
+import { SourceCallouts, SourceTag } from "@/components/SourceTag";
 
 export type ArtKind = "artist" | "movie" | "series" | "music_video";
 export type ArtRole = "thumb" | "poster" | "backdrop";
@@ -46,6 +47,13 @@ type Candidate = {
   label: string;
 };
 
+// GET /search response: candidate tiles plus friendly notes about sources
+// that did not answer or are not set up.
+type ArtSearchResponse = {
+  candidates: Candidate[];
+  notes: string[];
+};
+
 export function ArtOverrideModal({
   open,
   onClose,
@@ -61,6 +69,7 @@ export function ArtOverrideModal({
   const [error, setError] = useState<string | null>(null);
   const [url, setUrl] = useState("");
   const [candidates, setCandidates] = useState<Candidate[] | null>(null);
+  const [searchNotes, setSearchNotes] = useState<string[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -82,6 +91,7 @@ export function ArtOverrideModal({
     setError(null);
     setUrl("");
     setCandidates(null);
+    setSearchNotes([]);
     setSearchError(null);
     setSearchLoading(false);
     fetchedKeyRef.current = null;
@@ -118,8 +128,11 @@ export function ArtOverrideModal({
           setCandidates([]);
           return;
         }
-        const body = (await res.json()) as Candidate[];
-        if (!cancelled) setCandidates(Array.isArray(body) ? body : []);
+        const body = (await res.json()) as ArtSearchResponse;
+        if (!cancelled) {
+          setCandidates(Array.isArray(body.candidates) ? body.candidates : []);
+          setSearchNotes(Array.isArray(body.notes) ? body.notes : []);
+        }
       } catch (err) {
         if (!cancelled) {
           setSearchError(err instanceof Error ? err.message : "Search failed.");
@@ -345,6 +358,7 @@ export function ArtOverrideModal({
           ) : (
             <SearchPanel
               candidates={candidates}
+              notes={searchNotes}
               loading={searchLoading}
               error={searchError}
               busy={busy}
@@ -367,6 +381,7 @@ export function ArtOverrideModal({
 
 function SearchPanel({
   candidates,
+  notes,
   loading,
   error,
   busy,
@@ -375,6 +390,7 @@ function SearchPanel({
   onRemove,
 }: {
   candidates: Candidate[] | null;
+  notes: string[];
   loading: boolean;
   error: string | null;
   busy: boolean;
@@ -385,9 +401,10 @@ function SearchPanel({
   return (
     <div className="space-y-3">
       <p className="text-xs text-neutral-400">
-        Candidates from the configured *arr for this entity. Click one to
+        Candidates from the sources set up for this entity. Click one to
         download and pin it.
       </p>
+      {!loading && candidates !== null ? <SourceCallouts notes={notes} /> : null}
       {loading || candidates === null ? (
         <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
           {Array.from({ length: 6 }).map((_, i) => (
@@ -425,8 +442,11 @@ function SearchPanel({
                   className="h-full w-full object-cover"
                 />
               </div>
-              <div className="line-clamp-1 px-2 py-1 text-[10px] uppercase tracking-wide text-neutral-400 group-hover:text-neutral-200">
-                {c.label}
+              <div className="flex items-center justify-between gap-1 px-2 py-1">
+                <span className="line-clamp-1 text-[10px] uppercase tracking-wide text-neutral-400 group-hover:text-neutral-200">
+                  {c.label}
+                </span>
+                <SourceTag source={c.source} />
               </div>
             </button>
           ))}

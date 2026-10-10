@@ -923,6 +923,19 @@ class MatchCandidate(BaseModel):
     summary: Optional[str] = None
 
 
+class MatchCandidatesOut(BaseModel):
+    """GET /api/admin/match/{kind}/{id}/candidates response.
+
+    `candidates` is the de-duped list across every source that answered.
+    `notes` are short, friendly lines for the panel's callouts: a source
+    that did not answer, or one that is not set up ("Movies and TV search
+    TMDB. Add a TMDB key in Admin to search here."). No raw error codes.
+    """
+
+    candidates: list[MatchCandidate]
+    notes: list[str] = []
+
+
 class MatchApply(BaseModel):
     """POST /api/admin/match/{kind}/{id} body.
 

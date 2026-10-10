@@ -59,6 +59,17 @@ class ArtCandidateOut(BaseModel):
     label: str
 
 
+class ArtSearchOut(BaseModel):
+    """Search tab response: candidate tiles plus friendly notes.
+
+    `notes` are short lines for the modal's callouts (a source that did not
+    answer, or one that is not set up). Never raw error codes.
+    """
+
+    candidates: list[ArtCandidateOut]
+    notes: list[str] = []
+
+
 class ArtOverrideOut(BaseModel):
     entity_kind: str
     entity_id: uuid.UUID
@@ -202,37 +213,42 @@ def clear_art(
     db.commit()
 
 
-@admin_router.get("/search", response_model=list[ArtCandidateOut])
+@admin_router.get("/search", response_model=ArtSearchOut)
 def search_art(
     _admin: Annotated[User, Depends(require_admin)],
     db: Annotated[Session, Depends(get_db)],
     kind: str,
     id: uuid.UUID,
-) -> list[ArtCandidateOut]:
-    """Aggregate candidate art from the *arr stack for (kind, id).
+) -> ArtSearchOut:
+    """Aggregate candidate art from every configured source for (kind, id).
 
     Validates kind against the same map the write paths use so callers
-    can't probe arbitrary kinds. An unconfigured or unreachable *arr
-    degrades to an empty list rather than a 5xx, so the modal renders a
-    clean "No candidates" state instead of an error toast.
+    can't probe arbitrary kinds. Each source is best-effort: an
+    unconfigured or unreachable source becomes a friendly note rather than
+    a 5xx, so the modal renders candidates from the sources that did answer
+    plus callouts for the ones that didn't.
     """
     if kind not in art_service._VALID_ROLES:
         raise HTTPException(
             status_code=404, detail=f"unsupported entity kind: {kind}",
         )
     try:
-        candidates = art_search_service.search_candidates(
+        candidates, notes = art_search_service.search_candidates_with_notes(
             db, kind=kind, entity_id=id,
         )
     except ArrClientError as exc:
-        # *arr down or rejecting the key. Log and degrade gracefully so
-        # the admin can still fall back to Upload or Paste URL.
+        # Defensive: the aggregator catches per-source failures itself, so
+        # this only fires on an unexpected hard error. Degrade gracefully
+        # so the admin can still fall back to Upload or Paste URL.
         import logging
         logging.getLogger("f7five0.art").warning(
             "art search aggregator failed for %s/%s: %s", kind, id, exc,
         )
-        return []
-    return [ArtCandidateOut(**c) for c in candidates]
+        return ArtSearchOut(candidates=[], notes=["Search did not answer."])
+    return ArtSearchOut(
+        candidates=[ArtCandidateOut(**c) for c in candidates],
+        notes=notes,
+    )
 
 
 @admin_router.post(

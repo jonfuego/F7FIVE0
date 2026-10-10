@@ -556,6 +556,14 @@ export type MatchCandidate = {
   summary: string | null;
 };
 
+// GET /api/admin/match/{kind}/{id}/candidates. `notes` are friendly lines
+// for the panel's callouts (a source that did not answer, or one not set
+// up). Never raw error codes.
+export type MatchCandidatesOut = {
+  candidates: MatchCandidate[];
+  notes: string[];
+};
+
 export type StreamStartRequest = {
   file_id: string;
   // Optional resume hint in seconds. The backend quantizes to a 10s bucket
