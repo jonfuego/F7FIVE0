@@ -105,6 +105,17 @@ INSTALL.md for the operator view.
   trust the backend already gives a loopback peer. `x-forwarded-host` /
   `x-forwarded-proto` are always set from the allowlisted origin, never the raw
   header. The pure helper is `frontend/lib/forward-headers.ts`.
+- Web process env: the Next proxy runs in the Node runtime and reads
+  `PUBLIC_URL` / `HOME_URL` / `APP_ALLOWED_HOSTS` at runtime via
+  `lib/origin.ts`, so those redirects and the CSRF self-origin only stay on the
+  public host when the web process actually has them. The service env never
+  carried them, so `server-wrapper.js` reads them from the install-root `.env`
+  at start (install.ps1 passes `F7FIVE0_ENV_FILE`; a real service-env value
+  still wins). `remote-access.ps1` writes a new `PUBLIC_URL` to the same `.env`
+  then restarts `F7FIVE0-Web`, so the restart picks it up. `origin.ts` allows a
+  LAN machine name on its own (a single label like `mediabox`, or a `.local`
+  name); any other dotted name goes in `APP_ALLOWED_HOSTS`. A hostile dotted
+  `Host` is still rejected and never lands in a `Location`.
 - Libraries: when a `*_API_KEY` for Radarr/Sonarr/Lidarr is set, that app
   owns the library (`services/sync.py`). Otherwise `services/scan_library.py`
   scans `LIBRARY_ROOT_*` folders. Never let both write the same library.
@@ -128,6 +139,30 @@ INSTALL.md for the operator view.
   each folder scan `scan_library.schedule_catch_up` queues movies, artists and
   albums that have a TMDB/MusicBrainz id but no `metadata_synced_at`, spaced a
   second apart.
+  Per-file errors in the music scan are isolated: every MBID read from a tag
+  goes through `scan_library.normalize_mbid` (split on whitespace, `/`, `;`, `,`,
+  keep the first valid UUID), and each file imports inside a savepoint so one bad
+  file rolls back only itself, is recorded with its path and a short reason (no
+  raw SQL), counted, and the library ends "finished with N errors", never failed.
+  The music-videos scan (`scan_music_videos.py`) writes its own status through
+  `scan_status.py` (sibling key `music_videos_scan_status`) with a file total
+  counted up front and a running count, and Admin shows it with the same progress
+  bar as the folder scan.
+- Artist aliases and merge: Admin can merge one artist into another
+  (`services/artist_merge.py`). The source's name and MusicBrainz id are stored
+  as an alias (table `artist_aliases`) that both `scan_library.py` and `sync.py`
+  resolve through (`services/credits.py::resolve_artist`), so a rescan or *arr
+  sync does not recreate the source. A merge record (`artist_merges`) backs an
+  admin-only undo. `albums.credited_as` / `tracks.credited_as` keep the credited
+  text. At scan time a "feat." / "ft." / "Featuring" credit attaches to the main
+  artist; "&" and "And" are never auto-split.
+- Fix Match and art search go beyond *arr: the admin lookup
+  (`api/admin.py`) searches MusicBrainz (artist, album) and TMDB (movie, series
+  via `tmdb_key.get()`) with *arr optional, and `services/art_search.py` uses
+  `services/art_sources` (TMDB, AudioDB, iTunes) plus Cover Art Archive for
+  albums. Each candidate carries a source tag; one source failing still returns
+  the others. A TMDB series match gets a TMDB-backed refresh so applying it does
+  something without Sonarr.
 - Library folders: several per library (`app/services/library_folders.py`).
   Source is the `libraries` table once Admin > Library folders saves (then for
   every library), else `LIBRARY_ROOT_*` split on `;`. TV and music merge
