@@ -11,11 +11,25 @@
 
 import { cookies } from "next/headers";
 import { API_ORIGIN, ACCESS_COOKIE } from "@/lib/server-env";
+import { bearerFromCookieValue } from "@/lib/auth-bearer";
 
 type BackendInit = Omit<RequestInit, "body"> & {
   body?: unknown;
   authed?: boolean;
 };
+
+// Re-export the pure Bearer builder so callers can import both from lib/api.
+export { bearerFromCookieValue };
+
+// The one place a route reads the httpOnly access cookie. Routes that cannot go
+// through backend() (streamed multipart bodies) use this to get the same Bearer
+// backend() attaches, then forward the raw body themselves. A null result means
+// no token is available, so the route must answer 401 and let the browser
+// refresh or sign in. The token never reaches the browser.
+export async function accessBearer(): Promise<string | null> {
+  const jar = await cookies();
+  return bearerFromCookieValue(jar.get(ACCESS_COOKIE)?.value);
+}
 
 export async function backend(path: string, init: BackendInit = {}): Promise<Response> {
   const url = `${API_ORIGIN}${path.startsWith("/") ? path : `/${path}`}`;
@@ -25,9 +39,8 @@ export async function backend(path: string, init: BackendInit = {}): Promise<Res
     headers.set("content-type", "application/json");
   }
   if (init.authed) {
-    const jar = await cookies();
-    const access = jar.get(ACCESS_COOKIE)?.value;
-    if (access) headers.set("authorization", `Bearer ${access}`);
+    const bearer = await accessBearer();
+    if (bearer) headers.set("authorization", bearer);
   }
 
   return fetch(url, {

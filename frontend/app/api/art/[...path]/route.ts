@@ -1,14 +1,20 @@
 // BFF proxy for /api/art/*.
 //
 // The browser loads admin-pinned images via <img src="/api/art/<kind>/<id>/<role>?v=...">.
-// This route pulls the access cookie and adds a Bearer header before
-// talking to the backend at /api/art/*, then streams the response back
-// with its original content type.
+// This route attaches a Bearer before talking to the backend at /api/art/*,
+// then streams the response back with its original content type.
+//
+// Auth: the Bearer comes from the shared accessBearer() helper in lib/api,
+// the same cookie that backend(..., { authed: true }) attaches elsewhere. We
+// never read the access cookie here and feed it to fetch, and we never call
+// the API with no Bearer: when no token is available we answer 401 so the
+// browser refreshes or signs in instead of getting a backend
+// missing_bearer_token.
 //
 // Pass-through only. No path rewriting.
-import { cookies } from "next/headers";
-import { NextRequest } from "next/server";
-import { API_ORIGIN, ACCESS_COOKIE } from "@/lib/server-env";
+import { NextRequest, NextResponse } from "next/server";
+import { API_ORIGIN } from "@/lib/server-env";
+import { accessBearer } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
 
@@ -19,14 +25,16 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
   const search = req.nextUrl.search;
   const url = `${API_ORIGIN}/api/art/${suffix}${search}`;
 
-  const jar = await cookies();
-  const access = jar.get(ACCESS_COOKIE)?.value;
+  const bearer = await accessBearer();
+  if (!bearer) {
+    // Never call the API with no Bearer. The <img> breaks and the browser
+    // refreshes or signs in on its next data call.
+    return NextResponse.json({ detail: "missing_bearer_token" }, { status: 401 });
+  }
 
   const res = await fetch(url, {
     method: "GET",
-    headers: access
-      ? { authorization: `Bearer ${access}` }
-      : undefined,
+    headers: { authorization: bearer },
     cache: "no-store",
     redirect: "manual",
   });
