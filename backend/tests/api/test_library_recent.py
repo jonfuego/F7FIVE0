@@ -123,3 +123,67 @@ class TestRecent:
         assert len(rows) == 1
         assert rows[0]["kind"] == "movie"
         assert rows[0]["id"] == str(old_movie.id)
+
+
+def _add_episodes(db, *, title: str, count: int) -> None:
+    from app.models.tv import Episode, Series
+
+    s = Series(title=title)
+    db.add(s)
+    db.flush()
+    for n in range(1, count + 1):
+        ep = Episode(series_id=s.id, season_number=1, episode_number=n)
+        db.add(ep)
+        db.flush()
+        db.add(MediaFile(
+            kind=MediaKind.episode, ref_id=ep.id,
+            path=f"//nas/tv/{title}-{n}.mkv-{uuid.uuid4()}",
+            scan_state=ScanState.ready, duration_sec=1800,
+        ))
+    db.flush()
+
+
+def _add_album_tracks(db, *, title: str, count: int) -> None:
+    from app.models.music import Album, Track
+
+    artist = Artist(name=f"Artist {title}")
+    db.add(artist)
+    db.flush()
+    album = Album(artist_id=artist.id, title=title)
+    db.add(album)
+    db.flush()
+    for n in range(1, count + 1):
+        t = Track(album_id=album.id, title=f"T{n}", track_number=n)
+        db.add(t)
+        db.flush()
+        db.add(MediaFile(
+            kind=MediaKind.track, ref_id=t.id,
+            path=f"//nas/music/{title}-{n}.flac-{uuid.uuid4()}",
+            scan_state=ScanState.ready, duration_sec=200,
+        ))
+    db.flush()
+
+
+class TestBadgeMatchesRail:
+    def test_badge_count_equals_rail_items(self, client, db_session):
+        # Many files, few items: the raw file count is 2 + 12 + 10 + 3 = 27
+        # but the rail shows 2 movies, 1 series, 1 album = 4 tiles. The
+        # badge must say 4, not 27.
+        from app.models.user import User
+
+        now = datetime.now(timezone.utc)
+        admin = db_session.query(User).filter_by(username="test-admin").one()
+        admin.last_seen_home_at = now - timedelta(days=1)
+        _add_movie(db_session, title="M1", created_at=now)
+        _add_movie(db_session, title="M2", created_at=now)
+        _add_movie(db_session, title="Probing", ready=False, created_at=now)
+        _add_episodes(db_session, title="Show", count=12)
+        _add_album_tracks(db_session, title="Album", count=10)
+        for i in range(3):
+            _add_music_video(db_session, title=f"MV{i}", created_at=now)
+        db_session.commit()
+
+        rail = client.get("/api/recent?limit=20").json()
+        badge = client.get("/api/recent/badge").json()
+        assert len(rail) == 4
+        assert badge["count"] == len(rail)

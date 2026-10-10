@@ -1216,13 +1216,34 @@ def recent_badge(
     A null last_seen_home_at (never stamped) falls back to account
     creation. The frontend caps the display at 99+."""
     since = user.last_seen_home_at or user.created_at
-    count = db.scalar(
-        select(func.count())
-        .select_from(MediaFile)
-        .where(MediaFile.scan_state == ScanState.ready)
-        .where(MediaFile.created_at > since)
+    # Same item rule as list_recent: ready files only, no music videos, and
+    # episodes collapse to their series, tracks to their album. Counting raw
+    # media_files here made the kicker say 99+ over a rail of a few tiles.
+    base = (
+        MediaFile.scan_state == ScanState.ready,
+        MediaFile.created_at > since,
     )
-    return NewArrivalsBadgeOut(count=int(count or 0))
+    movies = db.scalar(
+        select(func.count(func.distinct(MediaFile.ref_id)))
+        .select_from(MediaFile)
+        .join(Movie, Movie.id == MediaFile.ref_id)
+        .where(MediaFile.kind == MediaKind.movie, *base)
+    )
+    series = db.scalar(
+        select(func.count(func.distinct(Episode.series_id)))
+        .select_from(MediaFile)
+        .join(Episode, Episode.id == MediaFile.ref_id)
+        .where(MediaFile.kind == MediaKind.episode, *base)
+    )
+    albums = db.scalar(
+        select(func.count(func.distinct(Track.album_id)))
+        .select_from(MediaFile)
+        .join(Track, Track.id == MediaFile.ref_id)
+        .where(MediaFile.kind == MediaKind.track, *base)
+    )
+    return NewArrivalsBadgeOut(
+        count=int(movies or 0) + int(series or 0) + int(albums or 0),
+    )
 
 
 @router.post("/recent/seen", status_code=204)
