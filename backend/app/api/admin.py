@@ -28,6 +28,7 @@ from app.api.deps import evict_session_cache, get_db, require_admin
 from app.api.schemas import (
     AudioAnalysisProgressOut, AudioAnalysisStartOut,
     LibraryFolderOut, LibraryFoldersIn, LibraryFoldersLibraryOut, LibraryFoldersOut,
+    MergeArtistIn, MergePreviewOut, MergeResultOut, UndoMergeResultOut,
     MetadataSettingsOut, NasCredentialIn, NasCredentialOut, NasSaveOut,
     ReminderOut, ReminderSnoozeIn, TmdbKeyCheckOut, TmdbKeyIn,
     TmdbKeyStatusOut, UpdateBadgeOut, UpdateRunOut, UpdatesOut,
@@ -37,7 +38,9 @@ from app.api.schemas import (
 )
 from app.models.media_file import MediaFile, MediaKind, ScanState
 from app.models.movie import Movie
-from app.models.music import Album, Artist, MusicVideo, MusicVideoRelease, Track
+from app.models.music import (
+    Album, Artist, ArtistMerge, MusicVideo, MusicVideoRelease, Track,
+)
 from app.models.playback import WatchHistory
 from app.models.transcode import TranscodeCache, TranscodeSession
 from app.models.tv import Episode, Series
@@ -51,6 +54,7 @@ from app.services import (
     android_app, library_folders, nas_auth, reminders, remote_access as ra,
     scan_status, server_version, tmdb_key, updates,
 )
+from app.services import artist_merge
 from app.services.metadata.runner import enrich_album, enrich_artist, enrich_movie
 
 log = logging.getLogger("f7five0.admin.override")
@@ -1008,6 +1012,121 @@ def refresh_metadata(
         pass
     db.refresh(row)
     return _override_out(kind, row)
+
+
+# ---------------------------------------------------------------------------
+# Merge artists (admin only)
+# ---------------------------------------------------------------------------
+# An admin folds a collaboration-credit artist (for example "2Pac Featuring KC
+# And Jojo") into the main artist. The albums and tracks move to the target, the
+# source row goes away, and a durable alias is saved so the next folder scan or
+# Lidarr sync does not recreate the source. Undo reverses it from a merge-record.
+@router.get(
+    "/artists/{source_id}/merge-preview", response_model=MergePreviewOut,
+)
+def merge_preview(
+    source_id: uuid.UUID,
+    target_id: Annotated[uuid.UUID, Query()],
+    _admin: Annotated[User, Depends(require_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> MergePreviewOut:
+    """How many albums and tracks a merge would move, so the confirm dialog can
+    name it. 422 if source and target are the same artist."""
+    if source_id == target_id:
+        raise HTTPException(status_code=422, detail="cannot_merge_into_self")
+    source = db.get(Artist, source_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail="source_not_found")
+    target = db.get(Artist, target_id)
+    if target is None:
+        raise HTTPException(status_code=404, detail="target_not_found")
+    counts = artist_merge.preview(db, source)
+    return MergePreviewOut(
+        source_id=source.id, source_name=source.name,
+        target_id=target.id, target_name=target.name,
+        albums=counts["albums"], tracks=counts["tracks"],
+    )
+
+
+@router.get("/artists/{target_id}/merges")
+def list_artist_merges(
+    target_id: uuid.UUID,
+    _admin: Annotated[User, Depends(require_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> list[dict]:
+    """Merges that folded another artist into this one and can still be undone.
+    Lets the artist page offer "Undo merge" for each source that was merged in."""
+    rows = db.scalars(
+        select(ArtistMerge)
+        .where(
+            ArtistMerge.target_artist_id == target_id,
+            ArtistMerge.undone_at.is_(None),
+        )
+        .order_by(ArtistMerge.created_at.desc())
+    ).all()
+    return [
+        {
+            "merge_id": str(r.id),
+            "source_name": r.source_name,
+            "albums": len(r.moved_album_ids or []),
+        }
+        for r in rows
+    ]
+
+
+@router.post("/artists/{source_id}/merge", response_model=MergeResultOut)
+def merge_artist(
+    source_id: uuid.UUID,
+    body: MergeArtistIn,
+    _admin: Annotated[User, Depends(require_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> MergeResultOut:
+    """Merge the source artist into the target. Admin only."""
+    if source_id == body.target_id:
+        raise HTTPException(status_code=422, detail="cannot_merge_into_self")
+    source = db.get(Artist, source_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail="source_not_found")
+    target = db.get(Artist, body.target_id)
+    if target is None:
+        raise HTTPException(status_code=404, detail="target_not_found")
+    counts = artist_merge.preview(db, source)
+    try:
+        record = artist_merge.merge(db, source, target)
+    except artist_merge.MergeError as exc:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=str(exc))
+    db.commit()
+    return MergeResultOut(
+        merge_id=record.id, target_id=target.id, target_name=target.name,
+        albums_moved=counts["albums"], tracks_moved=counts["tracks"],
+    )
+
+
+@router.post(
+    "/artists/merges/{merge_id}/undo", response_model=UndoMergeResultOut,
+)
+def undo_merge(
+    merge_id: uuid.UUID,
+    _admin: Annotated[User, Depends(require_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> UndoMergeResultOut:
+    """Undo a merge: remove its alias and restore the source artist with the
+    albums and tracks that moved. Admin only."""
+    record = db.get(ArtistMerge, merge_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="merge_not_found")
+    try:
+        restored = artist_merge.undo(db, record)
+    except artist_merge.MergeError as exc:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=str(exc))
+    db.commit()
+    return UndoMergeResultOut(
+        restored_artist_id=restored.id,
+        restored_artist_name=restored.name,
+        albums_restored=len(record.moved_album_ids or []),
+    )
 
 
 # ---------------------------------------------------------------------------

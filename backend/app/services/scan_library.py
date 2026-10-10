@@ -70,6 +70,7 @@ from app.models.movie import Movie
 from app.models.music import Album, Artist, Track
 from app.models.tv import Episode, Season, Series
 from app.services import ffprobe, library_folders, tmdb_key
+from app.services.credits import parse_credit, resolve_artist
 from app.services.path_map import translate as translate_path
 
 
@@ -1033,6 +1034,10 @@ class FoundTrack:
     album_mbid: Optional[str]
     track_mbid: Optional[str]
     album_dir: str
+    # The full artist credit as tagged, kept for display when it named more
+    # than the main artist (a "featuring" credit). None when the credit is just
+    # the main artist. See services/credits.py.
+    credited_as: Optional[str] = None
 
 
 def read_tags(path: str) -> dict:
@@ -1103,9 +1108,14 @@ def discover_music(root: str) -> Iterator[FoundTrack]:
             f_disc, f_track, f_title = parse_track_filename(fname)
             album_title, album_year = parse_title_year(folder_album)
             year_tag = _first(tags, "date", "originaldate", "year")
+            # A "featuring" credit attaches to the main artist and keeps the
+            # full credit text for display. "&" / "And" are never auto-split.
+            raw_artist = _first(tags, "albumartist", "album artist", "album_artist", "artist") or folder_artist
+            parsed = parse_credit(raw_artist)
             yield FoundTrack(
                 path=full,
-                artist=_first(tags, "albumartist", "album artist", "album_artist", "artist") or folder_artist,
+                artist=parsed.main or raw_artist,
+                credited_as=parsed.credited_as,
                 album=_first(tags, "album") or album_title or folder_album,
                 title=_first(tags, "title") or f_title,
                 track=_num(tags.get("tracknumber")) or f_track,
@@ -1188,17 +1198,22 @@ def _import_one_track(
     album_art_done = cache.album_art_done
     artist_art_done = cache.artist_art_done
 
-    akey = ft.artist.lower()
+    # Route the credit through any saved merge alias first, so a merged-away
+    # source artist (for example "2Pac Featuring KC And Jojo") files under its
+    # target and is not recreated on a rescan. resolve_artist rewrites the name
+    # and mbid to the target's own when an alias matched.
+    res_name, res_mbid, _aliased = resolve_artist(db, name=ft.artist, mbid=ft.artist_mbid)
+    akey = res_name.lower()
     artist = artists.get(akey)
     if artist is None:
-        if ft.artist_mbid:
-            artist = db.scalar(select(Artist).where(Artist.mbid == ft.artist_mbid))
+        if res_mbid:
+            artist = db.scalar(select(Artist).where(Artist.mbid == res_mbid))
         if artist is None:
             artist = db.scalars(select(Artist).where(func.lower(Artist.name) == akey)).first()
         if artist is None:
-            artist = Artist(name=ft.artist)
-            if ft.artist_mbid:
-                artist.mbid = ft.artist_mbid
+            artist = Artist(name=res_name)
+            if res_mbid:
+                artist.mbid = res_mbid
             db.add(artist)
             db.flush()
             stats.artists += 1
@@ -1221,12 +1236,18 @@ def _import_one_track(
                 album.release_date = date(ft.year, 1, 1)
             if ft.genre:
                 album.genres = [ft.genre]
+            if ft.credited_as:
+                album.credited_as = ft.credited_as
             db.add(album)
             db.flush()
             stats.albums += 1
             if album.mbid:
                 batch.enrich_album(album.id)
         albums[bkey] = album
+    # Keep the credited text on an existing album too, so a feat. credit found
+    # on a later pass still records who was on the record.
+    if ft.credited_as and not album.credited_as:
+        album.credited_as = ft.credited_as
 
     path = _store_path(ft.path)
     seen.add(path)
@@ -1242,6 +1263,8 @@ def _import_one_track(
         track = Track(album_id=album.id, title=ft.title, track_number=ft.track, disc_number=ft.disc)
         if ft.track_mbid and db.scalar(select(Track).where(Track.mbid == ft.track_mbid)) is None:
             track.mbid = ft.track_mbid
+        if ft.credited_as:
+            track.credited_as = ft.credited_as
         db.add(track)
         db.flush()
         stats.tracks += 1
@@ -1250,6 +1273,8 @@ def _import_one_track(
         track.title = ft.title or track.title
         track.track_number = ft.track
         track.disc_number = ft.disc
+        if ft.credited_as and not track.credited_as:
+            track.credited_as = ft.credited_as
     mf = _upsert_file(db, kind=MediaKind.track, ref_id=track.id, path=path, stats=stats)
     if mf.duration_sec and not track.duration_sec:
         track.duration_sec = mf.duration_sec
