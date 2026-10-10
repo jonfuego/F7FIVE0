@@ -2,7 +2,16 @@
 //
 // This shadows the generic /api/admin/[...path] proxy because uploads
 // here are multipart/form-data, not JSON. The generic proxy parses
-// `await req.text()` as JSON and would mangle the multipart body.
+// `await req.text()` as JSON and would mangle the multipart body, so we
+// stream the raw body straight through instead.
+//
+// Auth: the Bearer comes from the shared accessBearer() helper in lib/api,
+// the same cookie that backend(..., { authed: true }) attaches for the
+// generic proxy. We never read the access cookie here and feed it to fetch,
+// and we never call the API with no Bearer: when no token is available we
+// answer 401 so the browser refreshes or signs in. This is the fix for the
+// art window losing its sign-in (missing_bearer_token) once the 15-min
+// access token had expired.
 //
 // Pass-through path: no rewriting. The backend route is also at
 // /api/admin/art/<kind>/<id>/<role>.
@@ -13,9 +22,9 @@
 //   POST  /from-search (JSON, Slice B)
 //   DELETE
 //   GET   /search      (Slice B)
-import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
-import { API_ORIGIN, ACCESS_COOKIE } from "@/lib/server-env";
+import { API_ORIGIN } from "@/lib/server-env";
+import { accessBearer } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
 
@@ -30,11 +39,15 @@ async function forward(
   const search = req.nextUrl.search;
   const url = `${API_ORIGIN}/api/admin/art/${suffix}${search}`;
 
-  const jar = await cookies();
-  const access = jar.get(ACCESS_COOKIE)?.value;
+  const bearer = await accessBearer();
+  if (!bearer) {
+    // Same answer the API gives, so the browser refreshes and retries or
+    // signs in. Never call the API with no Bearer.
+    return NextResponse.json({ detail: "missing_bearer_token" }, { status: 401 });
+  }
 
   const headers = new Headers();
-  if (access) headers.set("authorization", `Bearer ${access}`);
+  headers.set("authorization", bearer);
   // Preserve the client's content-type so FastAPI's multipart parser
   // can read the boundary from it. For JSON bodies this is equally
   // important: if we drop it, FastAPI will 422.
