@@ -14,6 +14,7 @@ import { UpdatesSection } from "./UpdatesSection";
 import { LibraryFoldersSection } from "./LibraryFoldersSection";
 import { MetadataSection } from "./MetadataSection";
 import { apiGet, apiPatch, apiPost, apiDelete, ApiError } from "@/lib/client-api";
+import { loadMe } from "@/lib/load-me";
 import { useFeatures } from "@/lib/features";
 import { showArrSync } from "@/lib/library-scan";
 import type {
@@ -24,21 +25,31 @@ import type {
 export default function AdminPage() {
   const [me, setMe] = useState<Me | null>(null);
   const [forbidden, setForbidden] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const res = await fetch("/api/session/me", { cache: "no-store" });
-      if (!res.ok) return;
-      const profile = (await res.json()) as Me | null;
-      if (cancelled || !profile) return;
+  // loadMe goes through apiGet (single-flight refresh + retry), so the page
+  // renders on first navigation even right after the 15-min access token
+  // expired. See lib/load-me.ts for the cause this fixes.
+  const load = useCallback(async (signal?: AbortSignal) => {
+    setLoadError(null);
+    try {
+      const profile = await loadMe(apiGet, signal);
+      if (!profile) return;
       setMe(profile);
       if (profile.role !== "admin") setForbidden(true);
-    })();
-    return () => {
-      cancelled = true;
-    };
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
+      setLoadError(err instanceof Error ? err.message : "Could not load the admin page.");
+    }
   }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    load(controller.signal);
+    return () => {
+      controller.abort();
+    };
+  }, [load]);
 
   if (forbidden) {
     return (
@@ -78,6 +89,17 @@ export default function AdminPage() {
             <AuthEventsSection />
             <RecentHistorySection />
           </>
+        ) : loadError ? (
+          <div className="rounded-xl border border-red-900/60 bg-red-950/40 px-4 py-6 text-sm text-red-200">
+            <p>{loadError}</p>
+            <button
+              type="button"
+              onClick={() => load()}
+              className="mt-3 rounded-md border border-red-800/60 px-3 py-1.5 text-xs text-red-100 hover:border-red-600"
+            >
+              Try again
+            </button>
+          </div>
         ) : (
           <div className="h-32 animate-pulse rounded-xl border border-neutral-800 bg-neutral-900/40" />
         )}
