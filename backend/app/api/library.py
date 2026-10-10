@@ -638,16 +638,17 @@ def list_music_artists(
             )
         )
     rows = db.execute(stmt).all()
+    artist_thumbs = resolve_art_batch(
+        db,
+        entity_kind=ENTITY_ARTIST,
+        entity_ids=[ar.id for ar, _ in rows],
+        role=ROLE_THUMB,
+    )
     return [
         MusicArtistOut(
             id=ar.id,
             name=_effective_name(ar) or ar.name,
-            image_path=resolve_art(
-                db,
-                entity_kind=ENTITY_ARTIST,
-                entity_id=ar.id,
-                role=ROLE_THUMB,
-            ),
+            image_path=artist_thumbs.get(ar.id),
             album_count=int(album_count),
             country=ar.country,
             artist_type=ar.artist_type,
@@ -782,16 +783,17 @@ def list_music_video_artists(
             )
         )
     rows = db.execute(stmt).all()
+    artist_thumbs = resolve_art_batch(
+        db,
+        entity_kind=ENTITY_ARTIST,
+        entity_ids=[ar.id for ar, _ in rows],
+        role=ROLE_THUMB,
+    )
     return [
         MusicVideoArtistOut(
             id=ar.id,
             name=_effective_name(ar) or ar.name,
-            image_path=resolve_art(
-                db,
-                entity_kind=ENTITY_ARTIST,
-                entity_id=ar.id,
-                role=ROLE_THUMB,
-            ),
+            image_path=artist_thumbs.get(ar.id),
             video_count=int(video_count),
         )
         for ar, video_count in rows
@@ -993,6 +995,12 @@ def list_recent_music_videos(
         .limit(limit)
     )
     rows = list(db.execute(stmt).all())
+    music_video_thumbs = resolve_art_batch(
+        db,
+        entity_kind=ENTITY_MUSIC_VIDEO,
+        entity_ids=[mv.id for _, mv, _, _ in rows],
+        role=ROLE_THUMB,
+    )
     return [
         RecentMusicVideoOut(
             id=mv.id,
@@ -1000,12 +1008,7 @@ def list_recent_music_videos(
             artist_name=ar.name,
             release_id=rel.id,
             release_title=rel.title,
-            thumb_path=resolve_art(
-                db,
-                entity_kind=ENTITY_MUSIC_VIDEO,
-                entity_id=mv.id,
-                role=ROLE_THUMB,
-            ),
+            thumb_path=music_video_thumbs.get(mv.id),
             media_file_id=mf.id,
             added_at=mf.created_at,
         )
