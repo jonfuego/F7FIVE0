@@ -19,7 +19,7 @@ export function MetadataSection() {
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState<"test" | "save" | "remove" | null>(null);
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
-  const ref = useRef<HTMLElement | null>(null);
+  const ref = useRef<HTMLDivElement | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -95,13 +95,8 @@ export function MetadataSection() {
   const showForm = !tmdb?.configured || editing;
 
   return (
-    <section
-      id="metadata"
-      ref={ref}
-      className="scroll-mt-24 rounded-xl border border-neutral-800 bg-neutral-900/40 p-6"
-    >
-      <h2 className="text-base font-semibold">Metadata</h2>
-      <p className="mt-1 text-xs text-neutral-500">
+    <div id="metadata" ref={ref} className="scroll-mt-24">
+      <p className="text-xs text-neutral-500">
         TMDB supplies posters, backdrops, and descriptions for the movies and shows in your
         folders. The key is free.
       </p>
@@ -191,7 +186,7 @@ export function MetadataSection() {
           ) : null}
         </div>
       )}
-    </section>
+    </div>
   );
 }
 

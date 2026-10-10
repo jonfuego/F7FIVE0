@@ -16,13 +16,15 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import { apiGet, apiPost, refreshSession, ApiError } from "@/lib/client-api";
+import { apiGet, apiPut, apiPost, refreshSession, ApiError } from "@/lib/client-api";
 import type { UpdateRun, UpdatesStatus } from "@/lib/types";
 import { resetUpdateBadge } from "@/lib/update-badge";
 import {
-  UPDATE_STEPS, blockedText, checkedAgo, encodePasswordHeader, formatBytes, phaseLabel,
-  runSummary, stepIndex, upToDateMessages, updateErrorText,
+  UPDATE_STEPS, blockedText, checkedAgo, encodePasswordHeader, formatBytes,
+  phaseChipLabel, phaseLabel, runSummary, stepIndex, upToDateMessages, updateErrorText,
 } from "@/lib/updates";
+
+type DismissedOut = { run_id: string | null };
 
 function errorOf(err: unknown): string {
   if (err instanceof ApiError) return updateErrorText(err.detail, err.message);
@@ -62,6 +64,37 @@ export function UpdatesSection() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // The dismissed run id lives on the server (app_settings update_run_dismissed),
+  // so Dismiss sticks across reloads, browsers and other admins. A new run has a
+  // new id, so its result panel shows again.
+  useEffect(() => {
+    let cancelled = false;
+    void apiGet<DismissedOut>("/api/admin/updates/dismissed")
+      .then((d) => {
+        if (!cancelled) setDismissedRun(d.run_id);
+      })
+      .catch(() => {
+        // Best-effort: fall back to showing the panel.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const dismissRun = useCallback((runId: string) => {
+    setDismissedRun(runId);
+    void apiPut("/api/admin/updates/dismissed", { run_id: runId }).catch(() => {
+      // Best-effort: it still hides for this page load.
+    });
+  }, []);
+
+  const clearDismissed = useCallback(() => {
+    setDismissedRun(null);
+    void apiPut("/api/admin/updates/dismissed", { run_id: null }).catch(() => {
+      // Best-effort.
+    });
+  }, []);
 
   const active = run?.active ?? false;
 
@@ -119,7 +152,7 @@ export function UpdatesSection() {
     try {
       const next = await apiPost<UpdateRun>("/api/admin/updates/apply", {});
       setRun(next);
-      setDismissedRun(null);
+      clearDismissed();
       setConfirming(false);
     } catch (err) {
       setActionError(errorOf(err));
@@ -181,7 +214,7 @@ export function UpdatesSection() {
       }
       if (res.status === 202) {
         setRun(res.body as UpdateRun);
-        setDismissedRun(null);
+        clearDismissed();
         setFile(null);
         setUploadOpen(false);
       } else {
@@ -210,21 +243,20 @@ export function UpdatesSection() {
   const canUpdate = status !== null && status.can_install && !active && status.rollback_ready;
 
   return (
-    <section className="rounded-xl border border-neutral-800 bg-neutral-900/40 p-6" aria-labelledby="updates-heading">
+    <div>
       <div className="flex items-baseline justify-between gap-3">
-        <h2 id="updates-heading" className="text-base font-semibold">Updates</h2>
+        <p className="text-xs text-neutral-500">
+          F7FIVE0 checks GitHub once a day. Updating the server also updates the phone app it hands out.
+        </p>
         <button
           type="button"
           onClick={() => void checkNow()}
           disabled={checking || active}
-          className="rounded-md border border-neutral-700 px-3 py-1.5 text-xs font-medium text-neutral-100 hover:border-neutral-400 disabled:opacity-50"
+          className="shrink-0 rounded-md border border-neutral-700 px-3 py-1.5 text-xs font-medium text-neutral-100 hover:border-neutral-400 disabled:opacity-50"
         >
           {checking ? "Checking…" : "Check now"}
         </button>
       </div>
-      <p className="mt-1 text-xs text-neutral-500">
-        F7FIVE0 checks GitHub once a day. Updating the server also updates the phone app it hands out.
-      </p>
 
       {loadError ? (
         <div className="mt-4 rounded-md border border-red-900/60 bg-red-950/40 px-4 py-3 text-sm text-red-200">{loadError}</div>
@@ -271,7 +303,7 @@ export function UpdatesSection() {
           ) : null}
 
           {showRun && run ? (
-            <RunPanel run={run} lostContact={lostContact} onDismiss={() => setDismissedRun(run.id)} />
+            <RunPanel run={run} lostContact={lostContact} onDismiss={() => run.id && dismissRun(run.id)} />
           ) : null}
 
           {!active ? (
@@ -400,7 +432,7 @@ export function UpdatesSection() {
           ) : null}
         </div>
       )}
-    </section>
+    </div>
   );
 }
 
@@ -452,7 +484,7 @@ function RunPanel({ run, lostContact, onDismiss }: { run: UpdateRun; lostContact
                 i < current ? "bg-neutral-800 text-neutral-300" : i === current ? "bg-neutral-100 font-medium text-neutral-950" : "bg-neutral-900"
               }`}
             >
-              {phaseLabel(s).split(" ").slice(0, 2).join(" ")}
+              {phaseChipLabel(s)}
             </li>
           ))}
         </ol>

@@ -1405,6 +1405,50 @@ button { border: 0; background: transparent; color: inherit; font: inherit; curs
   color: var(--ink-2);
   margin: 4px 0 12px;
 }
+/* File path in the File info sheet: admins only, its own line, left-aligned,
+   with a copy button. Long UNC paths wrap instead of breaking right-aligned. */
+.detail .ep-info .file-path-row {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.detail .ep-info .file-path-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.detail .ep-info .file-path-head > span {
+  color: var(--ink-3);
+  letter-spacing: 0.02em;
+}
+.detail .ep-info .file-path-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-1);
+  color: var(--ink-2);
+  padding: 4px 8px;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  cursor: pointer;
+}
+.detail .ep-info .file-path-copy:hover,
+.detail .ep-info .file-path-copy:focus-visible { background: var(--surface-3); color: var(--ink); }
+.detail .ep-info .file-path-value {
+  display: block;
+  margin-top: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink);
+  text-align: left;
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+/* Movie detail puts the File info 3-dot menu in the kicker, pushed to the right. */
+.detail .info .kicker .ep-menu { margin-left: auto; }
 /* Season heading on the show page: links to the season page, chevron toggles. */
 .detail .episodes h3.season-head {
   display: flex;

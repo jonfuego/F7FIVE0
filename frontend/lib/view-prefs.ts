@@ -6,6 +6,16 @@
 
 export type MixInputs = Record<string, Record<string, string>>;
 
+// The Admin section ids that can be collapsed. The admin page remembers which
+// are folded per user (admin.collapsed). Keep these in sync with the ids the
+// admin page gives its CollapsibleSection headers.
+export const ADMIN_SECTION_IDS = [
+  "users", "updates", "remote-access", "library-folders", "metadata", "library",
+  "audio-analysis", "health", "active-streams", "sessions", "auth-events", "history",
+] as const;
+
+export type AdminSectionId = (typeof ADMIN_SECTION_IDS)[number];
+
 type Spec<T> = { fallback: T; valid: (v: unknown) => v is T };
 
 function oneOf<const T extends string>(...allowed: T[]): (v: unknown) => v is T {
@@ -14,6 +24,14 @@ function oneOf<const T extends string>(...allowed: T[]): (v: unknown) => v is T 
 
 function shortString(v: unknown): v is string {
   return typeof v === "string" && v.length > 0 && v.length <= 64;
+}
+
+// admin.collapsed is the list of collapsed Admin section ids. Only known ids
+// are kept; anything else is dropped so a stale id can't hide a section forever.
+function adminCollapsed(v: unknown): v is AdminSectionId[] {
+  if (!Array.isArray(v)) return false;
+  const known = new Set<string>(ADMIN_SECTION_IDS);
+  return v.every((x) => typeof x === "string" && known.has(x));
 }
 
 function mixInputs(v: unknown): v is MixInputs {
@@ -39,6 +57,8 @@ export const VIEW_PREFS = {
   "musicvideos.sort": { fallback: "name", valid: oneOf("name", "videos") } as Spec<"name" | "videos">,
   // Mixes: the last values typed into each mix's picker (year, decade, genre...).
   "mixes.inputs": { fallback: {}, valid: mixInputs } as Spec<MixInputs>,
+  // Admin page: the list of collapsed section ids (nothing collapsed by default).
+  "admin.collapsed": { fallback: [], valid: adminCollapsed } as Spec<AdminSectionId[]>,
 };
 
 export type ViewPrefKey = keyof typeof VIEW_PREFS;

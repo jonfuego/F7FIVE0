@@ -34,7 +34,8 @@ from app.api.schemas import (
     TmdbKeyStatusOut, UpdateBadgeOut, UpdateRunOut, UpdatesOut,
     ActiveTranscodeOut, AdminSessionOut, AuthEventOut, MatchApply,
     MatchCandidate, MatchCandidatesOut, OverrideOut, OverrideUpdate,
-    ServerHealthOut, SortOverrideOut, SortOverrideUpdate, WatchHistoryRowOut,
+    ServerHealthOut, SortOverrideOut, SortOverrideUpdate,
+    UpdateDismissIn, UpdateDismissOut, WatchHistoryRowOut,
 )
 from app.models.media_file import MediaFile, MediaKind, ScanState
 from app.models.movie import Movie
@@ -51,8 +52,8 @@ from app.services.arr.radarr import RadarrClient
 from app.services.arr.sonarr import SonarrClient
 from app.config import settings
 from app.services import (
-    android_app, library_folders, nas_auth, reminders, remote_access as ra,
-    scan_status, server_version, tmdb_key, updates,
+    android_app, app_settings, library_folders, nas_auth, reminders,
+    remote_access as ra, scan_status, server_version, tmdb_key, updates,
 )
 from app.services import artist_merge
 from app.services.metadata._base import ProviderError
@@ -1588,6 +1589,38 @@ def update_run(_admin: Annotated[User, Depends(require_admin)]) -> UpdateRunOut:
     """Live state of the running (or last) update. Poll while it is active; it
     keeps answering across the restart of the services."""
     return UpdateRunOut(**updates.run_state())
+
+
+# The dismissed update-run id lives in app_settings so Dismiss sticks across
+# reloads, browsers and admins (not per-browser React state). UpdatesSection
+# hides the result panel when the current run id equals this; a new run has a
+# new id, so its panel shows again.
+_DISMISS_KEY = "update_run_dismissed"
+
+
+@router.get("/updates/dismissed", response_model=UpdateDismissOut)
+def get_update_dismissed(
+    _admin: Annotated[User, Depends(require_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> UpdateDismissOut:
+    """The update-run id an admin dismissed, or null. The page hides a finished
+    run's result panel while its id matches this."""
+    stored = app_settings.get(db, _DISMISS_KEY) or {}
+    run_id = stored.get("run_id")
+    return UpdateDismissOut(run_id=run_id if isinstance(run_id, str) else None)
+
+
+@router.put("/updates/dismissed", response_model=UpdateDismissOut)
+def set_update_dismissed(
+    body: UpdateDismissIn,
+    _admin: Annotated[User, Depends(require_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> UpdateDismissOut:
+    """Remember (or clear) the dismissed update-run id. Clicking Dismiss stores
+    the finished run's id here; starting a new update clears it."""
+    app_settings.put(db, _DISMISS_KEY, {"run_id": body.run_id})
+    db.commit()
+    return UpdateDismissOut(run_id=body.run_id)
 
 
 @router.post("/updates/apply", response_model=UpdateRunOut, status_code=202)

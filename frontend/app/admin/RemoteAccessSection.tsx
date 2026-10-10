@@ -217,18 +217,17 @@ export function RemoteAccessSection() {
   const isDuck = form.host.trim().toLowerCase().endsWith(".duckdns.org");
 
   return (
-    <section className="rounded-xl border border-neutral-800 bg-neutral-900/40 p-6">
+    <div>
       <div className="flex items-baseline justify-between gap-3">
-        <h2 className="text-base font-semibold">Remote access</h2>
+        <p className="text-xs text-neutral-500">
+          Use F7FIVE0 away from home: on your phone&apos;s data, at work, at a friend&apos;s place.
+        </p>
         {!active ? (
-          <button type="button" onClick={() => void load()} className="text-xs text-neutral-500 hover:text-neutral-200">
+          <button type="button" onClick={() => void load()} className="shrink-0 text-xs text-neutral-500 hover:text-neutral-200">
             Refresh
           </button>
         ) : null}
       </div>
-      <p className="mt-1 text-xs text-neutral-500">
-        Use F7FIVE0 away from home: on your phone&apos;s data, at work, at a friend&apos;s place.
-      </p>
 
       {loadError ? (
         <div className="mt-4 rounded-md border border-red-900/60 bg-red-950/40 px-4 py-3 text-sm text-red-200">{loadError}</div>
@@ -385,7 +384,7 @@ export function RemoteAccessSection() {
           )}
         </div>
       )}
-    </section>
+    </div>
   );
 }
 

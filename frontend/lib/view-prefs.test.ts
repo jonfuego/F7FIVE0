@@ -14,8 +14,18 @@ test("nothing stored gives every default", () => {
     "tv.status": "All",
     "musicvideos.sort": "name",
     "mixes.inputs": {},
+    "admin.collapsed": [],
   });
   assert.equal(mergeViewPrefs(null)["music.browse"], "artists");
+});
+
+test("admin.collapsed keeps known section ids and drops the rest", () => {
+  assert.deepEqual(resolveViewPref("admin.collapsed", ["updates", "history"]), ["updates", "history"]);
+  // A stale id would otherwise hide a section forever; the whole value is
+  // rejected (falls back to the default) if any id is unknown.
+  assert.deepEqual(resolveViewPref("admin.collapsed", ["updates", "gone"]), []);
+  assert.deepEqual(resolveViewPref("admin.collapsed", "updates"), []);
+  assert.deepEqual(resolveViewPref("admin.collapsed", []), []);
 });
 
 test("a stored view wins over the default (pick Albums, come back, still Albums)", () => {
