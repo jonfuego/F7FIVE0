@@ -25,6 +25,9 @@ export type OriginOpts = {
   // Canonical origin (e.g. "https://media.example.com"), used as the fallback
   // and added to the allowlist. Usually process.env.PUBLIC_URL.
   publicOrigin?: string | null;
+  // Home-network origin (e.g. "http://192.168.1.20:3001"), added to the
+  // allowlist only. Usually process.env.HOME_URL.
+  homeOrigin?: string | null;
   // Extra allowed hostnames (no port). Usually process.env.APP_ALLOWED_HOSTS.
   allowedHosts?: string[];
 };
@@ -57,6 +60,18 @@ function isPrivateOrLoopback(host: string): boolean {
   return false;
 }
 
+// A LAN-only machine name: a single label with no dot (a Windows computer name
+// like "mediabox" reached at http://mediabox:3001) or an mDNS ".local" name.
+// Neither is routable on the internet, so allowing them keeps the fail-closed
+// rule: a hostile dotted public Host (evil.example) is still rejected and can
+// never land in a Location, while the common LAN case works without config.
+// Any other LAN name (a dotted internal domain) goes in APP_ALLOWED_HOSTS.
+function isLanName(host: string): boolean {
+  if (!host || host === "localhost") return false;
+  if (host.endsWith(".local")) return true;
+  return !host.includes(".");
+}
+
 function originHost(origin: string | null | undefined): string | null {
   if (!origin) return null;
   try {
@@ -70,6 +85,8 @@ function allowedHostSet(opts: OriginOpts): Set<string> {
   const set = new Set<string>(["localhost"]);
   const pub = originHost(opts.publicOrigin);
   if (pub) set.add(pub);
+  const home = originHost(opts.homeOrigin);
+  if (home) set.add(home);
   for (const h of opts.allowedHosts ?? []) {
     const n = h.trim().toLowerCase();
     if (n) set.add(n);
@@ -82,7 +99,8 @@ function hostAllowed(authority: string, opts: OriginOpts): boolean {
   const host = hostname(authority);
   if (!host) return false;
   if (allowedHostSet(opts).has(host)) return true;
-  return isPrivateOrLoopback(host);
+  if (isPrivateOrLoopback(host)) return true;
+  return isLanName(host);
 }
 
 function sanitizeProto(proto: string | null | undefined, fallback: string): "http" | "https" {
@@ -117,7 +135,11 @@ function envOpts(): OriginOpts {
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
-  return { publicOrigin: process.env.PUBLIC_URL ?? null, allowedHosts: allowed };
+  return {
+    publicOrigin: process.env.PUBLIC_URL ?? null,
+    homeOrigin: process.env.HOME_URL ?? null,
+    allowedHosts: allowed,
+  };
 }
 
 // Convenience for Next request handlers: derive the site origin from a Headers

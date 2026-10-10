@@ -465,6 +465,11 @@ function Disable-Other([string]$keep) {
 }
 
 function Restart-F7five0 {
+    # PUBLIC_URL was just written to .env (Set-EnvKey above). The API reads .env
+    # on start; the web launcher (server-wrapper.js) reads PUBLIC_URL /
+    # APP_ALLOWED_HOSTS from the same .env on start. So restarting both here is
+    # what makes the new address reach the web process, keeping its redirects and
+    # CSRF self-origin on the new public host.
     foreach ($svc in @("F7FIVE0-API", "F7FIVE0-Web")) {
         $s = Get-Service -Name $svc -ErrorAction SilentlyContinue
         if ($s -and $s.Status -eq "Running") {

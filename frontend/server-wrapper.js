@@ -26,6 +26,52 @@
 process.env.F7FIVE0_LAUNCHER = "1";
 
 const http = require("http");
+const fs = require("fs");
+const path = require("path");
+
+// Give the web process the configured addresses from the install-root .env.
+//
+// Why here (criterion: redirects stay on the public host): the Next proxy's
+// redirect to /login and its CSRF self-origin check build the site origin from
+// PUBLIC_URL / APP_ALLOWED_HOSTS via lib/origin.ts (siteOriginFromHeaders). The
+// service env install.ps1 writes never carried those, so a public hostname
+// failed the allowlist and the redirect fell back to http://127.0.0.1:3001.
+// The .env lives at the install root, not the web folder, and server.js never
+// loads it. Reading it in the launcher fixes every path at once: install sets
+// F7FIVE0_ENV_FILE, and remote-access.ps1 writes a new PUBLIC_URL to the same
+// .env then restarts F7FIVE0-Web, so the restart picks it up with no NSSM env
+// refresh. A real service-env value still wins (we never overwrite one).
+function loadEnvFile() {
+  const envPath =
+    process.env.F7FIVE0_ENV_FILE || path.join(__dirname, "..", ".env");
+  let text;
+  try {
+    text = fs.readFileSync(envPath, "utf8");
+  } catch {
+    return; // no .env (dev/standalone run): leave process.env as-is
+  }
+  // Only the addresses the web origin helper needs. Other keys stay backend-only.
+  const wanted = new Set(["PUBLIC_URL", "HOME_URL", "APP_ALLOWED_HOSTS"]);
+  for (const line of text.split(/\r?\n/)) {
+    const s = line.trim();
+    if (!s || s.startsWith("#")) continue;
+    const eq = s.indexOf("=");
+    if (eq < 0) continue;
+    const key = s.slice(0, eq).trim();
+    if (!wanted.has(key)) continue;
+    // An explicit service-env value wins over the file (dotenv convention).
+    if (process.env[key] !== undefined && process.env[key] !== "") continue;
+    let val = s.slice(eq + 1).trim();
+    if (
+      (val.startsWith('"') && val.endsWith('"')) ||
+      (val.startsWith("'") && val.endsWith("'"))
+    ) {
+      val = val.slice(1, -1);
+    }
+    if (val) process.env[key] = val;
+  }
+}
+loadEnvFile();
 
 // Hook every http.Server so that for each "request" event we overwrite the peer
 // header on the Node request before Next's handler runs. Next's standalone
