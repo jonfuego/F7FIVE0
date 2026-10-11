@@ -82,6 +82,7 @@ describe("ApiClient never logs out on network errors", () => {
       baseUrl: "http://x",
       tokenStore: store,
       fetchImpl,
+      sleepImpl: async () => {},
       onLogout: () => {
         loggedOut = true;
       },
@@ -103,6 +104,7 @@ describe("ApiClient never logs out on network errors", () => {
       baseUrl: "http://x",
       tokenStore: store,
       fetchImpl,
+      sleepImpl: async () => {},
       onLogout: () => {
         loggedOut = true;
       },
@@ -146,6 +148,7 @@ describe("ApiClient logs out only on a definitive refresh failure", () => {
       baseUrl: "http://x",
       tokenStore: store,
       fetchImpl,
+      sleepImpl: async () => {},
       onLogout: () => {
         loggedOut = true;
       },
@@ -153,6 +156,123 @@ describe("ApiClient logs out only on a definitive refresh failure", () => {
     await expect(client.request("/api/library/songs")).rejects.toBeInstanceOf(NetworkError);
     expect(loggedOut).toBe(false);
     expect(store.clearCount).toBe(0);
+  });
+});
+
+describe("ApiClient refresh outage handling", () => {
+  function setup(refreshAnswer: (n: number) => Response | Promise<Response>) {
+    const store = memStore();
+    const slept: number[] = [];
+    let refreshCalls = 0;
+    let loggedOut = false;
+    const fetchImpl = jest.fn(async (url: string) => {
+      if (url.endsWith("/api/auth/refresh")) {
+        refreshCalls += 1;
+        return refreshAnswer(refreshCalls);
+      }
+      return jsonResponse(refreshCalls === 0 ? 401 : 200, { ok: true });
+    }) as unknown as typeof fetch;
+    const client = new ApiClient({
+      baseUrl: "http://x",
+      tokenStore: store,
+      fetchImpl,
+      sleepImpl: async (ms) => {
+        slept.push(ms);
+      },
+      onLogout: () => {
+        loggedOut = true;
+      },
+    });
+    return {
+      client,
+      store,
+      slept,
+      get refreshCalls() {
+        return refreshCalls;
+      },
+      get loggedOut() {
+        return loggedOut;
+      },
+    };
+  }
+
+  it.each([500, 502, 503, 504])(
+    "a %i from refresh retries twice (0.5 s, 1.5 s), then keeps the session",
+    async (status) => {
+      const t = setup(() => jsonResponse(status, {}));
+      await expect(t.client.request("/api/library/songs")).rejects.toBeInstanceOf(NetworkError);
+      expect(t.refreshCalls).toBe(3);
+      expect(t.slept).toEqual([500, 1500]);
+      expect(t.loggedOut).toBe(false);
+      expect(t.store.clearCount).toBe(0);
+      expect(t.store.value).toBe("refresh-0");
+    },
+  );
+
+  it("a dropped connection retries twice, then keeps the session", async () => {
+    const t = setup(() => {
+      throw new TypeError("Network request failed");
+    });
+    await expect(t.client.request("/api/library/songs")).rejects.toBeInstanceOf(NetworkError);
+    expect(t.refreshCalls).toBe(3);
+    expect(t.loggedOut).toBe(false);
+    expect(t.store.clearCount).toBe(0);
+  });
+
+  it("a timed-out refresh (aborted) is treated as try again, not sign-out", async () => {
+    const t = setup(() => {
+      const e = new Error("aborted");
+      e.name = "AbortError";
+      throw e;
+    });
+    await expect(t.client.request("/api/library/songs")).rejects.toBeInstanceOf(NetworkError);
+    expect(t.loggedOut).toBe(false);
+    expect(t.store.clearCount).toBe(0);
+  });
+
+  it("a 503 then a 200 refreshes after one retry and the request succeeds", async () => {
+    const t = setup((n) => (n === 1 ? jsonResponse(503, {}) : jsonResponse(200, TOKENS)));
+    const res = await t.client.request("/api/library/songs");
+    expect(res.status).toBe(200);
+    expect(t.refreshCalls).toBe(2);
+    expect(t.slept).toEqual([500]);
+    expect(t.store.value).toBe("refresh-new");
+    expect(t.loggedOut).toBe(false);
+  });
+
+  it("a 401 signs out at once, with no retry", async () => {
+    const t = setup(() => jsonResponse(401, { detail: "refresh_token_revoked" }));
+    await expect(t.client.request("/api/library/songs")).rejects.toBeInstanceOf(AuthError);
+    expect(t.refreshCalls).toBe(1);
+    expect(t.slept).toEqual([]);
+    expect(t.loggedOut).toBe(true);
+    expect(t.store.clearCount).toBe(1);
+  });
+
+  it("a 403 from refresh no longer signs out (a proxy answer, not a dead token)", async () => {
+    const t = setup(() => jsonResponse(403, {}));
+    await expect(t.client.request("/api/library/songs")).rejects.toBeInstanceOf(NetworkError);
+    expect(t.refreshCalls).toBe(1);
+    expect(t.loggedOut).toBe(false);
+    expect(t.store.clearCount).toBe(0);
+  });
+
+  it("concurrent requests still share one retrying refresh", async () => {
+    const t = setup((n) => (n === 1 ? jsonResponse(502, {}) : jsonResponse(200, TOKENS)));
+    const results = await Promise.all([
+      t.client.request("/api/a"),
+      t.client.request("/api/b"),
+      t.client.request("/api/c"),
+    ]);
+    expect(results.map((r) => r.status)).toEqual([200, 200, 200]);
+    expect(t.refreshCalls).toBe(2);
+  });
+
+  it("bootstrap at launch with the server down is not a sign-out", async () => {
+    const t = setup(() => jsonResponse(503, {}));
+    await expect(t.client.bootstrap()).rejects.toBeInstanceOf(NetworkError);
+    expect(t.loggedOut).toBe(false);
+    expect(t.store.value).toBe("refresh-0");
   });
 });
 

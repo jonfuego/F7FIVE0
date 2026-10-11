@@ -206,8 +206,13 @@ export function UpdatesSection() {
       let res = await sendUpload(file, pw);
       if (res.status === 401) {
         // The access token expired mid-session: refresh once and send again.
-        if (!(await refreshSession())) {
+        const refreshed = await refreshSession();
+        if (refreshed === "sign-out") {
           window.location.replace("/login");
+          return;
+        }
+        if (refreshed === "keep-session") {
+          setActionError("The server isn't answering right now. You are still signed in; try again in a moment.");
           return;
         }
         res = await sendUpload(file, pw);

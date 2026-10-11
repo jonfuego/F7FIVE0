@@ -18,6 +18,7 @@ import { cookies } from "next/headers";
 import { backend } from "@/lib/api";
 import { setSessionCookies } from "@/lib/cookies";
 import { siteOriginFromHeaders } from "@/lib/origin";
+import { clearsSessionOnBackendStatus } from "@/lib/refresh-outcome";
 import { ACCESS_COOKIE, REFRESH_COOKIE } from "@/lib/server-env";
 
 export const runtime = "nodejs";
@@ -52,18 +53,26 @@ async function fetchInfo(path: string, access: string | undefined): Promise<Resp
 }
 
 // One refresh attempt when the access cookie has expired. Returns the new
-// tokens (to set on the response) or null.
-async function refreshTokens(): Promise<Tokens | null> {
+// tokens (to set on the response), null when the session is really gone (no
+// cookie or a 401 from the API), or "unavailable" when the API is restarting or
+// erroring. That last case is not a sign-out: the caller answers 503 and the
+// cookies stay (see lib/refresh-outcome.ts).
+async function refreshTokens(): Promise<Tokens | null | "unavailable"> {
   const refresh = (await cookies()).get(REFRESH_COOKIE)?.value;
   if (!refresh) return null;
-  const res = await backend("/api/auth/refresh", {
-    method: "POST",
-    body: { refresh_token: refresh },
-  });
-  if (!res.ok) return null;
+  let res: Response;
+  try {
+    res = await backend("/api/auth/refresh", {
+      method: "POST",
+      body: { refresh_token: refresh },
+    });
+  } catch {
+    return "unavailable";
+  }
+  if (!res.ok) return clearsSessionOnBackendStatus(res.status) ? null : "unavailable";
   const body = (await res.json().catch(() => null)) as Partial<Tokens> | null;
   if (!body || typeof body.access_token !== "string" || typeof body.refresh_token !== "string") {
-    return null;
+    return "unavailable";
   }
   return body as Tokens;
 }
@@ -73,7 +82,9 @@ async function lookup(req: NextRequest): Promise<{ info: AppInfo | null; status:
   let res = await fetchInfo(path, (await cookies()).get(ACCESS_COOKIE)?.value);
   let tokens: Tokens | null = null;
   if (res.status === 401) {
-    tokens = await refreshTokens();
+    const refreshed = await refreshTokens();
+    if (refreshed === "unavailable") return { info: null, status: 503, tokens: null };
+    tokens = refreshed;
     if (tokens) res = await fetchInfo(path, tokens.access_token);
   }
   if (!res.ok) return { info: null, status: res.status, tokens };
@@ -102,6 +113,7 @@ function notPublished(): NextResponse {
 export async function HEAD(req: NextRequest): Promise<Response> {
   const { info, status, tokens } = await lookup(req);
   if (status === 401) return new NextResponse(null, { status: 401 });
+  if (status === 503) return new NextResponse(null, { status: 503 });
   if (!info?.available) return withTokens(new NextResponse(null, { status: 404 }), tokens);
   const headers = new Headers({
     "content-type": "application/vnd.android.package-archive",
@@ -123,6 +135,12 @@ export async function GET(req: NextRequest): Promise<Response> {
     login.pathname = "/login";
     login.searchParams.set("next", req.nextUrl.pathname + req.nextUrl.search);
     return NextResponse.redirect(login);
+  }
+  if (status === 503) {
+    return new NextResponse("The server is not answering right now. Try again in a moment.", {
+      status: 503,
+      headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" },
+    });
   }
   if (!info?.available || !info.path) return withTokens(notPublished(), tokens);
   // Relative Location: the browser stays on whatever address it used, which

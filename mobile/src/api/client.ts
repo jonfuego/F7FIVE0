@@ -6,13 +6,16 @@
  *  - Concurrent 401s trigger exactly ONE refresh (single-flight); all waiters
  *    share the same in-flight refresh promise.
  *  - Network errors never clear the session (they throw NetworkError).
- *  - Only a definitive 401/403 from the refresh call (or a missing refresh
+ *  - Only a definitive 401 from the refresh call (or a missing refresh
  *    token) signs the user out (clears the store, calls onLogout, throws
- *    AuthError).
+ *    AuthError). A 5xx, a timeout or a dropped connection is retried twice
+ *    (0.5 s, 1.5 s) and then throws NetworkError with the session kept. The
+ *    decision lives in ./refreshOutcome.
  *
  * Everything is dependency-injected (fetch, tokenStore, onLogout) so the whole
  * module unit-tests in Node with no native modules.
  */
+import { decideRefresh, retryDelayMs, type RefreshOutcome } from "./refreshOutcome";
 import type { TokenStore } from "./tokenStore";
 
 export class NetworkError extends Error {
@@ -49,7 +52,12 @@ export interface ApiClientDeps {
   fetchImpl?: typeof fetch;
   onLogout?: () => void;
   clientMeta?: ClientMeta;
+  /** Backoff wait between refresh retries. Tests inject an instant one. */
+  sleepImpl?: (ms: number) => Promise<void>;
 }
+
+/** A refresh call that never answers must not hang every request behind it. */
+const REFRESH_TIMEOUT_MS = 10_000;
 
 interface TokenPair {
   access_token: string;
@@ -64,6 +72,7 @@ export class ApiClient {
   private readonly fetchImpl: typeof fetch;
   private readonly onLogout?: () => void;
   private readonly meta: ClientMeta;
+  private readonly sleep: (ms: number) => Promise<void>;
 
   constructor(deps: ApiClientDeps) {
     this.baseUrlSource = deps.baseUrl;
@@ -71,6 +80,7 @@ export class ApiClient {
     this.fetchImpl = deps.fetchImpl ?? fetch;
     this.onLogout = deps.onLogout;
     this.meta = deps.clientMeta ?? {};
+    this.sleep = deps.sleepImpl ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
   }
 
   private get baseUrl(): string {
@@ -191,31 +201,59 @@ export class ApiClient {
       this.onLogout?.();
       throw new AuthError("no_refresh_token");
     }
-    let res: Response;
-    try {
-      res = await this.fetchImpl(`${this.baseUrl}/api/auth/refresh`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ refresh_token: refresh }),
-      });
-    } catch (e) {
-      // Network failure: DO NOT clear the session; caller retries later.
-      throw new NetworkError("refresh_network_error", e);
+    let res: Response | null = null;
+    for (let retriesUsed = 0; ; retriesUsed += 1) {
+      const { outcome, response } = await this.refreshOnce(refresh);
+      const decision = decideRefresh(outcome, retriesUsed);
+      if (decision === "refreshed") {
+        res = response;
+        break;
+      }
+      if (decision === "retry") {
+        await this.sleep(retryDelayMs(retriesUsed));
+        continue;
+      }
+      if (decision === "sign-out") {
+        // Definitive: the API rejected the refresh token. Sign out.
+        await this.clearSession();
+        this.onLogout?.();
+        throw new AuthError("refresh_rejected");
+      }
+      // keep-session: restart, 5xx, timeout, dropped connection (retries used
+      // up) or an unexpected non-401 answer. DO NOT clear anything; the caller
+      // fails this request and the next one tries again.
+      throw new NetworkError(
+        outcome.kind === "response" ? `refresh_failed_${outcome.status}` : `refresh_${outcome.kind}`,
+      );
     }
-    if (res.status === 401 || res.status === 403) {
-      // Definitive auth failure: the refresh token is dead. Sign out.
-      await this.clearSession();
-      this.onLogout?.();
-      throw new AuthError("refresh_rejected");
-    }
-    if (!res.ok) {
-      // 5xx / transient: treat as network-ish, keep the session.
-      throw new NetworkError(`refresh_failed_${res.status}`);
-    }
-    const body = (await res.json()) as TokenPair;
+    const body = (await res!.json()) as TokenPair;
     this.accessToken = body.access_token;
     await this.store.setRefresh(body.refresh_token);
     return this.accessToken;
+  }
+
+  /** One refresh call, reduced to an outcome the pure helper can judge. */
+  private async refreshOnce(
+    refresh: string,
+  ): Promise<{ outcome: RefreshOutcome; response: Response | null }> {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), REFRESH_TIMEOUT_MS);
+    try {
+      const response = await this.fetchImpl(`${this.baseUrl}/api/auth/refresh`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refresh_token: refresh }),
+        signal: ctl.signal,
+      });
+      return { outcome: { kind: "response", status: response.status }, response };
+    } catch {
+      return {
+        outcome: ctl.signal.aborted ? { kind: "timeout" } : { kind: "network-error" },
+        response: null,
+      };
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /** Authenticated fetch. On a 401 it refreshes once (single-flight) and

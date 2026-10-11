@@ -166,7 +166,7 @@ async function loadMeWithRefresh(): Promise<Me | null> {
   if (first.status !== 401) return null;
   // Share the single-flight refresh so this does not race the data fetches.
   const refreshed = await refreshSession();
-  if (!refreshed) return null;
+  if (refreshed !== "refreshed") return null;
   const retry = await fetch("/api/session/me", { cache: "no-store" });
   if (!retry.ok) return null;
   return (await retry.json()) as Me;
