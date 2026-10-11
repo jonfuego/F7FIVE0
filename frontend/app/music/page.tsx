@@ -113,8 +113,7 @@ export default function MusicPage() {
     <AuthShell>
       <h1 className="page-title">Music</h1>
 
-      <div className="filter-bar">
-        <span className="lbl">Browse</span>
+      <div className="filter-bar" role="group" aria-label="Browse">
         <span className="chip on">Artists</span>
         <Link href="/music/albums" className="chip" onClick={() => setBrowse("albums")}>Albums</Link>
         <Link href="/music/songs" className="chip" onClick={() => setBrowse("songs")}>Songs</Link>
