@@ -177,7 +177,10 @@ def _scan_folders(only: Optional[list] = None) -> bool:
         # Connect any saved NAS sign-ins before walking folders, so a UNC
         # share is readable for this scan. Cheap when already connected.
         nas_auth.ensure_all(db)
-        scan_library.scan_all(db, on_progress=progress, only=only)
+        if only is None:
+            scan_library.scan_all(db, on_progress=progress)
+        else:
+            scan_library.scan_all(db, on_progress=progress, only=only)
         if only is None:
             has_music_videos = bool(library_folders.folders(db, "music_videos"))
         db.commit()
