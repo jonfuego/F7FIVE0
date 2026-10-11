@@ -5,14 +5,17 @@
 // when the access cookie has expired but the refresh cookie is still
 // alive.
 //
-// On a reused-or-revoked refresh the backend returns 401 and we clear
-// both cookies so the UI can redirect to /login.
+// Cookies are cleared ONLY when the backend answers 401 (reused, revoked,
+// expired or unknown refresh token). A backend restart, a 5xx or an
+// unreachable backend must not sign anyone out, so those answer 5xx and leave
+// both cookies alone; the client retries (lib/refresh-outcome.ts).
 
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { backend } from "@/lib/api";
 import { REFRESH_COOKIE } from "@/lib/server-env";
 import { clearSessionCookies, setSessionCookies } from "@/lib/cookies";
+import { clearsSessionOnBackendStatus } from "@/lib/refresh-outcome";
 
 export async function POST() {
   const refresh = (await cookies()).get(REFRESH_COOKIE)?.value;
@@ -22,17 +25,23 @@ export async function POST() {
     return res;
   }
 
-  const backendRes = await backend("/api/auth/refresh", {
-    method: "POST",
-    body: { refresh_token: refresh },
-  });
+  let backendRes: Response;
+  try {
+    backendRes = await backend("/api/auth/refresh", {
+      method: "POST",
+      body: { refresh_token: refresh },
+    });
+  } catch {
+    // API down or restarting (connection refused / reset). Keep the cookies.
+    return NextResponse.json({ detail: "backend_unreachable" }, { status: 503 });
+  }
   const payload = await safeJson(backendRes);
 
   if (!backendRes.ok) {
     const res = NextResponse.json(payload ?? { detail: "refresh_failed" }, {
       status: backendRes.status,
     });
-    await clearSessionCookies(res);
+    if (clearsSessionOnBackendStatus(backendRes.status)) await clearSessionCookies(res);
     return res;
   }
 
@@ -48,9 +57,9 @@ export async function POST() {
     refresh_expires_in_seconds?: unknown;
   };
   if (typeof access_token !== "string" || typeof refresh_token !== "string") {
-    const res = NextResponse.json({ detail: "malformed_token_response" }, { status: 502 });
-    await clearSessionCookies(res);
-    return res;
+    // Not a verdict on the session (a half-started API can answer oddly): 502,
+    // cookies kept.
+    return NextResponse.json({ detail: "malformed_token_response" }, { status: 502 });
   }
 
   const res = NextResponse.json({ ok: true }, { status: 200 });

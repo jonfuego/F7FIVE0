@@ -4,10 +4,20 @@
 // apiGet / apiPost so that a single expired access token triggers exactly
 // one /api/session/refresh round-trip and the caller never sees the 401.
 //
-// If refresh fails, the user is bounced to /login and the promise never
-// resolves (we replace the whole location).
+// Only a real 401 from the refresh call (the refresh token is rejected) bounces
+// the user to /login; the promise then never resolves (we replace the whole
+// location). A restart, a 5xx or a dropped connection during refresh is
+// retried briefly and then fails just that request; the session is kept. See
+// lib/refresh-outcome.ts for the decision.
 
 "use client";
+
+import {
+  runRefresh,
+  type RefreshOutcome,
+  type RefreshResult,
+  type Sleep,
+} from "./refresh-outcome.ts";
 
 export class ApiError extends Error {
   status: number;
@@ -31,16 +41,33 @@ type Options = {
 // token, the second used the grace window, and the rest presented a revoked
 // token, which the API treats as reuse and kills the session. Here every 401
 // awaits one shared in-flight refresh promise, so the token rotates once.
-let inFlightRefresh: Promise<boolean> | null = null;
+let inFlightRefresh: Promise<RefreshResult> | null = null;
 
-export function refreshSession(): Promise<boolean> {
+// A refresh call that never answers must not hang every request behind it.
+const REFRESH_TIMEOUT_MS = 10_000;
+
+async function attemptRefresh(): Promise<RefreshOutcome> {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), REFRESH_TIMEOUT_MS);
+  try {
+    const res = await fetch("/api/session/refresh", { method: "POST", signal: ctl.signal });
+    return { kind: "response", status: res.status };
+  } catch {
+    return ctl.signal.aborted ? { kind: "timeout" } : { kind: "network-error" };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// "refreshed": new cookies are set. "sign-out": the API rejected the refresh
+// token (401), the cookies are cleared, go to /login. "keep-session": the
+// server was unreachable or erroring after the retries; nothing was cleared,
+// fail this request and let the next one try again. `sleep` is for tests.
+export function refreshSession(sleep?: Sleep): Promise<RefreshResult> {
   if (!inFlightRefresh) {
-    inFlightRefresh = fetch("/api/session/refresh", { method: "POST" })
-      .then((res) => res.ok)
-      .catch(() => false)
-      .finally(() => {
-        inFlightRefresh = null;
-      });
+    inFlightRefresh = runRefresh(attemptRefresh, sleep).finally(() => {
+      inFlightRefresh = null;
+    });
   }
   return inFlightRefresh;
 }
@@ -73,9 +100,14 @@ async function request<T>(path: string, opts: Options): Promise<T> {
   // original call exactly once. A second 401 after refresh means the refresh
   // cookie is dead.
   const refreshed = await refreshSession();
-  if (!refreshed) {
+  if (refreshed === "sign-out") {
     redirectToLogin();
     return new Promise<T>(() => {}); // never resolves; navigation is underway
+  }
+  if (refreshed === "keep-session") {
+    // Server restarting or unreachable. Stay signed in; this call fails and
+    // the page shows its normal error state.
+    throw new ApiError(503, "session_refresh_unavailable", "HTTP 503: session_refresh_unavailable");
   }
   const retry = await doFetch(path, opts);
   if (retry.status === 401) {
