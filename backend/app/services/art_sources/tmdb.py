@@ -20,10 +20,12 @@ returns:
       "logos":     [...]   # tv only
     }
 
-We resolve `file_path` against TMDB's image base. The original-quality
-URL pattern is `https://image.tmdb.org/t/p/original{file_path}`. Posters
-are 2:3, backdrops are 16:9; both are returned because the modal can be
-opened with `role=poster` or `role=backdrop`.
+We resolve `file_path` against TMDB's image base. Applying downloads the
+original-quality URL, `https://image.tmdb.org/t/p/original{file_path}` (`url`).
+The modal's tile loads a small variant instead (`preview_url`, `w342` for
+posters, `w300` for backdrops); an `original` poster is several MB, which is
+too much for a 24-tile grid. Posters are 2:3, backdrops are 16:9; both are
+returned because the modal can be opened with `role=poster` or `role=backdrop`.
 """
 from __future__ import annotations
 
@@ -32,9 +34,11 @@ from typing import Any, Optional
 
 import httpx
 
+from app.services.art_sources import previews
+
 
 _BASE = "https://api.themoviedb.org/3"
-_IMG_BASE = "https://image.tmdb.org/t/p/original"
+_IMG_SIZE_FULL = "original"
 _TIMEOUT = 6.0
 _log = logging.getLogger("f7five0.art_sources.tmdb")
 
@@ -107,10 +111,15 @@ def _normalize(
         return None
     lang = entry.get("iso_639_1")
     lang_tag = f" [{lang}]" if isinstance(lang, str) and lang and lang != "en" else ""
+    preview_size = (
+        previews.TMDB_BACKDROP_PREVIEW if label_kind == "backdrop"
+        else previews.TMDB_POSTER_PREVIEW
+    )
     return {
         "source": "tmdb",
         "ref": path,
-        "url": f"{_IMG_BASE}{path}",
+        "url": previews.tmdb_url(path, _IMG_SIZE_FULL),
+        "preview_url": previews.tmdb_url(path, preview_size),
         "label": f"TMDB {label_kind}{lang_tag}",
     }
 

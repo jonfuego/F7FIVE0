@@ -55,7 +55,11 @@ class ArtFromSearchRequest(BaseModel):
 class ArtCandidateOut(BaseModel):
     source: str
     ref: str
+    # Full-size image: what applying downloads.
     url: str
+    # Small copy the modal's tile loads. Additive: older clients ignore it
+    # and keep using `url`.
+    preview_url: Optional[str] = None
     label: str
 
 

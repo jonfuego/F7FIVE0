@@ -23,6 +23,18 @@ test("CSP allows what HLS and Cast need", () => {
   assert.ok(CONTENT_SECURITY_POLICY.includes("www.gstatic.com"));
 });
 
+test("CSP lets the art picker tiles load https images but not http or scripts", () => {
+  const imgSrc = CONTENT_SECURITY_POLICY.split("; ").find((d) => d.startsWith("img-src ")) ?? "";
+  assert.ok(imgSrc.split(" ").includes("https:"));
+  assert.ok(!imgSrc.split(" ").includes("http:"));
+  assert.ok(!imgSrc.split(" ").includes("*"));
+  // The wider img-src must not leak into script or connect sources.
+  const scriptSrc = CONTENT_SECURITY_POLICY.split("; ").find((d) => d.startsWith("script-src ")) ?? "";
+  const connectSrc = CONTENT_SECURITY_POLICY.split("; ").find((d) => d.startsWith("connect-src ")) ?? "";
+  assert.ok(!scriptSrc.includes("https:"));
+  assert.ok(!connectSrc.includes("https:"));
+});
+
 test("HSTS only over HTTPS", () => {
   assert.equal(securityHeaders({ https: false })["Strict-Transport-Security"], undefined);
   assert.ok(securityHeaders({ https: true })["Strict-Transport-Security"]);

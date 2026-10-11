@@ -69,37 +69,48 @@ def _normalize(images: list[Any]) -> list[dict[str, Any]]:
         key=lambda i: 0 if i.get("front") else 1,
     )
     for img in ordered:
-        url = _best_url(img)
+        url, preview = _urls(img)
         if not url or url in seen:
             continue
         seen.add(url)
         label = "Cover Art front" if img.get("front") else "Cover Art"
-        out.append({
+        item: dict[str, Any] = {
             "source": "coverart",
             "ref": url,
             "url": url,
             "label": label,
-        })
+        }
+        if preview:
+            item["preview_url"] = preview
+        out.append(item)
     return out[:24]
 
 
-def _best_url(img: dict[str, Any]) -> Optional[str]:
-    """Prefer a 500px thumbnail over the full-size original.
+def _urls(img: dict[str, Any]) -> tuple[Optional[str], Optional[str]]:
+    """Return `(apply_url, preview_url)` for one Cover Art Archive image.
 
-    Full originals can be many megabytes; the modal renders a thumbnail
-    grid, so the 500px variant is both lighter and still sharp enough. We
-    fall back to the full image when no thumbnail is listed.
+    The tile loads the 250 px thumbnail (falling back to 500 px). Applying
+    downloads the 1200 px thumbnail rather than the raw upload: originals are
+    often tens of MB, past the 10 MB cap in `fetch_and_save_url`, so a pick
+    would fail with a 413. Without a 1200 px thumbnail it falls back to the
+    500 px one, then the original.
     """
     thumbs = img.get("thumbnails") or {}
-    if isinstance(thumbs, dict):
-        for size in ("500", "large", "250"):
+    if not isinstance(thumbs, dict):
+        thumbs = {}
+
+    def pick(*sizes: str) -> Optional[str]:
+        for size in sizes:
             candidate = thumbs.get(size)
             if isinstance(candidate, str) and candidate.startswith("https://"):
                 return candidate
+        return None
+
     full = img.get("image")
-    if isinstance(full, str) and full.startswith("https://"):
-        return full
-    return None
+    original = full if isinstance(full, str) and full.startswith("https://") else None
+    apply_url = pick("1200", "500", "large") or original
+    preview = pick("250", "small", "500", "large")
+    return apply_url, preview
 
 
 def _safe_json(resp: httpx.Response) -> Optional[dict[str, Any]]:

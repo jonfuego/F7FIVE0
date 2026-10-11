@@ -6,7 +6,10 @@
 // where the app needs it: hls.js spins a worker from a blob and feeds a
 // MediaSource (worker-src/media-src blob:), the Cast sender SDK loads from
 // www.gstatic.com and opens a gstatic iframe, art and poster images can be
-// data: or blob:, and self-hosted fonts plus the vestigial Google Fonts
+// data: or blob: or any https image (the Edit art picker previews candidates
+// straight from TMDB, iTunes, Cover Art Archive, TheAudioDB and whatever host
+// an *arr app returns, a list that changes by item and by source, so it can't
+// be a short allowlist; images cannot run script), and self-hosted fonts plus the vestigial Google Fonts
 // preconnect are allowed. 'unsafe-inline' for scripts/styles is kept on
 // purpose: Next injects inline hydration scripts and inline styles and this app
 // does not use per-request nonces.
@@ -21,7 +24,7 @@ export const CONTENT_SECURITY_POLICY = [
   // load over whatever scheme the page uses (http on a LAN install, https
   // through the tunnel); on an https page the browser's mixed-content rules
   // still block any http load, so this does not weaken a tunneled deploy.
-  "img-src 'self' data: blob: *.gstatic.com",
+  "img-src 'self' data: blob: https: *.gstatic.com",
   "media-src 'self' blob:",
   "script-src 'self' 'unsafe-inline' www.gstatic.com",
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
