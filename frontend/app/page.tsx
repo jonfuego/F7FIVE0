@@ -14,7 +14,9 @@ import { MediaCard } from "@/components/MediaCard";
 import { Row } from "@/components/Row";
 import { apiGet, apiPost } from "@/lib/client-api";
 import { colorForTitle, hueFromString, joinMeta } from "@/lib/format";
-import { heroSubtitleParts, pickFeatured } from "@/lib/featured";
+import {
+  heroFacts, heroSubtitleParts, pickFeatured, type HeroFactsSource,
+} from "@/lib/featured";
 import { heroEmptyMessage, resolveHeroState } from "@/lib/hero-state";
 import { resolveHeroPlay } from "@/lib/play-action";
 import {
@@ -330,6 +332,9 @@ function Hero({
   // for the wide hero frame so portrait compositions don't crop to the
   // figure's midsection. Albums have no backdrop and stay on poster.
   const [backdrop, setBackdrop] = useState<string | null>(null);
+  // Facts line (runtime, genres, rating, season or track counts) read from
+  // the same detail call; heroFacts skips whatever is missing.
+  const [facts, setFacts] = useState<string[]>([]);
   useEffect(() => {
     let cancelled = false;
     const path = item.kind === "movie"
@@ -337,11 +342,13 @@ function Hero({
       : item.kind === "series"
         ? `series/${item.id}`
         : `albums/${item.id}`;
-    apiGet<{
-      overview?: string | null;
-      backdrop_path?: string | null;
-      artist_id?: string | null;
-    }>(
+    apiGet<
+      HeroFactsSource & {
+        overview?: string | null;
+        backdrop_path?: string | null;
+        artist_id?: string | null;
+      }
+    >(
       `/api/library/${path}`,
     )
       .then((data) => {
@@ -349,12 +356,14 @@ function Hero({
         setOverview(data.overview ?? null);
         setBackdrop(data.backdrop_path ?? null);
         setArtistId(item.kind === "album" ? data.artist_id ?? null : null);
+        setFacts(heroFacts(item.kind, data));
       })
       .catch(() => {
         if (cancelled) return;
         setOverview(null);
         setBackdrop(null);
         setArtistId(null);
+        setFacts([]);
       });
     return () => {
       cancelled = true;
@@ -409,6 +418,16 @@ function Hero({
               </span>
             ))}
           </div>
+          {facts.length > 0 ? (
+            <div className="facts">
+              {facts.map((fact, i) => (
+                <span key={i}>
+                  {i > 0 ? <span className="dot" aria-hidden>•</span> : null}
+                  {fact}
+                </span>
+              ))}
+            </div>
+          ) : null}
           {overview ? <p className="blurb">{overview}</p> : null}
           <div className="ctas">
             <button

@@ -123,6 +123,7 @@ export type Track = {
 export type AlbumDetail = Album & {
   tracks: Track[];
   secondary_types: string[];
+  genres?: string[];
   label: string | null;
   disambiguation: string | null;
   mb_rating: number | null;

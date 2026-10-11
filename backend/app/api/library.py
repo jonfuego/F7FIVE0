@@ -519,6 +519,7 @@ def get_album(
         "metadata_synced_at": album.metadata_synced_at,
         "metadata_status": album.metadata_status,
         "secondary_types": album.secondary_types or [],
+        "genres": [g for g in (album.genres or []) if isinstance(g, str)],
         "label": album.label,
         "disambiguation": album.disambiguation,
         "mb_rating": merge_overrides(album)["rating"],

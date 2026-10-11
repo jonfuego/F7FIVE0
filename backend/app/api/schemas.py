@@ -268,6 +268,9 @@ class AlbumOut(BaseModel):
 class AlbumDetailOut(AlbumOut):
     tracks: list[TrackOut] = Field(default_factory=list)
     secondary_types: list[str] = Field(default_factory=list)
+    # Album genre names (Lidarr / MusicBrainz); empty when none were saved.
+    # The Home hero shows them in its facts line.
+    genres: list[str] = Field(default_factory=list)
     label: Optional[str] = None
     disambiguation: Optional[str] = None
     mb_rating: Optional[float] = None
