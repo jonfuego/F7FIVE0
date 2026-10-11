@@ -256,6 +256,21 @@ INSTALL.md for the operator view.
   in the stream worker. Any other art replaces a frame grab and is never
   replaced by one. Artists get the same treatment from the artist art auto-fill
   job (`source_kind` `artist_auto`, see the Fix Match and art search bullets).
+- Movie genres: `enrich_movie` (`services/metadata/runner.py`) saves the TMDB
+  genre names to `movies.genres`; it used to leave them to the Radarr sync, so
+  installs without Radarr had none and the Movies Genre row showed only All. The
+  job `backfill_movie_genres` fills movies that have a TMDB id and no genres
+  (batches of 25, a short pause after each lookup, a failed lookup is retried on
+  the next run, a second run saves nothing). The scheduler runs it after boot,
+  after each folder scan and when a TMDB key is saved.
+- Content-Security-Policy `img-src` (`frontend/lib/security-headers.ts`) allows
+  `https:`: the art picker shows candidate previews straight from TMDB, iTunes,
+  Cover Art Archive and TheAudioDB, and the old allowlist blocked all of them
+  (blank tiles). Art candidates carry `preview_url` for the tile and `url` for
+  the full image the admin's pick downloads.
+- `--bg-2` is not a design token (the v3 tokens define `--bg` and
+  `--surface-1..3`), so `background: var(--bg-2)` paints nothing. Use
+  `--surface-2` for an opaque panel.
 - Migrations go through Alembic. Keep revision ids stable: existing installs
   upgrade through them. Register new models in `app/models/__init__.py`.
 - Config comes from `.env` at the install root via pydantic-settings. New
