@@ -139,7 +139,12 @@ export function MixCard({
   }, [addToQueue, fetchItems, picker, pickerOpen, pickerValues, openPicker, onSaveValues]);
 
   return (
-    <div className="playbill" data-kind={kind} role="group" aria-label={title}>
+    <div
+      className={`playbill${(picker && pickerOpen) || error ? " expanded" : ""}`}
+      data-kind={kind}
+      role="group"
+      aria-label={title}
+    >
       <div className="pb-art">
         {hasMixArt(kind) ? (
           <MixPicture
