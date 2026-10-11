@@ -10,8 +10,8 @@ clicks one and the backend downloads `url` (full size) through the existing
 smaller variant gets `url` there (see `_ensure_previews`).
 
 Sources per kind:
-  artist / music video -> Lidarr, TheAudioDB, iTunes (iTunes is music-video
-    only, see `_artist_candidates`).
+  artist / music video -> Lidarr, TheAudioDB, Deezer (keyless), and iTunes
+    (iTunes is music-video only, see `_artist_candidates`).
   movie                -> Radarr, TMDB.
   series               -> Sonarr, TMDB.
   album                -> Lidarr, Cover Art Archive.
@@ -57,6 +57,7 @@ from app.services.arr import LidarrClient, RadarrClient, SonarrClient
 from app.services.arr._base import ArrClientError
 from app.services.art_sources import audiodb as audiodb_source
 from app.services.art_sources import coverart as coverart_source
+from app.services.art_sources import deezer as deezer_source
 from app.services.art_sources import itunes as itunes_source
 from app.services.art_sources import previews
 from app.services.art_sources import tmdb as tmdb_source
@@ -75,7 +76,7 @@ def search_candidates(
 
     Each entry: `{source, ref, url, preview_url, label}`. `source` is the
     provider name (`lidarr` / `radarr` / `sonarr` / `tmdb` / `audiodb` /
-    `itunes` / `coverart`). `ref` is the candidate's upstream identifier (the
+    `deezer` / `itunes` / `coverart`). `ref` is the candidate's upstream identifier (the
     image URL itself today). `url` is the full-size image URL that applying
     downloads. `preview_url` is a small copy for the modal's tile (the same
     as `url` when the source has no smaller variant). `label` is the display
@@ -130,7 +131,9 @@ def _artist_candidates(
 
     Lidarr's get_artist returns artist-level images (poster/fanart/
     banner/logo) which are genuine artist artwork. AudioDB likewise
-    returns artist portraits. iTunes is intentionally skipped here
+    returns artist portraits (by MusicBrainz id when the artist has one), and
+    Deezer returns an artist photo with no key at all, so this answers even
+    when Lidarr is not connected. iTunes is intentionally skipped here
     because the unauthenticated Search API only surfaces album covers,
     and album art doesn't belong on the artist tile. The music-video
     aggregator still uses iTunes since album art is a defensible thumb
@@ -148,8 +151,9 @@ def _artist_candidates(
     )
     _run(
         notes, "TheAudioDB",
-        lambda: _audiodb_artist_images(artist.name), out,
+        lambda: _audiodb_artist_images(artist.name, artist.mbid), out,
     )
+    _run(notes, "Deezer", lambda: _deezer_artist_images(artist.name), out)
     if not _lidarr().configured:
         notes.append(_ARR_MISSING["lidarr"])
     return _dedupe_by_url(out), notes
@@ -203,7 +207,7 @@ def _music_video_candidates(
     db: Session, entity_id: uuid.UUID,
 ) -> tuple[list[dict[str, Any]], list[str]]:
     """Music videos do not have their own *arr representation. Surface
-    the parent artist's Lidarr / AudioDB / iTunes images so the admin
+    the parent artist's Lidarr / AudioDB / Deezer / iTunes images so the admin
     can pick a relevant portrait, fanart, or album cover as the per-
     video thumb."""
     mv = db.get(MusicVideo, entity_id)
@@ -218,7 +222,11 @@ def _music_video_candidates(
         notes, "Lidarr",
         lambda: _lidarr_artist_images(artist.lidarr_id, artist.name), out,
     )
-    _run(notes, "TheAudioDB", lambda: _audiodb_artist_images(artist.name), out)
+    _run(
+        notes, "TheAudioDB",
+        lambda: _audiodb_artist_images(artist.name, artist.mbid), out,
+    )
+    _run(notes, "Deezer", lambda: _deezer_artist_images(artist.name), out)
     _run(notes, "iTunes", lambda: _itunes_artist_images(artist.name), out)
     if not _lidarr().configured:
         notes.append(_ARR_MISSING["lidarr"])
@@ -349,11 +357,20 @@ def _itunes_artist_images(name: Optional[str]) -> list[dict[str, Any]]:
     return itunes_source.search_artist(name)
 
 
-def _audiodb_artist_images(name: Optional[str]) -> list[dict[str, Any]]:
+def _audiodb_artist_images(
+    name: Optional[str], mbid: Optional[str] = None,
+) -> list[dict[str, Any]]:
     """TheAudioDB portraits/fanart fallback for an artist."""
     if not settings.audiodb_api_key or not name:
         return []
-    return audiodb_source.search_artist(settings.audiodb_api_key, name)
+    return audiodb_source.search_artist(settings.audiodb_api_key, name, mbid)
+
+
+def _deezer_artist_images(name: Optional[str]) -> list[dict[str, Any]]:
+    """Deezer artist photo (no key needed) for an exact name match."""
+    if not settings.deezer_enabled or not name:
+        return []
+    return deezer_source.search_artist(name)
 
 
 def _ensure_previews(items: list[dict[str, Any]]) -> list[dict[str, Any]]:

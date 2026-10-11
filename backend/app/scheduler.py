@@ -34,6 +34,7 @@ JOB_AUDIO_ANALYSIS = "audio_analysis"
 JOB_UPDATE_CHECK = "update_check"
 JOB_ART_COPIES = "art_copies_backfill"
 JOB_MOVIE_GENRES = "movie_genres_backfill"
+JOB_ARTIST_ART = "artist_art_autofill"
 
 # Once a day, give or take an hour, so a fleet of servers doesn't hit GitHub
 # at the same second. Checking never installs anything.
@@ -50,6 +51,10 @@ MOVIE_GENRES_PAUSE_SEC = 0.25
 # One folder scan at a time in this process: the periodic job, the ad hoc job
 # (Admin, folder save) and a manual start can all be queued together.
 _folder_scan_lock = threading.Lock()
+
+# One artist art auto-fill run at a time, even if a queued run starts while
+# the previous one is still walking artists.
+_artist_art_lock = threading.Lock()
 
 
 def _run_full_sync() -> None:
@@ -101,6 +106,8 @@ def _run_music_videos_scan() -> None:
             log.exception("could not record the end of the music_videos scan")
             db.rollback()
         db.close()
+        # New videos mean new artists; give the ones with no picture one.
+        trigger_artist_art_autofill(delay_sec=ENRICH_DELAY_SEC)
 
 
 def _scan_folders() -> bool:
@@ -132,6 +139,8 @@ def _scan_folders() -> bool:
             log.exception("enrichment catch-up raised")
         # Movies that were matched but enriched before genres were saved.
         trigger_movie_genres_backfill(delay_sec=ENRICH_DELAY_SEC)
+        # Artists the scan just added that have no picture of their own.
+        trigger_artist_art_autofill(delay_sec=ENRICH_DELAY_SEC)
     except Exception as exc:
         log.exception("folder scan raised")
         db.rollback()
@@ -222,6 +231,41 @@ def trigger_movie_genres_backfill(delay_sec: int = 0) -> None:
         _run_movie_genres_backfill,
         id=JOB_MOVIE_GENRES,
         name="fill movie genres from TMDB",
+        max_instances=1,
+        coalesce=True,
+        replace_existing=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=delay_sec),
+    )
+
+
+def _run_artist_art_autofill() -> None:
+    """Give artists that have no thumb art one from TheAudioDB or Deezer.
+    Batched and paced, own session, never raises; a rerun creates nothing new
+    (see artist_art_autofill). Skips quietly if a run is already going."""
+    if not _artist_art_lock.acquire(blocking=False):
+        log.info("artist art auto-fill already running; skipping this one")
+        return
+    try:
+        from app.services.artist_art_autofill import autofill_artist_art
+        with db_session() as db:
+            filled = autofill_artist_art(db)
+        log.info("artist art auto-fill: %d filled", filled)
+    except Exception:
+        log.exception("artist art auto-fill raised")
+    finally:
+        _artist_art_lock.release()
+
+
+def trigger_artist_art_autofill(delay_sec: int = 0) -> None:
+    """Queue the artist art auto-fill. One job id, so queuing it again (after
+    each music scan and music videos scan) never stacks two runs. No-op when
+    the scheduler is not running (CLI)."""
+    if _scheduler is None:
+        return
+    _scheduler.add_job(
+        _run_artist_art_autofill,
+        id=JOB_ARTIST_ART,
+        name="fill missing artist pictures",
         max_instances=1,
         coalesce=True,
         replace_existing=True,
@@ -363,6 +407,17 @@ def start() -> BackgroundScheduler:
         coalesce=True,
         replace_existing=True,
         next_run_time=datetime.now(timezone.utc) + timedelta(seconds=90),
+    )
+    # And once more after boot, after the art-copies and genres jobs. Each
+    # music and music videos scan queues it again (same job id).
+    sched.add_job(
+        _run_artist_art_autofill,
+        id=JOB_ARTIST_ART,
+        name="fill missing artist pictures",
+        max_instances=1,
+        coalesce=True,
+        replace_existing=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=120),
     )
     sched.start()
     _scheduler = sched

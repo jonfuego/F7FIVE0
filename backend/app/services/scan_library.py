@@ -63,7 +63,7 @@ from app import scheduler
 from app.config import settings
 from app.models.art import (
     ArtOverride, ENTITY_ALBUM, ENTITY_ARTIST, ENTITY_MOVIE, ENTITY_SERIES,
-    ROLE_BACKDROP, ROLE_COVER, ROLE_POSTER, ROLE_THUMB,
+    ROLE_BACKDROP, ROLE_COVER, ROLE_POSTER, ROLE_THUMB, SOURCE_ARTIST_AUTO,
 )
 from app.models.media_file import MediaFile, MediaKind, ScanState
 from app.models.movie import Movie
@@ -81,9 +81,12 @@ SOURCE_TMDB = "tmdb"
 # A still grabbed from the video itself (music videos with no other art).
 # The weakest art there is: any scanner source replaces it.
 SOURCE_FRAME = "frame"
+# SOURCE_ARTIST_AUTO (an artist picture the auto-fill job found online, see
+# services/artist_art_autofill.py) is also weaker than anything the scanner
+# finds on disk, so a sidecar image replaces it.
 # Art rows this scanner may refresh. Anything else (upload, url, *arr,
 # fanart, musicbrainz) belongs to someone else and is left alone.
-_SCANNER_SOURCES = frozenset({SOURCE_LOCAL, SOURCE_TMDB, SOURCE_FRAME})
+_SCANNER_SOURCES = frozenset({SOURCE_LOCAL, SOURCE_TMDB, SOURCE_FRAME, SOURCE_ARTIST_AUTO})
 
 VIDEO_EXTS = {"mkv", "mp4", "m4v", "avi", "mov", "webm", "ts", "m2ts", "wmv", "mpg", "mpeg"}
 AUDIO_EXTS = {"flac", "mp3", "m4a", "aac", "ogg", "oga", "opus", "wav", "wma", "alac", "aiff", "aif", "ape", "wv"}

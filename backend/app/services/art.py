@@ -31,6 +31,7 @@ from app.config import PROJECT_URL, settings
 from app.models.art import (
     ArtOverride, ENTITY_ALBUM, ENTITY_ARTIST, ENTITY_MIX, ENTITY_MOVIE, ENTITY_MUSIC_VIDEO,
     ENTITY_SERIES, ROLE_BACKDROP, ROLE_COVER, ROLE_POSTER, ROLE_THUMB,
+    SOURCE_ARTIST_AUTO,
 )
 
 
@@ -49,6 +50,11 @@ SYSTEM_USER_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 # an admin (which we never clobber) or from a prior sync (which we may
 # refresh when the URL changes).
 _ARR_SOURCE_KINDS: frozenset[str] = frozenset({"lidarr", "radarr", "sonarr"})
+
+# Weak, automatic art that a sync may replace like its own earlier write: an
+# artist picture the auto-fill job found online. Everything else that is not
+# an *arr row is admin or scanner art and stays.
+_AUTO_SOURCE_KINDS: frozenset[str] = frozenset({SOURCE_ARTIST_AUTO})
 
 
 # Accepted image formats after Pillow decode. Keys are Pillow's format
@@ -329,17 +335,9 @@ def save_upload_bytes(
     return row
 
 
-def fetch_and_save_url(
-    db: Session,
-    *,
-    entity_kind: str,
-    entity_id: uuid.UUID,
-    role: str,
-    url: str,
-    set_by_user_id: uuid.UUID,
-    source_kind: str = "url",
-) -> ArtOverride:
-    """Download an image over HTTP(S) and persist it.
+def fetch_url_bytes(url: str) -> bytes:
+    """Download an image over HTTP(S) and return the raw bytes (not yet
+    validated as an image; `save_upload_bytes` does that).
 
     The body is streamed and aborted the moment it crosses the 10 MB cap, so
     a hostile or fat URL (or a lying Content-Length) can't pull unbounded
@@ -406,12 +404,27 @@ def fetch_and_save_url(
             status_code=502,
         )
 
+    return bytes(body)
+
+
+def fetch_and_save_url(
+    db: Session,
+    *,
+    entity_kind: str,
+    entity_id: uuid.UUID,
+    role: str,
+    url: str,
+    set_by_user_id: uuid.UUID,
+    source_kind: str = "url",
+) -> ArtOverride:
+    """Download an image over HTTP(S) (see `fetch_url_bytes`) and persist it."""
+    data = fetch_url_bytes(url)
     return save_upload_bytes(
         db,
         entity_kind=entity_kind,
         entity_id=entity_id,
         role=role,
-        data=bytes(body),
+        data=data,
         set_by_user_id=set_by_user_id,
         source_kind=source_kind,
         source_ref=url,
@@ -479,7 +492,9 @@ def download_art_on_sync(
     Skip rules:
         - No usable URL: return None.
         - Existing override with a non-*arr source_kind (upload / url /
-          fanart / musicbrainz / etc.): admin wins, never clobber.
+          fanart / musicbrainz / etc.): admin wins, never clobber. The one
+          exception is `artist_auto` (an online guess by the auto-fill job):
+          the *arr's own image replaces it.
         - Existing override with matching source_ref: already downloaded
           the same URL, nothing to do.
     """
@@ -492,7 +507,7 @@ def download_art_on_sync(
     if existing is not None:
         # Admin-set overrides always win. Only refresh when the existing
         # row was previously written by an *arr sync.
-        if existing.source_kind not in _ARR_SOURCE_KINDS:
+        if existing.source_kind not in _ARR_SOURCE_KINDS | _AUTO_SOURCE_KINDS:
             return None
         if existing.source_ref == url:
             return existing

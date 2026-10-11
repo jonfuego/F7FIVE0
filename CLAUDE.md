@@ -159,10 +159,38 @@ INSTALL.md for the operator view.
 - Fix Match and art search go beyond *arr: the admin lookup
   (`api/admin.py`) searches MusicBrainz (artist, album) and TMDB (movie, series
   via `tmdb_key.get()`) with *arr optional, and `services/art_search.py` uses
-  `services/art_sources` (TMDB, AudioDB, iTunes) plus Cover Art Archive for
-  albums. Each candidate carries a source tag; one source failing still returns
-  the others. A TMDB series match gets a TMDB-backed refresh so applying it does
-  something without Sonarr.
+  `services/art_sources` (TMDB, AudioDB, Deezer, iTunes) plus Cover Art Archive
+  for albums. Each candidate carries a source tag and a small `preview_url`; one
+  source failing still returns the others (a source that cannot answer becomes a
+  "did not answer" note, never silence). A TMDB series match gets a TMDB-backed
+  refresh so applying it does something without Sonarr.
+  Artist and music video artist pictures work with no Lidarr: Deezer
+  (`art_sources/deezer.py`, `api.deezer.com/search/artist`, no key, switch
+  `DEEZER_ENABLED`) is the keyless artist image source. A hit must equal the
+  library name after `art_sources/names.py::match_key` folding (accents, case,
+  punctuation, "&" vs "and"; a leading "the" only when nothing matches without
+  it), must have a real picture, and the most followed one comes first. TheAudioDB
+  uses the free key `123`: the old key `2` is retired and TheAudioDB answers it
+  with HTTP 404, which the adapter once swallowed as "no artist"; `audiodb.effective_key`
+  still maps a `2` left in an old `.env` to `123`, an artist with a
+  MusicBrainz id is looked up by `artist-mb.php`, and any HTTP failure raises
+  `AudioDBError`. Never read `settings.audiodb_api_key` for a request without
+  `effective_key` (the adapter does it).
+- Artist art auto-fill (`services/artist_art_autofill.py`): an artist with no
+  `artist` / `thumb` art row gets a picture from TheAudioDB (MBID or exact name)
+  then Deezer, saved with `source_kind` `artist_auto`, which only this job
+  writes. It is the weakest art there is, like the music-video `frame` grab: it
+  never overwrites any existing art row (checked again after the download), and
+  every other writer replaces it (the folder scan's sidecar import via
+  `scan_library._SCANNER_SOURCES`, the *arr sync via `art._AUTO_SOURCE_KINDS`,
+  and every admin upload / URL / search pick). Background job `artist_art_autofill`
+  (scheduler): once after boot and queued after every folder scan and music videos
+  scan (one job id, so it never stacks; a lock skips a run that overlaps). It
+  walks artists in id order in batches, commits per artist, waits
+  `ARTIST_ART_AUTOFILL_PAUSE_SEC` (2) after each artist it asked about, remembers
+  artists nobody had a picture for in `app_settings` `artist_art_autofill_misses`
+  for 30 days (a service error is not remembered, and 5 in a row stop the run),
+  and a rerun creates nothing new. Off with `ARTIST_ART_AUTOFILL_ENABLED=false`.
 - Library folders: several per library (`app/services/library_folders.py`).
   Source is the `libraries` table once Admin > Library folders saves (then for
   every library), else `LIBRARY_ROOT_*` split on `;`. TV and music merge
@@ -200,7 +228,8 @@ INSTALL.md for the operator view.
   record (message, arguments and traceback text). A new entry point must call
   `install()`; never log a URL or request that carries a key some other way.
 - Scanner-imported art uses `source_kind` `local` or `tmdb`; admin-set art
-  (`upload`, `url`, ...) is never overwritten.
+  (`upload`, `url`, ...) is never overwritten. Weak automatic art (`frame`,
+  `artist_auto`) is replaced by the scanner's own art.
 - Art caching and size copies: every art save goes through
   `services/art.py::save_upload_bytes`, which also writes 300 px and 600 px
   WebP copies (`write_art_copies`). `GET /api/art/...` takes `w=300` or `w=600`
@@ -225,7 +254,8 @@ INSTALL.md for the operator view.
   grabs one frame with ffmpeg (about 10 percent in) and saves it as
   `music_video` / `thumb` with `source_kind` `frame`. It runs in the scan, never
   in the stream worker. Any other art replaces a frame grab and is never
-  replaced by one.
+  replaced by one. Artists get the same treatment from the artist art auto-fill
+  job (`source_kind` `artist_auto`, see the Fix Match and art search bullets).
 - Migrations go through Alembic. Keep revision ids stable: existing installs
   upgrade through them. Register new models in `app/models/__init__.py`.
 - Config comes from `.env` at the install root via pydantic-settings. New

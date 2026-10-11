@@ -120,11 +120,20 @@ class Settings(BaseSettings):
     # fallbacks when the *arr stack returns no usable candidates.
     # iTunes Search API needs no key. TMDB requires a free v3 API key;
     # leaving it blank disables the TMDB source cleanly. TheAudioDB
-    # accepts the public test key "2" for low-volume personal use; bump
-    # to a paid key (Patreon supporters get one) if rate-limited.
+    # accepts its free public key "123" for low-volume personal use (the old
+    # test key "2" is retired and answers 404; it is mapped to "123"); bump
+    # to a paid key (Patreon supporters get one) if rate-limited. Deezer
+    # artist photos need no key; false turns that source off, and with it the
+    # artist art auto-fill job's Deezer step.
     itunes_enabled: bool = True
     tmdb_api_key: str = ""
-    audiodb_api_key: str = "2"
+    audiodb_api_key: str = "123"
+    deezer_enabled: bool = True
+    # Artist art auto-fill (artists with no thumb get one from TheAudioDB or
+    # Deezer in the background). Off by turning this false. The pause is the
+    # gap in seconds between artists, so the two public services stay happy.
+    artist_art_autofill_enabled: bool = True
+    artist_art_autofill_pause_sec: float = 2.0
 
     # Transcoder
     ffmpeg_bin: str = "ffmpeg"
