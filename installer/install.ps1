@@ -777,11 +777,15 @@ $want = [ordered]@{
     # backend only on that trusted path; a direct LAN browser can't spoof an IP.
     # remote-access.ps1 reads this back and writes header_up into the Caddyfile.
     "TRUSTED_PROXY_SECRET"    = New-Secret 48
+    # Shared token the Radarr / Sonarr / Lidarr webhooks send (Admin shows it to
+    # copy). 32 random bytes as URL-safe text, 43 characters. Made when .env has
+    # none or a blank one; an existing value is never replaced.
+    "ARR_WEBHOOK_SECRET"      = New-Secret 32
 }
 # Ports are the exception: the services are registered with the ports chosen
 # above, so .env must match them even when they changed on this run.
 $portKeys = @{ "API_PORT" = "$ApiPort"; "STREAM_PORT" = "$StreamPort"; "WEB_PORT" = "$WebPort" }
-$added = Merge-EnvFile $EnvFile $want $portKeys
+$added = Merge-EnvFile $EnvFile $want $portKeys @("ARR_WEBHOOK_SECRET")
 # The services read .env, so their account (when not SYSTEM) gets read access.
 Set-PrivateAcl $EnvFile @($svcSid)
 Ok ("{0} ({1} new setting(s))" -f $EnvFile, $added)
