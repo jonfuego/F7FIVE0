@@ -1287,8 +1287,13 @@ def search_library(
     limit: int = Query(25, ge=1, le=100),
     include_pending: bool = Query(False),
     deep: bool = Query(False),
+    include_artists: bool = Query(False),
 ) -> list[SearchResultOut]:
     """Case-insensitive substring search across movies, series, and albums.
+
+    `include_artists=true` also returns artist rows (kind "artist", listed
+    first so the result cap never drops them). It is opt-in so older clients,
+    which would not know what to do with an "artist" row, see no change.
 
     For Phase 4 we only index the parent titles (plus artist name for
     albums). Episode and track titles are intentionally excluded: most
@@ -1314,6 +1319,47 @@ def search_library(
         ]
 
     out: list[SearchResultOut] = []
+
+    if include_artists and kind is None:
+        # Same match rule as the other kinds: every term in the name, lower-
+        # cased LIKE. Same visibility rule as GET /artists: the artist needs
+        # an album, and (unless an admin asked for pending) a ready track.
+        artist_stmt = (
+            select(Artist)
+            .where(*like_clauses(Artist.name))
+            .order_by(Artist.name)
+            .limit(limit)
+        )
+        if skip_filter:
+            artist_stmt = artist_stmt.where(
+                exists(select(Album.id).where(Album.artist_id == Artist.id))
+            )
+        else:
+            TrackAlbum = aliased(Album)
+            artist_stmt = artist_stmt.where(
+                exists(
+                    select(Track.id)
+                    .join(TrackAlbum, TrackAlbum.id == Track.album_id)
+                    .join(
+                        MediaFile,
+                        (MediaFile.kind == MediaKind.track)
+                        & (MediaFile.ref_id == Track.id),
+                    )
+                    .where(TrackAlbum.artist_id == Artist.id)
+                    .where(MediaFile.scan_state == ScanState.ready)
+                )
+            )
+        artist_rows = list(db.scalars(artist_stmt))
+        artist_thumbs = resolve_art_batch(
+            db, entity_kind=ENTITY_ARTIST,
+            entity_ids=[ar.id for ar in artist_rows], role=ROLE_THUMB,
+        )
+        for ar in artist_rows:
+            out.append(SearchResultOut(
+                kind="artist", id=ar.id,
+                title=_effective_name(ar) or ar.name,
+                poster_path=artist_thumbs.get(ar.id),
+            ))
 
     if kind in (None, "movie"):
         clauses = like_clauses(Movie.title)

@@ -535,7 +535,7 @@ class ContinueWatchingItemOut(BaseModel):
     UI needing another round trip.
     """
 
-    kind: str  # "movie" | "series" | "album" | "music_video_release"
+    kind: str  # "movie" | "series" | "album" | "artist" (artist only with include_artists) | "music_video_release"
     id: uuid.UUID  # parent id (movie/series/album/music_video_release)
     media_file_id: uuid.UUID
     title: str
