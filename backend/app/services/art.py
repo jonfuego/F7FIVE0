@@ -29,7 +29,7 @@ from sqlalchemy.orm import Session
 
 from app.config import PROJECT_URL, settings
 from app.models.art import (
-    ArtOverride, ENTITY_ALBUM, ENTITY_ARTIST, ENTITY_MOVIE, ENTITY_MUSIC_VIDEO,
+    ArtOverride, ENTITY_ALBUM, ENTITY_ARTIST, ENTITY_MIX, ENTITY_MOVIE, ENTITY_MUSIC_VIDEO,
     ENTITY_SERIES, ROLE_BACKDROP, ROLE_COVER, ROLE_POSTER, ROLE_THUMB,
 )
 
@@ -120,7 +120,52 @@ _VALID_ROLES: dict[str, set[str]] = {
     ENTITY_MUSIC_VIDEO: {ROLE_THUMB},
     ENTITY_MOVIE: {ROLE_POSTER, ROLE_BACKDROP},
     ENTITY_SERIES: {ROLE_POSTER, ROLE_BACKDROP},
+    ENTITY_MIX: {ROLE_COVER},
 }
+
+# Mixes have no database row, so their art id is derived: uuid5 of the mix key
+# under a fixed namespace. Only these four home-page mixes can carry a picture.
+MIX_KEYS: tuple[str, ...] = (
+    "recently-added", "most-played", "continue-listening", "random",
+)
+_MIX_NAMESPACE = uuid.UUID("5d0f0c52-7b0e-4c6a-9a43-2f7f5e0c1a77")
+MIX_IDS: dict[str, uuid.UUID] = {
+    key: uuid.uuid5(_MIX_NAMESPACE, key) for key in MIX_KEYS
+}
+_MIX_KEY_BY_ID: dict[uuid.UUID, str] = {v: k for k, v in MIX_IDS.items()}
+
+
+def parse_entity_id(entity_kind: str, raw: str) -> uuid.UUID:
+    """Turn the id segment of an art URL into a UUID.
+
+    For kind `mix` the segment is the mix KEY (or its derived uuid); anything
+    else is a 404. For every other kind it must be a UUID (422 otherwise,
+    matching what FastAPI did when the path param was typed).
+    """
+    if entity_kind == ENTITY_MIX:
+        if raw in MIX_IDS:
+            return MIX_IDS[raw]
+        try:
+            candidate = uuid.UUID(raw)
+        except ValueError:
+            candidate = None
+        if candidate in _MIX_KEY_BY_ID:
+            return candidate
+        raise ArtValidationError(f"unknown mix: {raw}", status_code=404)
+    try:
+        return uuid.UUID(raw)
+    except ValueError:
+        raise ArtValidationError("invalid entity id", status_code=422)
+
+
+def mix_art_urls(db: Session) -> dict[str, Optional[str]]:
+    """`{mix key: art URL or None}` for the four mixes. A URL means an admin
+    set a picture (cache key `?v=` like every other art URL); None means the
+    web should use its static default."""
+    found = resolve_art_batch(
+        db, entity_kind=ENTITY_MIX, entity_ids=MIX_IDS.values(), role=ROLE_COVER,
+    )
+    return {key: found.get(eid) for key, eid in MIX_IDS.items()}
 
 
 class ArtValidationError(ValueError):

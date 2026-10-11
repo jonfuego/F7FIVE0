@@ -20,8 +20,8 @@ import { Icon } from "@/components/Icon";
 import { X } from "lucide-react";
 import { SourceCallouts, SourceTag } from "@/components/SourceTag";
 
-export type ArtKind = "artist" | "movie" | "series" | "music_video";
-export type ArtRole = "thumb" | "poster" | "backdrop";
+export type ArtKind = "artist" | "movie" | "series" | "music_video" | "mix";
+export type ArtRole = "thumb" | "poster" | "backdrop" | "cover";
 
 type Props = {
   open: boolean;
@@ -98,6 +98,8 @@ export function ArtOverrideModal({
     if (fileRef.current) fileRef.current.value = "";
   }, [open, entityKind, entityId, role]);
 
+  // Mix pictures fall back to a built-in default rather than "no override".
+  const removeLabel = entityKind === "mix" ? "Reset to default" : "Remove override";
   const basePath = `/api/admin/art/${entityKind}/${entityId}/${role}`;
 
   // Tab-mount fetch: the spec is explicit that we don't debounce on
@@ -284,9 +286,11 @@ export function ArtOverrideModal({
           <TabButton active={tab === "url"} onClick={() => setTab("url")}>
             Paste URL
           </TabButton>
-          <TabButton active={tab === "search"} onClick={() => setTab("search")}>
-            Search
-          </TabButton>
+          {entityKind === "mix" ? null : (
+            <TabButton active={tab === "search"} onClick={() => setTab("search")}>
+              Search
+            </TabButton>
+          )}
         </div>
 
         <div className="px-5 py-4">
@@ -309,7 +313,7 @@ export function ArtOverrideModal({
                     disabled={busy}
                     className="rounded px-3 py-1.5 text-sm text-red-300 hover:bg-red-950/40 disabled:opacity-50"
                   >
-                    Remove override
+                    {removeLabel}
                   </button>
                 ) : null}
                 <button
@@ -342,7 +346,7 @@ export function ArtOverrideModal({
                     disabled={busy}
                     className="rounded px-3 py-1.5 text-sm text-red-300 hover:bg-red-950/40 disabled:opacity-50"
                   >
-                    Remove override
+                    {removeLabel}
                   </button>
                 ) : null}
                 <button
@@ -365,6 +369,7 @@ export function ArtOverrideModal({
               hasOverride={Boolean(hasOverride)}
               onPick={handlePickCandidate}
               onRemove={handleRemove}
+              removeLabel={removeLabel}
             />
           )}
 
@@ -388,6 +393,7 @@ function SearchPanel({
   hasOverride,
   onPick,
   onRemove,
+  removeLabel,
 }: {
   candidates: Candidate[] | null;
   notes: string[];
@@ -397,6 +403,7 @@ function SearchPanel({
   hasOverride: boolean;
   onPick: (c: Candidate) => void;
   onRemove: () => void;
+  removeLabel: string;
 }) {
   return (
     <div className="space-y-3">
@@ -460,7 +467,7 @@ function SearchPanel({
             disabled={busy}
             className="rounded px-3 py-1.5 text-sm text-red-300 hover:bg-red-950/40 disabled:opacity-50"
           >
-            Remove override
+            {removeLabel}
           </button>
         </div>
       ) : null}

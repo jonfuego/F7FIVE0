@@ -119,7 +119,7 @@ admin_router = APIRouter()
 )
 async def upload_art(
     entity_kind: str,
-    entity_id: uuid.UUID,
+    entity_id: str,
     role: str,
     request: Request,
     admin: Annotated[User, Depends(require_admin)],
@@ -129,6 +129,7 @@ async def upload_art(
     """Upload an image and pin it as the override for this entity+role."""
     data = await file.read()
     try:
+        entity_id = art_service.parse_entity_id(entity_kind, entity_id)
         row = art_service.save_upload_bytes(
             db,
             entity_kind=entity_kind,
@@ -155,7 +156,7 @@ async def upload_art(
 )
 def set_art_from_url(
     entity_kind: str,
-    entity_id: uuid.UUID,
+    entity_id: str,
     role: str,
     body: ArtFromUrlRequest,
     request: Request,
@@ -164,6 +165,7 @@ def set_art_from_url(
 ) -> ArtOverrideOut:
     """Fetch an image from an arbitrary URL and pin it."""
     try:
+        entity_id = art_service.parse_entity_id(entity_kind, entity_id)
         row = art_service.fetch_and_save_url(
             db,
             entity_kind=entity_kind,
@@ -187,7 +189,7 @@ def set_art_from_url(
 )
 def clear_art(
     entity_kind: str,
-    entity_id: uuid.UUID,
+    entity_id: str,
     role: str,
     request: Request,
     admin: Annotated[User, Depends(require_admin)],
@@ -196,6 +198,7 @@ def clear_art(
     """Drop the override. Native column value re-emerges on next read."""
     try:
         art_service.validate_kind_role(entity_kind, role)
+        entity_id = art_service.parse_entity_id(entity_kind, entity_id)
     except art_service.ArtValidationError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc))
 
@@ -258,7 +261,7 @@ def search_art(
 )
 def set_art_from_search(
     entity_kind: str,
-    entity_id: uuid.UUID,
+    entity_id: str,
     role: str,
     body: ArtFromSearchRequest,
     request: Request,
@@ -276,6 +279,7 @@ def set_art_from_search(
     """
     try:
         art_service.validate_kind_role(entity_kind, role)
+        entity_id = art_service.parse_entity_id(entity_kind, entity_id)
     except art_service.ArtValidationError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc))
 
@@ -346,6 +350,17 @@ def optional_current_user(
     return current_user(token=token, db=db)
 
 
+@read_router.get("/mixes")
+def mix_art(
+    _user: Annotated[User, Depends(current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict[str, Optional[str]]:
+    """`{mix key: art URL or null}` for the four home mixes. A URL (with the
+    usual `?v=` cache key) means an admin set a picture; null means the web
+    shows its static default from /mix/<key>.svg."""
+    return art_service.mix_art_urls(db)
+
+
 @read_router.get("/{entity_kind}/{entity_id}/{role}")
 def serve_art(
     entity_kind: str,
@@ -387,6 +402,8 @@ def serve_art(
             raise HTTPException(status_code=403, detail="session_revoked")
     try:
         art_service.validate_kind_role(entity_kind, role)
+        if entity_kind == "mix" and entity_id not in art_service.MIX_IDS.values():
+            raise art_service.ArtValidationError("unknown mix", status_code=404)
     except art_service.ArtValidationError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc))
 
