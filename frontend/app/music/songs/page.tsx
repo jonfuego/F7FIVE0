@@ -34,8 +34,7 @@ function SongsShell() {
   return (
     <AuthShell>
       <h1 className="page-title">Music</h1>
-      <div className="filter-bar">
-        <span className="lbl">Browse</span>
+      <div className="filter-bar" role="group" aria-label="Browse">
         <Link href="/music" className="chip">Artists</Link>
         <Link href="/music/albums" className="chip">Albums</Link>
         <span className="chip on">Songs</span>
@@ -109,8 +108,7 @@ function SongsPageInner() {
     <AuthShell>
       <h1 className="page-title">Music</h1>
 
-      <div className="filter-bar">
-        <span className="lbl">Browse</span>
+      <div className="filter-bar" role="group" aria-label="Browse">
         <Link href="/music" className="chip" onClick={() => setBrowse("artists")}>Artists</Link>
         <Link href="/music/albums" className="chip" onClick={() => setBrowse("albums")}>Albums</Link>
         <span className="chip on">Songs</span>

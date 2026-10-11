@@ -116,8 +116,7 @@ export default function SeriesPage() {
     <AuthShell>
       <h1 className="page-title">Television</h1>
 
-      <div className="filter-bar">
-        <span className="lbl">Status</span>
+      <div className="filter-bar" role="group" aria-label="Status">
         {STATUS_FILTERS.map((f) => (
           <button
             key={f}

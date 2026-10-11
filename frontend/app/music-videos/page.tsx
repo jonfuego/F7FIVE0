@@ -108,8 +108,7 @@ export default function MusicVideosPage() {
     <AuthShell>
       <h1 className="page-title">Music Videos</h1>
 
-      <div className="filter-bar">
-        <span className="lbl">Sort</span>
+      <div className="filter-bar" role="group" aria-label="Sort">
         <button
           type="button"
           className={`chip ${mvSort === "name" ? "on" : ""}`}

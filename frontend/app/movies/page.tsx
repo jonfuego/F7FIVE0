@@ -151,8 +151,7 @@ export default function MoviesPage() {
     <AuthShell>
       <h1 className="page-title">Movies</h1>
 
-      <div className="filter-bar">
-        <span className="lbl">Genre</span>
+      <div className="filter-bar" role="group" aria-label="Genre">
         {genres.map((g) => (
           <button
             key={g}
@@ -164,8 +163,7 @@ export default function MoviesPage() {
           </button>
         ))}
       </div>
-      <div className="filter-bar">
-        <span className="lbl">Sort</span>
+      <div className="filter-bar" role="group" aria-label="Sort">
         {MOVIE_SORTS.map((o) => (
           <button
             key={o.key}
