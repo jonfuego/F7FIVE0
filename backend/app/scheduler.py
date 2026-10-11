@@ -35,6 +35,7 @@ JOB_UPDATE_CHECK = "update_check"
 JOB_ART_COPIES = "art_copies_backfill"
 JOB_MOVIE_GENRES = "movie_genres_backfill"
 JOB_ARTIST_ART = "artist_art_autofill"
+JOB_ARTIST_BIOS = "artist_bios_backfill"
 
 # Once a day, give or take an hour, so a fleet of servers doesn't hit GitHub
 # at the same second. Checking never installs anything.
@@ -47,6 +48,9 @@ ENRICH_DELAY_SEC = 5
 
 # Gap after each movie the genres backfill has to look up at TMDB.
 MOVIE_GENRES_PAUSE_SEC = 0.25
+
+# Gap after each artist the bio backfill asks Wikidata and Wikipedia about.
+ARTIST_BIOS_PAUSE_SEC = 0.5
 
 # One folder scan at a time in this process: the periodic job, the ad hoc job
 # (Admin, folder save) and a manual start can all be queued together.
@@ -141,6 +145,8 @@ def _scan_folders() -> bool:
         trigger_movie_genres_backfill(delay_sec=ENRICH_DELAY_SEC)
         # Artists the scan just added that have no picture of their own.
         trigger_artist_art_autofill(delay_sec=ENRICH_DELAY_SEC)
+        # Artists with a saved Wikipedia or Wikidata link and no bio yet.
+        trigger_artist_bios_backfill(delay_sec=ENRICH_DELAY_SEC)
     except Exception as exc:
         log.exception("folder scan raised")
         db.rollback()
@@ -231,6 +237,37 @@ def trigger_movie_genres_backfill(delay_sec: int = 0) -> None:
         _run_movie_genres_backfill,
         id=JOB_MOVIE_GENRES,
         name="fill movie genres from TMDB",
+        max_instances=1,
+        coalesce=True,
+        replace_existing=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=delay_sec),
+    )
+
+
+def _run_artist_bios_backfill() -> None:
+    """Fill bios for artists that have a saved Wikipedia or Wikidata link and
+    no bio. Batched and paced, own session, never raises; a failed lookup is
+    left for a later run and a rerun with nothing new changes nothing (see
+    runner.backfill_artist_bios)."""
+    try:
+        from app.services.metadata.runner import backfill_artist_bios
+        with db_session() as db:
+            filled = backfill_artist_bios(db, pause_sec=ARTIST_BIOS_PAUSE_SEC)
+        log.info("artist bios backfill: %d filled", filled)
+    except Exception:
+        log.exception("artist bios backfill raised")
+
+
+def trigger_artist_bios_backfill(delay_sec: int = 0) -> None:
+    """Queue the artist bios backfill. One job id, so queuing it again (after
+    each folder scan) never stacks two runs. No-op when the scheduler is not
+    running (CLI)."""
+    if _scheduler is None:
+        return
+    _scheduler.add_job(
+        _run_artist_bios_backfill,
+        id=JOB_ARTIST_BIOS,
+        name="fill artist bios from Wikipedia",
         max_instances=1,
         coalesce=True,
         replace_existing=True,
@@ -418,6 +455,17 @@ def start() -> BackgroundScheduler:
         coalesce=True,
         replace_existing=True,
         next_run_time=datetime.now(timezone.utc) + timedelta(seconds=120),
+    )
+    # Once after boot, after the other backfills. Each folder scan queues it
+    # again (same job id, so it never stacks).
+    sched.add_job(
+        _run_artist_bios_backfill,
+        id=JOB_ARTIST_BIOS,
+        name="fill artist bios from Wikipedia",
+        max_instances=1,
+        coalesce=True,
+        replace_existing=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=150),
     )
     sched.start()
     _scheduler = sched

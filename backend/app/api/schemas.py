@@ -271,6 +271,9 @@ class AlbumDetailOut(AlbumOut):
     # Album genre names (Lidarr / MusicBrainz); empty when none were saved.
     # The Home hero shows them in its facts line.
     genres: list[str] = Field(default_factory=list)
+    # One or two sentences of the artist's bio for the Home hero; null when
+    # the artist has none (see services/bio_excerpt).
+    artist_bio_excerpt: Optional[str] = None
     label: Optional[str] = None
     disambiguation: Optional[str] = None
     mb_rating: Optional[float] = None

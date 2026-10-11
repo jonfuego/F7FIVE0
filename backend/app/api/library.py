@@ -44,6 +44,7 @@ from app.models.track_play import TrackPlay
 from app.models.tv import Episode, Series
 from app.models.user import User
 from app.services import scan_status
+from app.services.bio_excerpt import bio_excerpt
 from app.services.art import resolve_art, resolve_art_batch
 
 
@@ -520,6 +521,7 @@ def get_album(
         "metadata_status": album.metadata_status,
         "secondary_types": album.secondary_types or [],
         "genres": [g for g in (album.genres or []) if isinstance(g, str)],
+        "artist_bio_excerpt": bio_excerpt(artist.bio_text if artist is not None else None),
         "label": album.label,
         "disambiguation": album.disambiguation,
         "mb_rating": merge_overrides(album)["rating"],

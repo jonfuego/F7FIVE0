@@ -415,6 +415,13 @@ button { border: 0; background: transparent; color: inherit; font: inherit; curs
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+/* Album pick: a short artist bio (at most about 220 characters) from the
+   detail call, a notch smaller than the synopsis. */
+.hero .content .band .blurb.bio-excerpt {
+  font-size: 15px;
+  -webkit-line-clamp: 4;
+  line-clamp: 4;
+}
 @media (max-width: 720px) {
   .hero .content { padding: 24px 16px 32px; }
   .hero .content .band { padding: 18px 16px; }
@@ -1593,6 +1600,67 @@ button { border: 0; background: transparent; color: inherit; font: inherit; curs
   line-height: 1.6;
   color: var(--ink-2);
   max-width: 70ch;
+}
+
+/* Artist page hero: name and buttons on the left, the bio on the right.
+   Below the hero content at phone width (same breakpoint as .detail > .body). */
+.detail .info .artist-head.has-bio {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 400px);
+  gap: 24px 48px;
+  align-items: start;
+}
+.detail .info .artist-head-main { min-width: 0; }
+.detail .info .artist-bio {
+  padding-left: 28px;
+  border-left: 1px solid var(--line);
+}
+.detail .info .artist-bio h4 {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--hive-text);
+  margin: 0 0 12px;
+}
+.detail .info .artist-bio .bio-text {
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--ink-2);
+  margin: 0 0 8px;
+  white-space: pre-line;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 6;
+  overflow: hidden;
+}
+.detail .info .artist-bio .bio-text.open {
+  display: block;
+  overflow: visible;
+}
+.detail .info .artist-bio .bio-toggle {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--hive-text);
+  background: transparent;
+  border: 0;
+  padding: 4px 0;
+  cursor: pointer;
+}
+.detail .info .artist-bio .bio-source {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--ink-3);
+  margin-top: 8px;
+}
+@media (max-width: 900px) {
+  .detail .info .artist-head.has-bio { grid-template-columns: 1fr; gap: 8px; }
+  .detail .info .artist-bio { padding-left: 0; border-left: 0; }
+  .detail .info .artist-bio .bio-text { -webkit-line-clamp: 5; }
 }
 
 @media (max-width: 900px) {

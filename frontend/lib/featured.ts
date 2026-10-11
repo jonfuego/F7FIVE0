@@ -84,9 +84,25 @@ export type HeroFactsSource = {
   tmdb_rating?: number | null;
   episodes?: ReadonlyArray<{ season_number: number }> | null;
   tracks?: ReadonlyArray<{ duration_sec?: number | null }> | null;
+  // Albums only: one or two sentences of the artist's bio, cut on the server
+  // (backend/app/services/bio_excerpt.py). Null when the artist has none.
+  artist_bio_excerpt?: string | null;
 };
 
 const MAX_GENRES = 3;
+
+/**
+ * The artist bio excerpt the hero shows under an album pick, or null: other
+ * kinds never show one, and an artist with no bio (or a blank one) has none.
+ */
+export function heroBioExcerpt(
+  kind: FeaturedCandidate["kind"],
+  src: HeroFactsSource | null | undefined,
+): string | null {
+  if (kind !== "album") return null;
+  const text = src?.artist_bio_excerpt;
+  return typeof text === "string" && text.trim() ? text.trim() : null;
+}
 
 function plural(n: number, one: string, many: string): string {
   return `${n} ${n === 1 ? one : many}`;

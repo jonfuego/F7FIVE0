@@ -124,6 +124,9 @@ export type AlbumDetail = Album & {
   tracks: Track[];
   secondary_types: string[];
   genres?: string[];
+  // One or two sentences of the artist's bio for the Home hero; null or
+  // missing when the artist has none.
+  artist_bio_excerpt?: string | null;
   label: string | null;
   disambiguation: string | null;
   mb_rating: number | null;
