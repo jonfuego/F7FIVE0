@@ -1,6 +1,7 @@
 // Shared per-tile album context menu. Lives over an album cover as a
 // small kebab button that opens a four-item menu acting on the album:
-// Play now, Play next, Shuffle, Add all to queue. Fetches album detail
+// Play now, Play next, Shuffle, Add all to queue, plus Edit... for an admin
+// when the page passes `onEdit`. Fetches album detail
 // on demand and maps it through albumToQueueItems before handing the
 // block to the queue. Used by both /music/albums and the artist page
 // discography grid so the menu markup lives in one place.
@@ -16,9 +17,12 @@ import type { AlbumDetail } from "@/lib/types";
 export function AlbumTileMenu({
   albumId,
   albumTitle,
+  onEdit,
 }: {
   albumId: string;
   albumTitle: string;
+  /** Admin only: opens the Edit modal. Omit for members (no Edit item). */
+  onEdit?: () => void;
 }) {
   const { playAlbum, playNextBlock, addToQueue } = useQueue();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -102,6 +106,21 @@ export function AlbumTileMenu({
           <button type="button" role="menuitem" onClick={onAddAll} style={tileMenuItemStyle}>
             Add all to queue
           </button>
+          {onEdit ? (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setMenuOpen(false);
+                onEdit();
+              }}
+              style={tileMenuItemStyle}
+            >
+              Edit...
+            </button>
+          ) : null}
         </div>
       ) : null}
     </div>
@@ -134,7 +153,8 @@ const tileMenuStyle: CSSProperties = {
   top: "calc(100% + 4px)",
   right: 0,
   minWidth: 170,
-  background: "var(--bg-2)",
+  // Opaque: --bg-2 is not a design token, so the menu was see-through.
+  background: "var(--surface-2, #181818)",
   border: "1px solid var(--line)",
   borderRadius: 4,
   fontFamily: "var(--grotesk)",

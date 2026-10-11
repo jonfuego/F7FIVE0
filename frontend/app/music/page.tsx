@@ -280,6 +280,21 @@ function ArtistTile({
               <button type="button" role="menuitem" onClick={onArtistRadio} style={artistMenuItemStyle}>
                 Artist radio
               </button>
+              {isAdmin && onEdit ? (
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setMenuOpen(false);
+                    onEdit();
+                  }}
+                  style={artistMenuItemStyle}
+                >
+                  Edit...
+                </button>
+              ) : null}
               {isAdmin ? (
                 <button
                   type="button"
@@ -298,20 +313,6 @@ function ArtistTile({
             </div>
           ) : null}
         </div>
-        {isAdmin && onEdit ? (
-          <button
-            type="button"
-            className="admin-edit"
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              onEdit();
-            }}
-            aria-label={`Edit ${artist.name}`}
-          >
-            Edit
-          </button>
-        ) : null}
       </div>
       <div className="info">
         <div className="t">{artist.name}</div>
@@ -360,7 +361,8 @@ const artistMenuStyle: CSSProperties = {
   top: "calc(100% + 4px)",
   right: 0,
   minWidth: 170,
-  background: "var(--bg-2)",
+  // Opaque: --bg-2 is not a design token, so the menu was see-through.
+  background: "var(--surface-2, #181818)",
   border: "1px solid var(--line)",
   borderRadius: 4,
   fontFamily: "var(--grotesk)",
