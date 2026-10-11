@@ -60,7 +60,6 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app import scheduler
-from app.config import settings
 from app.models.art import (
     ArtOverride, ENTITY_ALBUM, ENTITY_ARTIST, ENTITY_MOVIE, ENTITY_SERIES,
     ROLE_BACKDROP, ROLE_COVER, ROLE_POSTER, ROLE_THUMB, SOURCE_ARTIST_AUTO,
@@ -69,7 +68,7 @@ from app.models.media_file import MediaFile, MediaKind, ScanState
 from app.models.movie import Movie
 from app.models.music import Album, Artist, Track
 from app.models.tv import Episode, Season, Series
-from app.services import ffprobe, library_folders, tmdb_key
+from app.services import arr_settings, ffprobe, library_folders, tmdb_key
 from app.services.credits import parse_credit, resolve_artist
 from app.services.path_map import translate as translate_path
 
@@ -157,15 +156,15 @@ class FolderScanStats:
 # Which libraries does this scanner own?
 # ---------------------------------------------------------------------------
 def movies_enabled(db: Optional[Session] = None) -> bool:
-    return bool(library_folders.folders(db, "movies")) and not settings.radarr_api_key
+    return bool(library_folders.folders(db, "movies")) and not arr_settings.configured("radarr")
 
 
 def tv_enabled(db: Optional[Session] = None) -> bool:
-    return bool(library_folders.folders(db, "tv")) and not settings.sonarr_api_key
+    return bool(library_folders.folders(db, "tv")) and not arr_settings.configured("sonarr")
 
 
 def music_enabled(db: Optional[Session] = None) -> bool:
-    return bool(library_folders.folders(db, "music")) and not settings.lidarr_api_key
+    return bool(library_folders.folders(db, "music")) and not arr_settings.configured("lidarr")
 
 
 def any_enabled(db: Optional[Session] = None) -> bool:

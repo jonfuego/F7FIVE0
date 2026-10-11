@@ -21,8 +21,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db
-from app.config import settings
-from app.services import sync
+from app.services import arr_settings, sync
 
 
 log = logging.getLogger("f7five0.webhooks")
@@ -62,7 +61,7 @@ def verify_shared_secret(
     x_arr_webhook_token: str | None = Header(default=None),
     authorization: str | None = Header(default=None),
 ) -> None:
-    expected = settings.arr_webhook_secret
+    expected = arr_settings.webhook_secret()
     if not expected:
         raise HTTPException(status_code=503, detail="webhook_secret_not_configured")
 
