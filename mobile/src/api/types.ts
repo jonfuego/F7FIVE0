@@ -38,6 +38,8 @@ export interface Album {
   release_date?: string | null;
   cover_path?: string | null;
   album_type?: string | null;
+  /** MusicBrainz secondary types (Compilation, Live, ...); the artist screen groups by them. */
+  secondary_types?: string[] | null;
   /** When the album entered the library ("Date added" sort). */
   created_at?: string | null;
 }

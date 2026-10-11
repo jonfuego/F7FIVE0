@@ -24,6 +24,7 @@ import {
   hueFromString,
   joinMeta,
 } from "@/lib/format";
+import { groupDiscography } from "@/lib/discography";
 import { countryName } from "@/lib/iso-country";
 import { albumToQueueItems, useQueue, type QueueItem } from "@/lib/queue";
 import type { Album, AlbumDetail, MusicArtistDetail, OverrideOut } from "@/lib/types";
@@ -256,15 +257,7 @@ function ArtistHero({
             style={{ marginTop: 28, paddingTop: 28, borderTop: "1px solid var(--line)" }}
           >
             <h3>Discography</h3>
-            {detail.albums.length === 0 ? (
-              <GridEmpty message="No albums on file for this artist." />
-            ) : (
-              <Grid>
-                {detail.albums.map((a) => (
-                  <DiscoTile key={a.id} album={a} />
-                ))}
-              </Grid>
-            )}
+            <Discography albums={detail.albums} />
           </div>
         </div>
       </div>
@@ -498,6 +491,45 @@ function UndoMergePanel({
         </span>
       ) : null}
     </div>
+  );
+}
+
+// The Discography: Albums, EPs, Singles, Other (compilations, live albums and
+// albums with no type), each by year. Empty sections are left out.
+function Discography({ albums }: { albums: Album[] }) {
+  const sections = useMemo(() => groupDiscography(albums), [albums]);
+  if (sections.length === 0) {
+    return <GridEmpty message="No albums on file for this artist." />;
+  }
+  return (
+    <>
+      {sections.map((section) => (
+        <section
+          key={section.id}
+          aria-label={section.title}
+          data-disco-section={section.id}
+          style={{ marginBottom: 28 }}
+        >
+          <h4
+            style={{
+              fontFamily: "var(--mono)",
+              fontSize: 10,
+              letterSpacing: "0.24em",
+              textTransform: "uppercase",
+              color: "var(--hive-text)",
+              margin: "0 0 14px",
+            }}
+          >
+            {section.title}
+          </h4>
+          <Grid>
+            {section.albums.map((a) => (
+              <DiscoTile key={a.id} album={a} />
+            ))}
+          </Grid>
+        </section>
+      ))}
+    </>
   );
 }
 

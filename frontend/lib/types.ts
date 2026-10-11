@@ -107,6 +107,9 @@ export type Album = {
   release_date: string | null;
   cover_path: string | null;
   album_type: string | null;
+  // MusicBrainz secondary types (Compilation, Live, ...). The artist page uses
+  // them to place an album in the Discography.
+  secondary_types?: string[];
   metadata_synced_at: string | null;
   metadata_status: string | null;
 };

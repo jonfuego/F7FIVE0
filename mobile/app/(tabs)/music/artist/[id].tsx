@@ -4,6 +4,7 @@ import React, { useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View, RefreshControl } from "react-native";
 
 import { fetchAutoPlaylistById, useArtist } from "@/api/queries";
+import { groupDiscography } from "@/lib/discography";
 import { usePlayer } from "@/player/PlayerProvider";
 import { useApi } from "@/state/auth";
 import { colors, fonts, MIN_TOUCH, radius, spacing, typography } from "@/state/theme";
@@ -79,18 +80,26 @@ export default function ArtistDetailScreen(): React.ReactElement {
                 </Pressable>
               </View>
             </View>
-            <View style={styles.grid}>
-              {detail.albums.map((al) => (
-                <Tile
-                  key={al.id}
-                  title={al.title}
-                  subtitle={al.release_date ?? undefined}
-                  artPath={al.cover_path}
-                  size={108}
-                  onPress={() => router.push(`/music/album/${al.id}`)}
-                />
-              ))}
-            </View>
+            {/* Albums, EPs, Singles, Other; empty sections are left out. */}
+            {groupDiscography(detail.albums).map((section) => (
+              <View key={section.id}>
+                <Text accessibilityRole="header" style={styles.section}>
+                  {section.title}
+                </Text>
+                <View style={styles.grid}>
+                  {section.albums.map((al) => (
+                    <Tile
+                      key={al.id}
+                      title={al.title}
+                      subtitle={al.release_date ?? undefined}
+                      artPath={al.cover_path}
+                      size={108}
+                      onPress={() => router.push(`/music/album/${al.id}`)}
+                    />
+                  ))}
+                </View>
+              </View>
+            ))}
           </ScrollView>
         )}
       </QueryState>
@@ -125,5 +134,6 @@ const styles = StyleSheet.create({
   },
   ghostText: { fontFamily: fonts.uiMedium, color: colors.text, fontSize: 15 },
   pressed: { opacity: 0.8 },
+  section: { ...typography.label, marginTop: spacing.lg, marginBottom: spacing.sm },
   grid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", gap: spacing.md },
 });
