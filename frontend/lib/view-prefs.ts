@@ -10,7 +10,7 @@ export type MixInputs = Record<string, Record<string, string>>;
 // are folded per user (admin.collapsed). Keep these in sync with the ids the
 // admin page gives its CollapsibleSection headers.
 export const ADMIN_SECTION_IDS = [
-  "users", "updates", "remote-access", "library-folders", "metadata", "library",
+  "users", "updates", "remote-access", "library-folders", "metadata", "arr", "library",
   "audio-analysis", "health", "active-streams", "sessions", "auth-events", "history",
 ] as const;
 

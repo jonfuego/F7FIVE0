@@ -616,3 +616,51 @@ export type StreamStart = {
   // exact requested second despite the bucketed encode start. 0 usually.
   seek_within_sec?: number;
 };
+
+// ---- *arr settings (Admin > Radarr, Sonarr and Lidarr) ----------------------
+// The API key is write-only: the server sends has_key and a masked tail, never
+// the key.
+export type ArrAppId = "radarr" | "sonarr" | "lidarr";
+
+export type ArrAppSettings = {
+  app: ArrAppId;
+  label: string;
+  configured: boolean;
+  // "admin": saved on the Admin page; "env": from Setup (.env); null: no key.
+  key_source: "admin" | "env" | null;
+  has_key: boolean;
+  masked: string | null;
+  url: string;
+  url_source: "admin" | "env";
+  // Radarr and Sonarr only (approved Requests land in this profile and folder).
+  supports_requests: boolean;
+  quality_profile_id: number | null;
+  quality_profile_source: "admin" | "env" | null;
+  root_folder: string | null;
+  root_folder_source: "admin" | "env" | null;
+};
+
+export type ArrSettings = { apps: ArrAppSettings[] };
+
+export type ArrOptions = {
+  profiles: { id: number; name: string }[];
+  root_folders: { path: string; free_space: number | null }[];
+  error: string | null;
+};
+
+export type ArrTestResult = {
+  ok: boolean;
+  message: string;
+  version: string | null;
+  options: ArrOptions | null;
+};
+
+export type ArrWebhook = {
+  has_token: boolean;
+  source: "admin" | "env" | null;
+  token: string | null;
+  // App name -> path on this server, like /api/webhooks/radarr.
+  paths: Record<ArrAppId, string>;
+  // Addresses the server knows for itself (home network, public).
+  base_urls: { label: string; url: string }[];
+};
