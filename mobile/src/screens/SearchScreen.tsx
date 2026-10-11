@@ -1,11 +1,12 @@
 import { useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
-import { StyleSheet, TextInput, View } from "react-native";
+import React, { useEffect, useMemo, useState } from "react";
+import { RefreshControl, SectionList, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { useSearch } from "@/api/queries";
-import { colors, MIN_TOUCH, radius, spacing } from "@/state/theme";
+import type { SearchResult } from "@/api/types";
+import { groupSearchResults } from "@/lib/searchGroups";
+import { colors, fonts, MIN_TOUCH, radius, spacing } from "@/state/theme";
 import { QueryState } from "@/ui/QueryState";
-import { RefreshableGrid } from "@/ui/RefreshableGrid";
 import { Screen } from "@/ui/Screen";
 import { TrackRow } from "@/ui/TrackRow";
 
@@ -20,7 +21,8 @@ export default function SearchScreen(): React.ReactElement {
     return () => clearTimeout(t);
   }, [text]);
 
-  const results = useSearch(debounced);
+  const results = useSearch(debounced, { artists: true });
+  const sections = useMemo(() => groupSearchResults(results.data), [results.data]);
 
   return (
     <Screen title="Search">
@@ -48,19 +50,34 @@ export default function SearchScreen(): React.ReactElement {
           emptyTitle="No results"
           emptyMessage={`Nothing matched "${debounced}".`}
         >
-          {(rows) => (
-            <RefreshableGrid
-              data={rows}
-              keyExtractor={(r) => `${r.kind}-${r.id}`}
-              refreshing={results.isFetching}
-              onRefresh={results.refetch}
+          {() => (
+            <SectionList
+              sections={sections}
+              keyExtractor={(r: SearchResult) => `${r.kind}-${r.id}`}
+              stickySectionHeadersEnabled={false}
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={styles.content}
+              refreshControl={
+                <RefreshControl
+                  refreshing={results.isFetching}
+                  onRefresh={results.refetch}
+                  tintColor={colors.accent}
+                  colors={[colors.accent]}
+                />
+              }
+              renderSectionHeader={({ section }) => (
+                <Text style={styles.sectionHeader} accessibilityRole="header">
+                  {section.title}
+                </Text>
+              )}
               renderItem={({ item }) => (
                 <TrackRow
                   title={item.title}
-                  subtitle={item.subtitle ?? item.kind}
+                  subtitle={item.subtitle ?? (item.kind === "artist" ? "Artist" : item.kind)}
                   artPath={item.poster_path}
                   onPress={() => {
-                    if (item.kind === "album") router.push(`/music/album/${item.id}`);
+                    if (item.kind === "artist") router.push(`/music/artist/${item.id}`);
+                    else if (item.kind === "album") router.push(`/music/album/${item.id}`);
                     else if (item.kind === "movie") router.push(`/movies/movie/${item.id}`);
                     else if (item.kind === "series") router.push(`/movies/show/${item.id}`);
                     else router.push(`/watch/${item.id}?kind=${item.kind}`);
@@ -88,4 +105,14 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   hint: { flex: 1 },
+  content: { paddingBottom: 120, paddingTop: spacing.sm },
+  sectionHeader: {
+    fontFamily: fonts.display,
+    fontSize: 20,
+    letterSpacing: 1,
+    color: colors.text,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.xs,
+    backgroundColor: colors.background,
+  },
 });
