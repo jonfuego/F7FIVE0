@@ -153,7 +153,7 @@ const tileMenuStyle: CSSProperties = {
   top: "calc(100% + 4px)",
   right: 0,
   minWidth: 170,
-  // Opaque: --bg-2 is not a design token, so the menu was see-through.
+  // Opaque: the old background variable was not a design token, so the menu was see-through.
   background: "var(--surface-2, #181818)",
   border: "1px solid var(--line)",
   borderRadius: 4,

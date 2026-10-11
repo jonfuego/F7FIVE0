@@ -530,7 +530,7 @@ function ResumePrompt({
     >
       <div
         style={{
-          background: "var(--bg-2)",
+          background: "var(--surface-2, #181818)",
           border: "1px solid var(--line)",
           borderRadius: 8,
           padding: "32px 28px",
@@ -607,7 +607,7 @@ function ErrorBox({ message, onRetry }: { message: string; onRetry: () => void }
     >
       <div
         style={{
-          background: "var(--bg-2)",
+          background: "var(--surface-2, #181818)",
           border: "1px solid var(--danger)",
           borderRadius: 8,
           padding: "24px 28px",
@@ -751,7 +751,7 @@ function DockLinkedView({
             width: "min(60vmin, 360px)",
             aspectRatio: "1/1",
             borderRadius: 12,
-            background: "var(--bg-2)",
+            background: "var(--surface-2, #181818)",
             border: "1px solid var(--line)",
           }}
         />

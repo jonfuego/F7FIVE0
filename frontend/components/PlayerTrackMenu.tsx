@@ -212,7 +212,7 @@ function MenuItem({
   );
 }
 
-// Opaque on purpose. The old `var(--bg-2)` is not a token: the v3 design tokens
+// Opaque on purpose. The old background variable is not a token: the v3 design tokens
 // define --bg and --surface-1..3 only, so the variable was undefined, the
 // declaration was invalid at computed-value time and the menu painted with no
 // background. --surface-2 is a solid colour (#181818 dark); the literal is the

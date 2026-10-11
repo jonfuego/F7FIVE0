@@ -502,7 +502,7 @@ function RequestFromSearchInner({ query }: { query: string }) {
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={r.poster_url} alt="" style={{ width: 44, height: 66, objectFit: "cover", borderRadius: 2, flexShrink: 0 }} />
               ) : (
-                <div style={{ width: 44, height: 66, background: "var(--bg-2)", borderRadius: 2, flexShrink: 0 }} />
+                <div style={{ width: 44, height: 66, background: "var(--surface-2, #181818)", borderRadius: 2, flexShrink: 0 }} />
               )}
               <div style={{ minWidth: 0, flex: 1 }}>
                 <div style={{ fontFamily: "var(--grotesk)", fontSize: 14, color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>

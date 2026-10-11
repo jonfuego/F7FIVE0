@@ -113,7 +113,7 @@ const menuStyle: CSSProperties = {
   top: "calc(100% + 4px)",
   right: 0,
   minWidth: 160,
-  background: "var(--bg-2)",
+  background: "var(--surface-2, #181818)",
   border: "1px solid var(--line)",
   borderRadius: 4,
   fontFamily: "var(--grotesk)",
