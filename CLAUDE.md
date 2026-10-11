@@ -403,6 +403,17 @@ INSTALL.md for the operator view.
   `lib/view-prefs.ts`); the app uses `useViewPref` from
   `mobile/src/state/viewPrefs.ts`. Don't keep view state only in
   localStorage or AsyncStorage; the app's AsyncStorage copy is a cache.
+- Poster wall on return (web): the Movies page used to throw its list away on
+  unmount, so every return showed placeholders until `/api/library/movies` came
+  back (about half the time to the first 20 posters), then rendered the tiles;
+  the art itself was already served from the browser cache with no request.
+  `frontend/lib/list-cache.ts` keeps the last list in a JS Map for the life of
+  the tab (no service worker, IndexedDB or CDN): a copy under 30 s old is
+  used with no request, an older one paints first and is then refetched. A
+  movie edit (`movies/[id]` `onApplied`) calls `invalidateLists("movies")`; a
+  new list page that adopts the cache must do the same for its edits. The
+  first 24 posters load eager and the wall's links do not prefetch. Art rules
+  above are unchanged.
 - Admin-only account creation. No self-serve sign-up.
 - Writing style for docs, comments, and commits: plain and direct, no em
   dashes.
