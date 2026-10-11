@@ -175,6 +175,18 @@ def test_stale_run_reports_failed_and_allows_a_new_one(client, ra_dir, helper):
     assert client.post("/api/admin/remote-access", json={"method": "tailscale"}).status_code == 202
 
 
+def test_tunnel_in_use_message_reaches_the_admin_page(client, ra_dir):
+    msg = (
+        "The Cloudflare tunnel 'f7five0' is already in use elsewhere (2 connector(s) are connected to it now), "
+        "so F7FIVE0 did not take it over and fetched no credentials. "
+        "Pick another name: set CLOUDFLARE_TUNNEL_NAME=f7five0-2 in the .env file."
+    )
+    _write_status(ra_dir, state="failed", error=msg, finished_at=_iso(datetime.now(timezone.utc)))
+    run = client.get("/api/admin/remote-access/run").json()
+    assert run["state"] == "failed"
+    assert run["error"] == msg
+
+
 def test_helper_missing_is_503(client, ra_dir):
     app.dependency_overrides[routes.get_helper] = lambda: FakeHelper(available=False)
     r = client.post("/api/admin/remote-access", json={"method": "tailscale"})
