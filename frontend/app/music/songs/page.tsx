@@ -17,6 +17,7 @@ import { songRowToQueueItem, useQueue } from "@/lib/queue";
 import { useScrollRestoration } from "@/lib/scroll-restoration";
 import type { SongRow } from "@/lib/types";
 import { useViewPref } from "@/lib/use-view-pref";
+import { artSized } from "@/lib/art-url";
 
 const DEBOUNCE_MS = 200;
 const FETCH_LIMIT = 2000;
@@ -300,7 +301,7 @@ function SongRowItem({ row }: { row: SongRow }) {
           {row.cover_path ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
-              src={row.cover_path}
+              src={artSized(row.cover_path, 300) ?? row.cover_path}
               alt=""
               loading="lazy"
               decoding="async"

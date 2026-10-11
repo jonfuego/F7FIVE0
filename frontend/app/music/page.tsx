@@ -22,6 +22,7 @@ import { useScanState } from "@/lib/use-scan-state";
 import { useScrollRestoration } from "@/lib/scroll-restoration";
 import { useViewPref } from "@/lib/use-view-pref";
 import type { MusicArtist, OverrideOut } from "@/lib/types";
+import { artSized } from "@/lib/art-url";
 
 type EditInitial = OverrideOut & { algorithmic_sort_hint: string };
 
@@ -242,7 +243,7 @@ function ArtistTile({
         <div className="keyart-mini" />
         {artist.image_path ? (
           <img
-            src={artist.image_path}
+            src={artSized(artist.image_path, 300) ?? artist.image_path}
             alt={artist.name}
             loading="lazy"
             decoding="async"

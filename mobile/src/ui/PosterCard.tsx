@@ -1,8 +1,8 @@
 import { Check, Film, Music, Play } from "lucide-react-native";
 import React, { useState } from "react";
-import { Image, Pressable, StyleSheet, Text, View } from "react-native";
+import { Image, PixelRatio, Pressable, StyleSheet, Text, View } from "react-native";
 
-import { resolveArtUri } from "@/api/media";
+import { artWidthFor, resolveArtUri } from "@/api/media";
 import { useApi } from "@/state/auth";
 import { colors, fonts, radius, spacing } from "@/state/theme";
 import { Icon } from "./Icon";
@@ -54,7 +54,7 @@ export function PosterCard({
   onPlay,
 }: PosterCardProps): React.ReactElement {
   const api = useApi();
-  const uri = resolveArtUri(artPath);
+  const uri = resolveArtUri(artPath, artWidthFor(width, PixelRatio.get()));
   const [failed, setFailed] = useState(false);
   const height = square ? width : Math.round(width * 1.5);
   const isServerArt = !!artPath && !/^https?:\/\//i.test(artPath);

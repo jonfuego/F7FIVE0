@@ -25,6 +25,7 @@ import type { MediaMarker, Progress, StreamStart, StreamStartRequest } from "@/l
 import { loadFeatures } from "@/lib/features";
 import { prefHeight, readQualityPref, writeQualityPref } from "@/lib/quality";
 import { browserClientCaps } from "@/lib/playback-caps";
+import { artSized } from "@/lib/art-url";
 
 const AUDIO_CONTAINERS = new Set([
   "mp3", "m4a", "aac", "wav", "flac", "ogg", "oga", "opus", "wma",
@@ -733,7 +734,7 @@ function DockLinkedView({
     >
       {item?.cover_path ? (
         <img
-          src={item.cover_path}
+          src={artSized(item.cover_path, 600) ?? item.cover_path}
           alt=""
           style={{
             width: "min(60vmin, 360px)",

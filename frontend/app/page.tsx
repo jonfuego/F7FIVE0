@@ -26,6 +26,7 @@ import type {
   AlbumDetail, ContinueWatchingItem, MovieDetail, RecentItem,
   RecentMusicVideo, SeriesDetail,
 } from "@/lib/types";
+import { artSized } from "@/lib/art-url";
 
 const ROW_LIMIT = 20;
 
@@ -255,7 +256,7 @@ function RecentMusicVideoTile({ mv }: { mv: RecentMusicVideo }) {
         <div className="keyart-mini" />
         {mv.thumb_path ? (
           <img
-            src={mv.thumb_path}
+            src={artSized(mv.thumb_path, 300) ?? mv.thumb_path}
             alt={mv.title}
             loading="lazy"
             decoding="async"

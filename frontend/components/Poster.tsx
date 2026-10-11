@@ -10,6 +10,7 @@
 "use client";
 
 import { useState } from "react";
+import { artSized } from "@/lib/art-url";
 
 type AspectRatio = "poster" | "square" | "wide";
 
@@ -37,7 +38,7 @@ export function Poster({ src, alt, aspect = "poster" }: Props) {
       <div className="keyart-mini" />
       {!showFallback ? (
         <img
-          src={src ?? ""}
+          src={artSized(src, aspect === "wide" ? 600 : 300) ?? ""}
           alt={alt}
           loading="lazy"
           decoding="async"

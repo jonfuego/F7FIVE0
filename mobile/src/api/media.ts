@@ -21,10 +21,28 @@ import type { AutoPlaylistItem } from "./types";
 /** Resolve an art path to a loadable URI. Remote (*arr/TMDB) URLs pass through;
  * server-relative art paths are prefixed with the API base. Returns null when
  * there's no art so the UI renders a placeholder instead of a blank/broken box. */
-export function resolveArtUri(path?: string | null): string | null {
+export function resolveArtUri(path?: string | null, w?: ArtWidth): string | null {
   if (!path) return null;
   if (path.startsWith("http://") || path.startsWith("https://")) return path;
-  return `${getApiBase()}${path.startsWith("/") ? "" : "/"}${path}`;
+  const full = `${getApiBase()}${path.startsWith("/") ? "" : "/"}${path}`;
+  return w && path.includes("/api/art/") ? withArtWidth(full, w) : full;
+}
+
+/** The server keeps 300 and 600 px wide WebP copies of art and serves one for
+ * `w=300` / `w=600` (anything else returns the original). */
+export type ArtWidth = 300 | 600;
+
+/** Add or replace `w` on a server art URL, keeping the `?v=` cache key. */
+export function withArtWidth(url: string, w: ArtWidth): string {
+  const [base, query = ""] = url.split("?", 2);
+  const kept = query.split("&").filter((p) => p && !p.startsWith("w="));
+  kept.push(`w=${w}`);
+  return `${base}?${kept.join("&")}`;
+}
+
+/** The smallest copy that still covers `sizeDp` at the screen density. */
+export function artWidthFor(sizeDp: number, pixelRatio: number): ArtWidth {
+  return sizeDp * pixelRatio <= 300 ? 300 : 600;
 }
 
 /** Optional video-picker choices for stream/start (crit 41). */

@@ -26,7 +26,7 @@ from fastapi import (
     APIRouter, Depends, File, Header, HTTPException, Request, UploadFile,
     status,
 )
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -357,7 +357,9 @@ def serve_art(
     exp: Optional[int] = None,
     sig: Optional[str] = None,
     sid: Optional[str] = None,
-) -> FileResponse:
+    w: Optional[int] = None,
+    if_none_match: Annotated[Optional[str], Header()] = None,
+) -> Response:
     """Stream the override's on-disk file. 404 if no override exists.
 
     Accepts either a bearer token (unchanged) or a short-lived HMAC-signed
@@ -398,19 +400,43 @@ def serve_art(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="art_not_found",
         )
+    # `w=300` or `w=600` serves the smaller WebP copy (made on save, or on
+    # demand here if missing); anything else serves the original.
+    width = art_service.parse_width(w)
+    served = path
+    if width is not None:
+        served = art_service.ensure_art_copy(path, width) or path
+        if served == path:
+            width = None
     # Cache aggressively. resolve_art appends ?v=<set_at_unix> to every art
     # URL (services/art.py resolve_art), so re-picking an image changes the
     # URL and busts the cache on its own. `immutable` tells the browser not
     # to revalidate for a matched URL, which kills the repeat-visit poster
     # storm entirely. Private, because art stays behind auth. The ETag is
-    # derived from the file's stat (mtime + size) so a conditional request
-    # can still 304 if the same URL is ever refetched.
-    st = os.stat(path)
-    etag = f'"{st.st_mtime_ns:x}-{st.st_size:x}"'
+    # derived from the served file's stat (mtime + size) plus the width, so
+    # each size has its own tag and a conditional request can 304.
+    st = os.stat(served)
+    etag = f'"{st.st_mtime_ns:x}-{st.st_size:x}' + (f"-w{width}" if width else "") + '"'
     headers = {
         "Cache-Control": "private, max-age=31536000, immutable",
         "ETag": etag,
     }
+    if _etag_matches(if_none_match, etag):
+        return Response(status_code=304, headers=headers)
     # Media type is resolved from the extension so jpg/png/webp are all
     # served with the right Content-Type without us tracking it in the DB.
-    return FileResponse(path, headers=headers)
+    return FileResponse(served, headers=headers)
+
+
+def _etag_matches(header: Optional[str], etag: str) -> bool:
+    """RFC 9110 weak comparison of an If-None-Match header against `etag`."""
+    if not header:
+        return False
+    if header.strip() == "*":
+        return True
+
+    def norm(tag: str) -> str:
+        tag = tag.strip()
+        return tag[2:] if tag.startswith("W/") else tag
+
+    return any(norm(t) == etag for t in header.split(","))

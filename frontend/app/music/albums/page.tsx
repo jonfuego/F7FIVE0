@@ -19,6 +19,7 @@ import { albumToQueueItems, useQueue } from "@/lib/queue";
 import { useScanState } from "@/lib/use-scan-state";
 import type { Album, AlbumDetail, OverrideOut } from "@/lib/types";
 import { useViewPref } from "@/lib/use-view-pref";
+import { artSized } from "@/lib/art-url";
 
 type EditInitial = OverrideOut & { algorithmic_sort_hint: string };
 
@@ -202,7 +203,7 @@ function AlbumTile({
         <div className="keyart-mini" />
         {album.cover_path ? (
           <img
-            src={album.cover_path}
+            src={artSized(album.cover_path, 300) ?? album.cover_path}
             alt={album.title}
             loading="lazy"
             decoding="async"

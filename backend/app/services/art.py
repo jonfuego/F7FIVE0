@@ -59,6 +59,11 @@ _ALLOWED_FORMATS: dict[str, str] = {
     "WEBP": "webp",
 }
 
+# Widths of the smaller WebP copies written next to every saved original.
+# Grids and rails ask for 300, hero and detail pages for 600 (or the original).
+ART_COPY_WIDTHS: tuple[int, ...] = (300, 600)
+_COPY_QUALITY = 80
+
 # 10 MB cap on any uploaded or fetched image. Larger than any sane
 # poster but small enough that a runaway download gets stopped.
 _MAX_BYTES = 10 * 1024 * 1024
@@ -239,6 +244,12 @@ def save_upload_bytes(
     rel_path = _relative_path(entity_kind, entity_id, role, ext)
     abs_path = _absolute_path(rel_path)
     _write_atomically(abs_path, data)
+    # The ONE place size copies are written. Every art save (upload, paste
+    # URL, *arr sync, folder scan, TMDB, and any later caller such as mix art
+    # or music-video frame grabs) funnels through here, so they all get 300 and
+    # 600 px WebP copies. A failure is logged and never blocks the save: the
+    # serve path regenerates a missing copy on demand.
+    write_art_copies(abs_path, data)
 
     row = db.get(ArtOverride, (entity_kind, entity_id, role))
     if row is None:
@@ -257,6 +268,7 @@ def save_upload_bytes(
         # stays orphaned on disk. Remove it so we don't accumulate cruft.
         if row.local_path != rel_path:
             _quiet_unlink(_absolute_path(row.local_path))
+            _unlink_copies(_absolute_path(row.local_path))
         row.local_path = rel_path
         row.source_kind = source_kind
         row.source_ref = source_ref
@@ -474,6 +486,7 @@ def clear_override(
     if row is None:
         return False
     _quiet_unlink(_absolute_path(row.local_path))
+    _unlink_copies(_absolute_path(row.local_path))
     db.delete(row)
     db.flush()
     return True
@@ -499,6 +512,137 @@ def local_file_path(
     if not path.is_file():
         return None
     return path
+
+
+# ---------------------------------------------------------------------------
+# Size copies (300 / 600 px wide WebP)
+# ---------------------------------------------------------------------------
+def copy_path(original: Path, width: int) -> Path:
+    """Where the `width` px copy of `original` lives: `poster.jpg` ->
+    `poster.w300.webp` in the same folder."""
+    return original.with_name(f"{original.stem}.w{width}.webp")
+
+
+def parse_width(w: Optional[int]) -> Optional[int]:
+    """The requested width when it is a supported copy size, else None
+    (None means serve the original)."""
+    return w if w in ART_COPY_WIDTHS else None
+
+
+def _copy_is_fresh(original: Path, target: Path) -> bool:
+    try:
+        return (
+            target.is_file()
+            and target.stat().st_size > 0
+            and target.stat().st_mtime_ns >= original.stat().st_mtime_ns
+        )
+    except OSError:
+        return False
+
+
+def _build_copy(img: Image.Image, target: Path, width: int) -> None:
+    """Resize an already opened image to at most `width` px wide (never
+    enlarging) and write it as WebP, atomically."""
+    img.load()
+    if img.mode not in ("RGB", "RGBA"):
+        has_alpha = img.mode in ("LA", "PA") or "transparency" in img.info
+        img = img.convert("RGBA" if has_alpha else "RGB")
+    if img.width > width:
+        height = max(1, round(img.height * width / img.width))
+        img = img.resize((width, height), Image.LANCZOS)
+    buf = io.BytesIO()
+    img.save(buf, "WEBP", quality=_COPY_QUALITY, method=4)
+    _write_atomically(target, buf.getvalue())
+
+
+def write_art_copies(
+    original: Path, data: Optional[bytes] = None,
+) -> list[Path]:
+    """Write the 300 and 600 px WebP copies for the art file at `original`
+    (always rewrites, so a replaced image never keeps stale copies). Pass the
+    already read `data` to skip a disk read. Returns the copies written.
+
+    This is the single copy writer. Anything that saves art should go through
+    `save_upload_bytes` (which calls this); call it directly only for a file
+    that was written some other way. Never raises: a bad image logs a warning
+    and yields no copies, and the serve path falls back to the original."""
+    written: list[Path] = []
+    try:
+        src = data if data is not None else original.read_bytes()
+        for width in ART_COPY_WIDTHS:
+            # formats= keeps Pillow on the parsers we accept (SEC-P0-1).
+            with Image.open(
+                io.BytesIO(src), formats=tuple(_ALLOWED_FORMATS)
+            ) as img:
+                target = copy_path(original, width)
+                _build_copy(img, target, width)
+                written.append(target)
+    except Exception:
+        log.warning("could not write art copies for %s", original, exc_info=True)
+    return written
+
+
+def ensure_art_copy(original: Path, width: int) -> Optional[Path]:
+    """Return the `width` px copy of `original`, generating it when missing
+    or older than the original. None when it cannot be made (the caller then
+    serves the original)."""
+    target = copy_path(original, width)
+    if _copy_is_fresh(original, target):
+        return target
+    try:
+        with Image.open(
+            original, formats=tuple(_ALLOWED_FORMATS)
+        ) as img:
+            _build_copy(img, target, width)
+        return target
+    except Exception:
+        log.warning("could not build %spx copy of %s", width, original, exc_info=True)
+        return None
+
+
+def backfill_art_copies(
+    db: Session, *, batch_size: int = 100, pause_sec: float = 0.0,
+) -> int:
+    """Build any missing size copies for art that already exists. Walks
+    `art_overrides` in batches (so memory and DB use stay flat), pausing
+    `pause_sec` between batches so it stays polite on a busy box. Safe to
+    rerun: a copy that is present and current is left alone. Returns the number
+    of copies created (0 on a second run)."""
+    import time
+
+    created = 0
+    offset = 0
+    while True:
+        paths = db.scalars(
+            select(ArtOverride.local_path)
+            .order_by(
+                ArtOverride.entity_kind, ArtOverride.entity_id, ArtOverride.role,
+            )
+            .offset(offset)
+            .limit(batch_size)
+        ).all()
+        if not paths:
+            break
+        offset += len(paths)
+        for rel in paths:
+            if not rel:
+                continue
+            original = _absolute_path(rel)
+            if not original.is_file():
+                continue
+            for width in ART_COPY_WIDTHS:
+                if _copy_is_fresh(original, copy_path(original, width)):
+                    continue
+                if ensure_art_copy(original, width) is not None:
+                    created += 1
+        if pause_sec > 0:
+            time.sleep(pause_sec)
+    return created
+
+
+def _unlink_copies(original: Path) -> None:
+    for width in ART_COPY_WIDTHS:
+        _quiet_unlink(copy_path(original, width))
 
 
 # ---------------------------------------------------------------------------

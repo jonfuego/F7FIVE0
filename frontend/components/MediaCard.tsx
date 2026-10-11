@@ -16,6 +16,7 @@ import { Icon } from "@/components/Icon";
 import { Poster } from "./Poster";
 import { colorForTitle, episodeSubtitle, hueFromString } from "@/lib/format";
 import type { FileStatus } from "@/lib/progress";
+import { artSized } from "@/lib/art-url";
 
 type Kind = "movie" | "series" | "album" | "track" | "music_video" | "music_video_release";
 
@@ -82,7 +83,7 @@ export function MediaCard({
         <div className="keyart-mini" />
         {posterPath ? (
           <img
-            src={posterPath}
+            src={artSized(posterPath, 300) ?? posterPath}
             alt={title}
             loading="lazy"
             decoding="async"
