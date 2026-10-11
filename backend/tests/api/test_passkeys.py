@@ -365,3 +365,185 @@ def test_delete_other_users_passkey_is_404(auth_client, db_session, user):
 
     resp = auth_client.delete(f"/api/auth/passkeys/{cred.id}")
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Throttle key (PostgreSQL rejects NUL in text columns)
+# ---------------------------------------------------------------------------
+def test_throttle_key_has_no_nul_and_cannot_be_a_username():
+    import re
+    from app.api.schemas import USERNAME_PATTERN
+
+    key = passkeys_module._PASSKEY_THROTTLE_USER
+    assert "\x00" not in key
+    assert key.isprintable()
+    assert re.match(USERNAME_PATTERN, key) is None
+
+
+# ---------------------------------------------------------------------------
+# Real crypto: software authenticator, no monkeypatched verify functions
+# ---------------------------------------------------------------------------
+RP_ID = "media.example.com"
+ORIGIN = "https://media.example.com"
+
+
+class _SoftAuthenticator:
+    """Minimal ES256 platform authenticator: 'none' attestation, UV+UP set."""
+
+    def __init__(self):
+        from cryptography.hazmat.primitives.asymmetric import ec
+        self.key = ec.generate_private_key(ec.SECP256R1())
+        self.cred_id = b"soft-cred-" + bytes(range(16))
+        self.counter = 0
+
+    def _cose_key(self) -> bytes:
+        import cbor2
+        nums = self.key.public_key().public_numbers()
+        return cbor2.dumps({
+            1: 2, 3: -7, -1: 1,
+            -2: nums.x.to_bytes(32, "big"),
+            -3: nums.y.to_bytes(32, "big"),
+        })
+
+    @staticmethod
+    def _client_data(ceremony: str, challenge_b64: str) -> bytes:
+        return json.dumps(
+            {"type": ceremony, "challenge": challenge_b64, "origin": ORIGIN,
+             "crossOrigin": False}
+        ).encode()
+
+    def register(self, challenge_b64: str) -> dict:
+        import hashlib
+        import struct
+        import cbor2
+        rp_hash = hashlib.sha256(RP_ID.encode()).digest()
+        auth_data = (
+            rp_hash + bytes([0x45]) + struct.pack(">I", 0) + bytes(16)
+            + struct.pack(">H", len(self.cred_id)) + self.cred_id + self._cose_key()
+        )
+        att = cbor2.dumps({"fmt": "none", "attStmt": {}, "authData": auth_data})
+        return {
+            "id": bytes_to_base64url(self.cred_id),
+            "rawId": bytes_to_base64url(self.cred_id),
+            "type": "public-key",
+            "response": {
+                "clientDataJSON": bytes_to_base64url(
+                    self._client_data("webauthn.create", challenge_b64)),
+                "attestationObject": bytes_to_base64url(att),
+                "transports": ["internal"],
+            },
+        }
+
+    def assert_(self, challenge_b64: str, user_handle: bytes) -> dict:
+        import hashlib
+        import struct
+        from cryptography.hazmat.primitives import hashes
+        from cryptography.hazmat.primitives.asymmetric import ec
+        self.counter += 1
+        rp_hash = hashlib.sha256(RP_ID.encode()).digest()
+        auth_data = rp_hash + bytes([0x05]) + struct.pack(">I", self.counter)
+        cdj = self._client_data("webauthn.get", challenge_b64)
+        sig = self.key.sign(
+            auth_data + hashlib.sha256(cdj).digest(), ec.ECDSA(hashes.SHA256()))
+        return {
+            "id": bytes_to_base64url(self.cred_id),
+            "rawId": bytes_to_base64url(self.cred_id),
+            "type": "public-key",
+            "response": {
+                "clientDataJSON": bytes_to_base64url(cdj),
+                "authenticatorData": bytes_to_base64url(auth_data),
+                "signature": bytes_to_base64url(sig),
+                "userHandle": bytes_to_base64url(user_handle),
+            },
+        }
+
+
+def test_real_registration_and_login_roundtrip(auth_client, anon_client, db_session, user):
+    authn = _SoftAuthenticator()
+    # Register through the real verify_registration_response.
+    opts = auth_client.post("/api/auth/passkey/register/options").json()
+    resp = auth_client.post(
+        "/api/auth/passkey/register/verify",
+        json={"credential": authn.register(opts["challenge"]), "name": "Soft"},
+    )
+    assert resp.status_code == 201, resp.text
+    stored = db_session.query(WebAuthnCredential).filter_by(user_id=user.id).one()
+    assert stored.credential_id == bytes_to_base64url(authn.cred_id)
+
+    # Log in through the real verify_authentication_response.
+    lopts = anon_client.post("/api/auth/passkey/login/options").json()
+    cred = authn.assert_(lopts["challenge"], str(user.id).encode())
+    resp = anon_client.post("/api/auth/passkey/login/verify", json={"credential": cred})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["access_token"]
+    db_session.expire_all()
+    assert db_session.query(WebAuthnCredential).one().sign_count == 1
+
+    # A tampered signature on a fresh challenge is a 401, not a 500.
+    lopts = anon_client.post("/api/auth/passkey/login/options").json()
+    bad = authn.assert_(lopts["challenge"], str(user.id).encode())
+    sig = bytearray(base64.urlsafe_b64decode(bad["response"]["signature"] + "=="))
+    sig[-1] ^= 0xFF
+    bad["response"]["signature"] = bytes_to_base64url(bytes(sig))
+    resp = anon_client.post("/api/auth/passkey/login/verify", json={"credential": bad})
+    assert resp.status_code == 401
+    assert resp.json()["detail"] == "passkey_verification_failed"
+
+
+@pytest.mark.parametrize("response_patch", [
+    {"authenticatorData": "!!!not-base64!!!"},
+    {"authenticatorData": "AAAA"},
+    {"signature": ""},
+    {"authenticatorData": None},
+])
+def test_login_malformed_assertion_is_4xx(anon_client, db_session, user, response_patch):
+    _seed_credential(db_session, user, sign_count=0)
+    opts = anon_client.post("/api/auth/passkey/login/options").json()
+    credential = {
+        "id": CRED_ID_B64, "rawId": CRED_ID_B64, "type": "public-key",
+        "response": {
+            "clientDataJSON": _client_data(opts["challenge"], ceremony="webauthn.get"),
+            "authenticatorData": "dummy", "signature": "dummy",
+            **response_patch,
+        },
+    }
+    resp = anon_client.post(
+        "/api/auth/passkey/login/verify", json={"credential": credential})
+    assert 400 <= resp.status_code < 500, resp.text
+
+
+@pytest.mark.parametrize("exc", [KeyError("x"), ValueError("v"), TypeError("t")])
+def test_login_unexpected_library_error_is_4xx(anon_client, db_session, user, monkeypatch, exc):
+    _seed_credential(db_session, user, sign_count=0)
+
+    def _raise(**kw):
+        raise exc
+
+    monkeypatch.setattr(passkeys_module, "verify_authentication_response", _raise)
+    opts = anon_client.post("/api/auth/passkey/login/options").json()
+    credential = {
+        "id": CRED_ID_B64, "rawId": CRED_ID_B64, "type": "public-key",
+        "response": {
+            "clientDataJSON": _client_data(opts["challenge"], ceremony="webauthn.get"),
+            "authenticatorData": "dummy", "signature": "dummy",
+        },
+    }
+    resp = anon_client.post(
+        "/api/auth/passkey/login/verify", json={"credential": credential})
+    assert resp.status_code == 401
+    assert resp.json()["detail"] == "passkey_verification_failed"
+
+
+@pytest.mark.parametrize("att", ["!!!", "AAAA", "dummy"])
+def test_register_malformed_attestation_is_4xx(auth_client, att):
+    opts = auth_client.post("/api/auth/passkey/register/options").json()
+    credential = {
+        "id": CRED_ID_B64, "rawId": CRED_ID_B64, "type": "public-key",
+        "response": {
+            "clientDataJSON": _client_data(opts["challenge"], ceremony="webauthn.create"),
+            "attestationObject": att,
+        },
+    }
+    resp = auth_client.post(
+        "/api/auth/passkey/register/verify", json={"credential": credential})
+    assert 400 <= resp.status_code < 500, resp.text
