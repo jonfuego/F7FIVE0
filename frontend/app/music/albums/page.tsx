@@ -221,21 +221,11 @@ function AlbumTile({
         >
           <span className="tri" />
         </button>
-        <AlbumTileMenu albumId={album.id} albumTitle={album.title} />
-        {isAdmin && onEdit ? (
-          <button
-            type="button"
-            className="admin-edit"
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              onEdit();
-            }}
-            aria-label={`Edit ${album.title}`}
-          >
-            Edit
-          </button>
-        ) : null}
+        <AlbumTileMenu
+          albumId={album.id}
+          albumTitle={album.title}
+          onEdit={isAdmin ? onEdit : undefined}
+        />
       </div>
       <div className="info">
         <div className="t">{album.title}</div>
