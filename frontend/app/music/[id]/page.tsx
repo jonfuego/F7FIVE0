@@ -5,13 +5,14 @@
 
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
 import Link from "next/link";
 import { notFound, useParams } from "next/navigation";
 import { AuthShell } from "@/components/AuthShell";
 import { BackButton } from "@/components/BackButton";
 import { TrackRowMenu } from "@/components/TrackRowMenu";
+import { startArtistRadio } from "@/lib/artist-radio";
 import { apiGet, ApiError } from "@/lib/client-api";
 import {
   colorForTitle,
@@ -93,6 +94,16 @@ function AlbumHero({ album }: { album: AlbumDetail }) {
   const groups = useMemo(() => groupByDisc(album.tracks), [album.tracks]);
   const queueItems = useMemo(() => albumToQueueItems(album), [album]);
   const { playAlbum, playNextBlock, addToQueue } = useQueue();
+  const [radioBusy, setRadioBusy] = useState(false);
+
+  async function onArtistRadio() {
+    setRadioBusy(true);
+    try {
+      await startArtistRadio<QueueItem>(album.artist_id, { get: apiGet, playNextBlock });
+    } finally {
+      setRadioBusy(false);
+    }
+  }
 
   const meta = joinMeta([
     year,
@@ -170,6 +181,14 @@ function AlbumHero({ album }: { album: AlbumDetail }) {
                 >
                   + Queue
                 </button>
+                <button
+                  type="button"
+                  className="btn ghost"
+                  disabled={!album.artist_id || radioBusy}
+                  onClick={onArtistRadio}
+                >
+                  {radioBusy ? "..." : "Artist radio"}
+                </button>
               </>
             ) : (
               <button type="button" className="btn play" disabled>
@@ -210,12 +229,12 @@ function AlbumHero({ album }: { album: AlbumDetail }) {
 
 function MetaRow({ text }: { text: string }) {
   return (
-    <div className="meta">
-      {text.split(" • ").map((part, i, arr) => (
-        <span key={i} className={part.startsWith("★") ? "stars" : undefined}>
-          {part}
-          {i < arr.length - 1 ? <span aria-hidden style={{ margin: "0 0", color: "var(--ink-3)" }}>•</span> : null}
-        </span>
+    <div className="meta" style={{ gap: 10 }}>
+      {text.split(" • ").map((part, i) => (
+        <Fragment key={i}>
+          {i > 0 ? <span aria-hidden style={{ color: "var(--ink-3)" }}>•</span> : null}
+          <span className={part.startsWith("★") ? "stars" : undefined}>{part}</span>
+        </Fragment>
       ))}
     </div>
   );
@@ -298,12 +317,26 @@ function TrackRow({
           cursor: primary ? "pointer" : "default",
         }}
       >
-        <div className="num">{String(number).padStart(2, "0")}</div>
-        <div className="body">
+        <div className="num" style={{ flex: "0 0 36px", marginRight: 16 }}>
+          {String(number).padStart(2, "0")}
+        </div>
+        <div className="body" style={{ flex: 1, minWidth: 0 }}>
           <div className="t">{track.title}</div>
         </div>
-        <div className="right">
-          <div>{duration || "—"}</div>
+        <div
+          className="duration"
+          style={{
+            flex: "0 0 56px",
+            width: 56,
+            marginLeft: 16,
+            textAlign: "right",
+            fontFamily: "var(--font-sans)",
+            fontSize: 13,
+            color: "var(--ink-3)",
+            fontVariantNumeric: "tabular-nums",
+          }}
+        >
+          {duration || "—"}
         </div>
       </button>
       <TrackRowMenu item={queueItem} label={track.title} />
