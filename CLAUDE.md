@@ -201,6 +201,27 @@ INSTALL.md for the operator view.
   `install()`; never log a URL or request that carries a key some other way.
 - Scanner-imported art uses `source_kind` `local` or `tmdb`; admin-set art
   (`upload`, `url`, ...) is never overwritten.
+- Art caching and size copies: every art save goes through
+  `services/art.py::save_upload_bytes`, which also writes 300 px and 600 px
+  WebP copies (`write_art_copies`). `GET /api/art/...` takes `w=300` or `w=600`
+  (anything else serves the original), builds a missing copy on demand, and
+  gives each size its own ETag. `Cache-Control` stays `private, max-age=31536000,
+  immutable`; the `?v=<set_at>` key changes the URL when art changes. The web
+  route (`app/api/art/[...path]/route.ts`) passes `Cache-Control`, `ETag` and
+  `If-None-Match`/304 through, so never cap it with its own max-age. Grids and
+  rails ask for `w=300` (`lib/art-url.ts`, `resolveArtUri` on the app). A one-time
+  job (`backfill_art_copies`, run by the scheduler after boot) builds copies for
+  older art and is safe to rerun. Art is private: Cloudflare must not cache it.
+- Mix art: the four Home mixes (`recently-added`, `most-played`,
+  `continue-listening`, `random`) are art kind `mix`, role `cover`, with a fixed
+  uuid5 id per key. Admin sets or resets a picture from the mix cards; with no
+  override the web shows the static default in `frontend/public/mix/`. Unknown
+  mix keys are rejected.
+- Frame-grab thumbs: when a music video has no thumb art, the music videos scan
+  grabs one frame with ffmpeg (about 10 percent in) and saves it as
+  `music_video` / `thumb` with `source_kind` `frame`. It runs in the scan, never
+  in the stream worker. Any other art replaces a frame grab and is never
+  replaced by one.
 - Migrations go through Alembic. Keep revision ids stable: existing installs
   upgrade through them. Register new models in `app/models/__init__.py`.
 - Config comes from `.env` at the install root via pydantic-settings. New
