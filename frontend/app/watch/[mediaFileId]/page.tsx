@@ -390,6 +390,7 @@ export default function WatchPage() {
         <div className="top">
           <div
             className="title"
+            data-np-title
             style={{
               // Title truncates with text-overflow: ellipsis; overflow: hidden;
               // white-space: nowrap so it never wraps onto a second line.
@@ -755,7 +756,7 @@ function DockLinkedView({
           }}
         />
       )}
-      <div style={{ textAlign: "center", maxWidth: "100%" }}>
+      <div data-np-title style={{ textAlign: "center", maxWidth: "100%" }}>
         <div
           style={{
             fontFamily: "var(--display)",
@@ -842,7 +843,8 @@ function DockLinkedView({
         <PlayerTrackMenu
           albumId={item?.album_id ?? null}
           artistId={item?.artist_id ?? null}
-          placement="up"
+          placement="down"
+          avoidSelector="[data-np-title]"
           buttonStyle={iconButtonStyle}
           iconSize={24}
         />
