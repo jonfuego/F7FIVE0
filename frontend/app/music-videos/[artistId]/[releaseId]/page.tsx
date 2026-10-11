@@ -32,6 +32,7 @@ import type {
   MusicVideoReleaseDetail,
   OverrideOut,
 } from "@/lib/types";
+import { artSized } from "@/lib/art-url";
 
 type EditInitial = OverrideOut & { algorithmic_sort_hint: string };
 
@@ -310,7 +311,7 @@ function VideoTile({ video }: { video: MusicVideo }) {
         <div className="keyart-mini" />
         {video.thumb_path ? (
           <img
-            src={video.thumb_path}
+            src={artSized(video.thumb_path, 600) ?? video.thumb_path}
             alt={video.title}
             loading="lazy"
             decoding="async"

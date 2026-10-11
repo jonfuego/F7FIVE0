@@ -55,6 +55,7 @@ import type {
   StreamStart,
   StreamStartRequest,
 } from "@/lib/types";
+import { artSized } from "@/lib/art-url";
 
 const HEARTBEAT_MS = 10_000;
 const RESUME_MIN_SEC = 15;
@@ -1169,7 +1170,7 @@ export function MiniPlayer() {
             <div className="keyart-mini" />
             {currentItem?.cover_path ? (
               <img
-                src={currentItem.cover_path}
+                src={artSized(currentItem.cover_path, 300) ?? currentItem.cover_path}
                 alt={currentItem.title ?? ""}
               />
             ) : null}

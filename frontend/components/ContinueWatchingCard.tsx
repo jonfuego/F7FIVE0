@@ -7,6 +7,7 @@ import Link from "next/link";
 import type { CSSProperties } from "react";
 import { colorForTitle, formatDuration, hueFromString } from "@/lib/format";
 import type { ContinueWatchingItem } from "@/lib/types";
+import { artSized } from "@/lib/art-url";
 
 type Props = {
   item: ContinueWatchingItem;
@@ -41,7 +42,7 @@ export function ContinueWatchingCard({ item }: Props) {
         <div className="keyart-mini" />
         {item.poster_path ? (
           <img
-            src={item.poster_path}
+            src={artSized(item.poster_path, 600) ?? item.poster_path}
             alt={item.title}
             loading="lazy"
             decoding="async"

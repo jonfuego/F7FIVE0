@@ -24,6 +24,7 @@ import {
 import { useScrollRestoration } from "@/lib/scroll-restoration";
 import { useFeatures } from "@/lib/features";
 import type { RequestKind, RequestSearchResult, SearchResult } from "@/lib/types";
+import { artSized } from "@/lib/art-url";
 
 const DEBOUNCE_MS = 200;
 const RESULT_LIMIT = 40;
@@ -388,7 +389,7 @@ function ResultRow({
         <div className="keyart-mini" />
         {r.poster_path ? (
           <img
-            src={r.poster_path}
+            src={artSized(r.poster_path, 300) ?? r.poster_path}
             alt=""
             loading="lazy"
             decoding="async"

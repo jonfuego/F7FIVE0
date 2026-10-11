@@ -33,6 +33,7 @@ import {
   type QueueItem,
   type RepeatMode,
 } from "@/lib/queue";
+import { artSized } from "@/lib/art-url";
 
 type Props = {
   open: boolean;
@@ -331,7 +332,7 @@ function SortableRow({ id, item, active, onJump, onRemove }: SortableRowProps) {
           {item.cover_path ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
-              src={item.cover_path}
+              src={artSized(item.cover_path, 300) ?? item.cover_path}
               alt=""
               className="h-10 w-10 shrink-0 rounded object-cover"
             />

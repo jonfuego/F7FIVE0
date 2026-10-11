@@ -15,6 +15,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { API_ORIGIN } from "@/lib/server-env";
 import { accessBearer } from "@/lib/api";
+import { artResponseHeaders, artUpstreamHeaders } from "@/lib/art-proxy";
 
 export const dynamic = "force-dynamic";
 
@@ -34,23 +35,18 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
 
   const res = await fetch(url, {
     method: "GET",
-    headers: { authorization: bearer },
+    headers: artUpstreamHeaders(bearer, req.headers),
     cache: "no-store",
     redirect: "manual",
   });
 
-  // Stream the body back. Preserve content-type + cache headers so the
-  // browser treats this the same as a static image.
-  const headers = new Headers();
-  const contentType = res.headers.get("content-type");
-  if (contentType) headers.set("content-type", contentType);
-  const contentLength = res.headers.get("content-length");
-  if (contentLength) headers.set("content-length", contentLength);
-  // Cache-bust already lives in the query (?v=<set_at>), so we can let
-  // the browser cache for a long time. Not critical if omitted.
-  headers.set("cache-control", "private, max-age=3600");
+  // Stream the body back. The API's content-type, cache-control and etag
+  // pass through unchanged (a 304 included), so the browser's disk cache keeps
+  // posters across visits.
+  const headers = artResponseHeaders(res.headers);
 
-  return new Response(res.body, {
+  // A 304 has no body.
+  return new Response(res.status === 304 ? null : res.body, {
     status: res.status,
     headers,
   });

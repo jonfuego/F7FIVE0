@@ -32,6 +32,7 @@ JOB_MUSIC_VIDEOS_SCAN = "music_videos_scan"
 JOB_FOLDER_SCAN = "folder_scan"
 JOB_AUDIO_ANALYSIS = "audio_analysis"
 JOB_UPDATE_CHECK = "update_check"
+JOB_ART_COPIES = "art_copies_backfill"
 
 # Once a day, give or take an hour, so a fleet of servers doesn't hit GitHub
 # at the same second. Checking never installs anything.
@@ -179,6 +180,19 @@ def _run_update_check() -> None:
         log.exception("scheduled update check raised")
 
 
+def _run_art_copies_backfill() -> None:
+    """One-shot after boot: build the 300 / 600 px copies for art saved before
+    they existed. Batched and paced, own session, never raises; a rerun creates
+    nothing new (see art.backfill_art_copies)."""
+    try:
+        from app.services import art as art_service
+        with db_session() as db:
+            made = art_service.backfill_art_copies(db, pause_sec=0.2)
+        log.info("art copies backfill: %d created", made)
+    except Exception:
+        log.exception("art copies backfill raised")
+
+
 def _run_audio_analysis_step() -> None:
     """Analyze ONE un-analyzed track, then reschedule the next step.
 
@@ -291,6 +305,17 @@ def start() -> BackgroundScheduler:
         replace_existing=True,
         # First look a few minutes after boot (spread out a little), then daily.
         next_run_time=datetime.now(timezone.utc) + timedelta(seconds=300 + random.randint(0, 300)),
+    )
+    # Runs once, a minute after boot, so startup is not delayed. Cheap on every
+    # later boot (it only stats files that already have their copies).
+    sched.add_job(
+        _run_art_copies_backfill,
+        id=JOB_ART_COPIES,
+        name="build smaller poster copies",
+        max_instances=1,
+        coalesce=True,
+        replace_existing=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=60),
     )
     sched.start()
     _scheduler = sched

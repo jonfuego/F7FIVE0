@@ -1,8 +1,8 @@
 import { Music } from "lucide-react-native";
 import React, { useState } from "react";
-import { Image, StyleSheet, View } from "react-native";
+import { Image, PixelRatio, StyleSheet, View } from "react-native";
 
-import { resolveArtUri } from "@/api/media";
+import { artWidthFor, resolveArtUri } from "@/api/media";
 import { useApi } from "@/state/auth";
 import { colors, radius } from "@/state/theme";
 import { Icon } from "@/ui/Icon";
@@ -18,7 +18,7 @@ interface ArtworkProps {
 /** Poster / cover image with a branded placeholder (never a blank box). */
 export function Artwork({ path, size, rounded, headers }: ArtworkProps): React.ReactElement {
   const api = useApi();
-  const uri = resolveArtUri(path);
+  const uri = resolveArtUri(path, artWidthFor(size, PixelRatio.get()));
   const [failedUri, setFailedUri] = useState<string | null>(null);
   // Server art (/api/art/...) requires the bearer token; remote (TMDB etc.)
   // URLs are public and must not receive it.
