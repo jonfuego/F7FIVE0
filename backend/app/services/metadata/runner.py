@@ -94,6 +94,49 @@ def _wiki_url_from_relations(relations: list[dict]) -> Optional[str]:
     return None
 
 
+def _wikidata_url_from_relations(relations: list[dict]) -> Optional[str]:
+    for rel in relations or []:
+        if (rel.get("type") or "").lower() == "wikidata":
+            url = ((rel or {}).get("url") or {}).get("resource")
+            if url and "wikidata.org" in url:
+                return url
+    return None
+
+
+def _link(links: Optional[list], kind: str, host: str) -> Optional[str]:
+    """The first saved artist link of `kind` on `host` (artist.links shape)."""
+    for item in links or []:
+        if isinstance(item, dict) and item.get("kind") == kind:
+            url = item.get("url") or ""
+            if host in url:
+                return url
+    return None
+
+
+def wikipedia_bio(
+    wiki_url: Optional[str], wikidata_url: Optional[str],
+) -> tuple[Optional[str], bool]:
+    """The English Wikipedia summary for an artist: straight from a Wikipedia
+    link when MusicBrainz has one, else Wikidata -> enwiki title -> summary
+    (most MusicBrainz artists only link Wikidata, which is why bios were
+    missing). Returns `(text, asked)`; `asked` is False when there was no
+    link to follow. Raises ProviderError when a service cannot answer, so a
+    caller can try again later instead of remembering a miss."""
+    title_or_url = wiki_url
+    if not title_or_url and wikidata_url:
+        from app.services.metadata.wikidata import WikidataClient
+        with WikidataClient() as wd:
+            title_or_url = wd.enwiki_title(wikidata_url)
+        if not title_or_url:
+            return None, True
+    if not title_or_url:
+        return None, False
+    with WikipediaClient() as wp:
+        payload = wp.get_extract(title_or_url)
+    text = (payload or {}).get("extract") or None
+    return (text.strip() if isinstance(text, str) and text.strip() else None), True
+
+
 def _safe_year(value) -> Optional[int]:
     """Pull a 4-digit year out of `YYYY`, `YYYY-MM`, or `YYYY-MM-DD`."""
     if not value:
@@ -248,6 +291,77 @@ def backfill_movie_genres(
 
 
 # ---------------------------------------------------------------------------
+# Artist bios (Wikipedia, through Wikidata)
+# ---------------------------------------------------------------------------
+# bio_source for an artist whose Wikipedia / Wikidata link led to no English
+# article: remembered so the backfill does not ask again.
+BIO_NOT_FOUND = "not_found"
+
+
+def backfill_artist_bios(
+    db: Session, *, batch_size: int = 25, pause_sec: float = 0.0,
+    max_failures: int = 5,
+) -> int:
+    """Fill `bio_text` for artists that have none but whose saved links point
+    at Wikipedia or Wikidata. Enrichment only followed a direct Wikipedia
+    link, and MusicBrainz links most artists to Wikidata instead, so most
+    artists never got a bio; enrichment also skips artists within its TTL, so
+    this reads the saved `links` (no MusicBrainz request) and touches only
+    `bio_text` / `bio_source`. Walks by id in batches, commits each batch,
+    waits `pause_sec` after each artist it asks about. A miss is remembered
+    (`bio_source` = BIO_NOT_FOUND); a service error is not, and
+    `max_failures` errors in a row end the run. Safe to rerun: an artist with
+    a bio or a remembered miss is never asked again. Returns how many got a
+    bio."""
+    filled = 0
+    failures = 0
+    last_id = None
+    while True:
+        stmt = (
+            select(Artist.id)
+            .where(Artist.bio_text.is_(None))
+            .where((Artist.bio_source.is_(None)) | (Artist.bio_source != BIO_NOT_FOUND))
+            .order_by(Artist.id)
+            .limit(batch_size)
+        )
+        if last_id is not None:
+            stmt = stmt.where(Artist.id > last_id)
+        ids = list(db.scalars(stmt))
+        if not ids:
+            break
+        last_id = ids[-1]
+        for artist_id in ids:
+            artist = db.get(Artist, artist_id)
+            if artist is None or artist.bio_text:
+                continue
+            wiki = _link(artist.links, "wikipedia", "wikipedia.org")
+            wikidata = _link(artist.links, "wikidata", "wikidata.org")
+            if not wiki and not wikidata:
+                continue
+            try:
+                text, _asked = wikipedia_bio(wiki, wikidata)
+            except ProviderError as exc:
+                failures += 1
+                log.info("artist bio backfill: %r failed: %s", artist.name, exc)
+                if failures >= max_failures:
+                    db.commit()
+                    log.warning("artist bio backfill: stopping after %d failures", failures)
+                    return filled
+                continue
+            failures = 0
+            if text:
+                artist.bio_text = text
+                artist.bio_source = "wikipedia"
+                filled += 1
+            else:
+                artist.bio_source = BIO_NOT_FOUND
+            if pause_sec > 0:
+                time.sleep(pause_sec)
+        db.commit()
+    return filled
+
+
+# ---------------------------------------------------------------------------
 # enrich_artist
 # ---------------------------------------------------------------------------
 def enrich_artist(
@@ -294,24 +408,30 @@ def enrich_artist(
 
     bio_text: Optional[str] = None
     bio_source: Optional[str] = None
-    wiki_url = _wiki_url_from_relations(relations)
-    if wiki_url:
-        try:
-            with WikipediaClient() as wp:
-                wiki_payload = wp.get_extract(wiki_url)
-        except ProviderError as exc:
-            log.warning("wikipedia fetch failed for %s: %s", artist.id, exc)
-            wiki_payload = None
-        if wiki_payload and wiki_payload.get("extract"):
-            bio_text = wiki_payload.get("extract")
-            bio_source = "wikipedia"
+    asked = False
+    lookup_failed = False
+    try:
+        bio_text, asked = wikipedia_bio(
+            _wiki_url_from_relations(relations),
+            _wikidata_url_from_relations(relations),
+        )
+    except ProviderError as exc:
+        # Not a miss: leave bio_source empty so the bio backfill tries again.
+        lookup_failed = True
+        log.warning("wikipedia bio fetch failed for %s: %s", artist.id, exc)
+    if bio_text is not None:
+        bio_source = "wikipedia"
+    if bio_text is None and lookup_failed and artist.bio_text:
+        # A service error must not wipe a bio the artist already has.
+        bio_text, bio_source = artist.bio_text, artist.bio_source
     if bio_text is None:
         annotation = mb_payload.get("annotation") or None
         if annotation:
             bio_text = annotation
             bio_source = "musicbrainz_annotation"
-    if bio_text is None:
-        bio_source = "none"
+    if bio_text is None and bio_source is None and asked:
+        # A Wikipedia or Wikidata link that led to no English article.
+        bio_source = BIO_NOT_FOUND
 
     artist.bio_text = bio_text
     artist.bio_source = bio_source
