@@ -392,7 +392,29 @@ button { border: 0; background: transparent; color: inherit; font: inherit; curs
 .hero .content .band .meta .dot { margin: 0 10px; color: var(--ink-3); }
 .hero .content .band .meta a { color: inherit; text-decoration: none; }
 .hero .content .band .meta a:hover { color: var(--ink); text-decoration: underline; }
-.hero .content .band .blurb { margin-bottom: 20px; }
+/* Facts line under the subtitle: runtime, genres, rating or counts. It sits
+   in the band's flow after the title (two-line clamp), so it can only push
+   the title up, never the buttons off the band. */
+.hero .content .band .meta:has(+ .facts) { margin-bottom: 6px; }
+.hero .content .band .facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  color: var(--ink-2);
+  margin-bottom: 16px;
+  font-variant-numeric: tabular-nums;
+}
+.hero .content .band .facts .dot { margin: 0 10px; color: var(--ink-3); }
+.hero .content .band .blurb {
+  margin-bottom: 20px;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
 @media (max-width: 720px) {
   .hero .content { padding: 24px 16px 32px; }
   .hero .content .band { padding: 18px 16px; }
