@@ -117,12 +117,18 @@ export const useRecent = () => useJsonQuery<RecentItem[]>(["recent"], "/api/rece
 export const useMyRequests = () => useJsonQuery<MediaRequest[]>(["requests"], "/api/requests/mine");
 export const useMySessions = () => useJsonQuery<DeviceSession[]>(["sessions"], "/api/sessions");
 
-export function useSearch(q: string): UseQueryResult<SearchResult[]> {
+/** `artists` asks the server to include artist rows (kind "artist"). Off by
+ * default: only the phone Search screen knows how to open one. */
+export function useSearch(q: string, opts: { artists?: boolean } = {}): UseQueryResult<SearchResult[]> {
   const api = useApi();
   const trimmed = q.trim();
+  const artists = opts.artists === true;
   return useQuery<SearchResult[]>({
-    queryKey: ["search", trimmed],
-    queryFn: () => api.json<SearchResult[]>(`/api/search?q=${encodeURIComponent(trimmed)}`),
+    queryKey: ["search", trimmed, artists],
+    queryFn: () =>
+      api.json<SearchResult[]>(
+        `/api/search?q=${encodeURIComponent(trimmed)}${artists ? "&include_artists=true" : ""}`,
+      ),
     enabled: trimmed.length > 0,
   });
 }
