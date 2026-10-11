@@ -88,6 +88,26 @@ export default function EditOverridesModal({
   const [error, setError] = useState<string | null>(null);
   const [artModal, setArtModal] = useState<{ role: ArtRole } | null>(null);
   const [draft, setDraft] = useState<DraftState>(() => buildInitialDraft(initial));
+  // The Art tab's pictures. `initial` is fetched once by the page that opens
+  // the modal, so after an art change the tab re-reads the override view
+  // (GET /api/admin/override/...) to show the new picture.
+  const [artView, setArtView] = useState<Props["initial"]>(initial);
+  const [artFor, setArtFor] = useState(initial);
+  if (artFor !== initial) {
+    // A new `initial` from the page (another entity, or a refetch) wins.
+    setArtFor(initial);
+    setArtView(initial);
+  }
+  const reloadArt = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/admin/override/${kind}/${entityId}`, { cache: "no-store" });
+      if (!res.ok) return;
+      const body = (await res.json()) as OverrideOut;
+      setArtView((prev) => ({ ...prev, canonical: body.canonical }));
+    } catch {
+      // Keep the old picture; the library tile still shows the new one.
+    }
+  }, [entityId, kind]);
 
   // Reset draft whenever the modal opens against a different entity. We
   // also clear stale tab errors so the next session starts clean.
@@ -216,7 +236,7 @@ export default function EditOverridesModal({
               ) : tab === "art" ? (
                 <ArtTab
                   kind={kind}
-                  initial={initial}
+                  initial={artView}
                   onOpenArt={(role) => setArtModal({ role })}
                 />
               ) : tab === "match" ? (
@@ -277,10 +297,11 @@ export default function EditOverridesModal({
           entityId={entityId}
           role={artModal.role}
           title={`${labelForKind(kind)} - ${artModal.role}`}
-          hasOverride={artHasOverride(initial, artModal.role)}
+          hasOverride={artHasOverride(artView, artModal.role)}
           onClose={() => setArtModal(null)}
           onApplied={() => {
             setArtModal(null);
+            void reloadArt();
             onApplied();
           }}
         />

@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, object_session
 
 import uuid
 
@@ -38,6 +38,9 @@ from app.api.schemas import (
     ServerHealthOut, SortOverrideOut, SortOverrideUpdate,
     UpdateDismissIn, UpdateDismissOut, WatchHistoryRowOut,
 )
+from app.models.art import (
+    ENTITY_ARTIST, ENTITY_MOVIE, ENTITY_SERIES, ROLE_BACKDROP, ROLE_POSTER, ROLE_THUMB,
+)
 from app.models.media_file import MediaFile, MediaKind, ScanState
 from app.models.movie import Movie
 from app.models.music import (
@@ -56,6 +59,7 @@ from app.services import (
     android_app, app_settings, library_folders, nas_auth, reminders,
     remote_access as ra, scan_status, server_version, tmdb_key, updates,
 )
+from app.services import art as art_service
 from app.services import artist_merge
 from app.services.metadata._base import ProviderError
 from app.services.metadata.musicbrainz import MusicBrainzClient
@@ -607,7 +611,37 @@ def _canonical_dict(kind: str, row: Any) -> dict:
         row, "cover_path", None,
     ) or getattr(row, "image_path", None)
     out["backdrop_path"] = getattr(row, "backdrop_path", None)
+
+    # art_overrides is the single source of truth for art (services/art.py
+    # resolve_art), and it is what the library tiles show. The legacy columns
+    # above are often empty (an artist picked from art search, the auto-fill,
+    # an upload), so the modal's Art tab showed "No art" next to a tile that
+    # had one. Prefer the art_overrides URL for the kinds the Art tab edits.
+    art = _OVERRIDE_ART_ROLES.get(kind)
+    session = object_session(row)
+    if art is not None and session is not None:
+        entity_kind, poster_role = art
+        poster = art_service.resolve_art(
+            session, entity_kind=entity_kind, entity_id=row.id, role=poster_role,
+        )
+        if poster:
+            out["poster_path"] = poster
+        if kind in ("movie", "series"):
+            backdrop = art_service.resolve_art(
+                session, entity_kind=entity_kind, entity_id=row.id, role=ROLE_BACKDROP,
+            )
+            if backdrop:
+                out["backdrop_path"] = backdrop
     return out
+
+
+# Override kind -> (art entity kind, role the Art tab shows as the main image).
+# Same mapping as ART_KIND_MAP in frontend/components/EditOverridesModal.tsx.
+_OVERRIDE_ART_ROLES: dict[str, tuple[str, str]] = {
+    "movie": (ENTITY_MOVIE, ROLE_POSTER),
+    "series": (ENTITY_SERIES, ROLE_POSTER),
+    "artist": (ENTITY_ARTIST, ROLE_THUMB),
+}
 
 
 def _external_id(kind: str, row: Any) -> Optional[dict]:
