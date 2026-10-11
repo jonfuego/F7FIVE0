@@ -196,3 +196,80 @@ def test_enrich_remembers_a_link_with_no_english_article(db_session, monkeypatch
     runner.enrich_artist(db_session, a.id, force=True)
     db_session.refresh(a)
     assert a.bio_text is None and a.bio_source == runner.BIO_NOT_FOUND
+
+
+# ---------------------------------------------------------------------------
+# Scheduler wiring
+# ---------------------------------------------------------------------------
+class _FakeScheduler:
+    def __init__(self):
+        self.jobs: list[dict] = []
+
+    def add_job(self, func, **kw):
+        self.jobs.append({"func": func, **kw})
+
+
+def test_bios_trigger_is_a_noop_without_a_scheduler(monkeypatch):
+    from app import scheduler
+    monkeypatch.setattr(scheduler, "_scheduler", None)
+    scheduler.trigger_artist_bios_backfill()  # must not raise
+
+
+def test_bios_trigger_queues_one_job_that_never_stacks(monkeypatch):
+    from app import scheduler
+    fake = _FakeScheduler()
+    monkeypatch.setattr(scheduler, "_scheduler", fake)
+
+    scheduler.trigger_artist_bios_backfill(delay_sec=5)
+    scheduler.trigger_artist_bios_backfill(delay_sec=5)
+
+    assert [j["id"] for j in fake.jobs] == [scheduler.JOB_ARTIST_BIOS] * 2
+    for job in fake.jobs:
+        assert job["func"] is scheduler._run_artist_bios_backfill
+        assert job["max_instances"] == 1
+        assert job["coalesce"] is True
+        assert job["replace_existing"] is True
+
+
+def test_bios_job_is_registered_once_after_boot():
+    from app import scheduler
+    sched = scheduler.start()
+    try:
+        jobs = [j for j in sched.get_jobs() if j.func is scheduler._run_artist_bios_backfill]
+        assert [j.id for j in jobs] == [scheduler.JOB_ARTIST_BIOS]
+        assert jobs[0].max_instances == 1 and jobs[0].coalesce is True
+    finally:
+        scheduler.shutdown()
+
+
+def test_a_folder_scan_queues_the_bios_backfill(db_session, monkeypatch):
+    from app import scheduler
+    fake = _FakeScheduler()
+    monkeypatch.setattr(scheduler, "_scheduler", fake)
+    monkeypatch.setattr(scheduler.nas_auth, "ensure_all", lambda db: None)
+    monkeypatch.setattr(scheduler.scan_library, "scan_all", lambda db, on_progress=None: None)
+    monkeypatch.setattr(scheduler.scan_library, "schedule_catch_up", lambda db: {})
+
+    scheduler._scan_folders()
+
+    assert scheduler.JOB_ARTIST_BIOS in [j["id"] for j in fake.jobs]
+
+
+def test_the_run_wrapper_pauses_between_artists_and_never_raises(monkeypatch):
+    from app import scheduler
+    seen = {}
+
+    def fake_backfill(db, **kw):
+        seen.update(kw)
+        return 2
+
+    monkeypatch.setattr(runner, "backfill_artist_bios", fake_backfill)
+    scheduler._run_artist_bios_backfill()
+    assert seen == {"pause_sec": scheduler.ARTIST_BIOS_PAUSE_SEC}
+    assert scheduler.ARTIST_BIOS_PAUSE_SEC > 0
+
+    def boom(db, **kw):
+        raise RuntimeError("down")
+
+    monkeypatch.setattr(runner, "backfill_artist_bios", boom)
+    scheduler._run_artist_bios_backfill()  # logged, not raised
