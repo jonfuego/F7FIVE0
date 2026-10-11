@@ -19,6 +19,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon } from "@/components/Icon";
 import { X } from "lucide-react";
 import { SourceCallouts, SourceTag } from "@/components/SourceTag";
+import { candidateTileSrc, type ArtCandidate } from "@/lib/art-candidate";
 
 export type ArtKind = "artist" | "movie" | "series" | "music_video" | "mix";
 export type ArtRole = "thumb" | "poster" | "backdrop" | "cover";
@@ -40,12 +41,7 @@ type Props = {
 
 type Tab = "upload" | "url" | "search";
 
-type Candidate = {
-  source: string;
-  ref: string;
-  url: string;
-  label: string;
-};
+type Candidate = ArtCandidate;
 
 // GET /search response: candidate tiles plus friendly notes about sources
 // that did not answer or are not set up.
@@ -261,8 +257,10 @@ export function ArtOverrideModal({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="w-full max-w-lg rounded-lg bg-neutral-900 shadow-xl ring-1 ring-neutral-800">
-        <div className="flex items-center justify-between border-b border-neutral-800 px-5 py-3">
+      {/* The panel is capped at the screen height (the overlay's p-4 is the
+          1rem either side). Header and tabs stay put; only the body scrolls. */}
+      <div className="flex max-h-[calc(100dvh-2rem)] w-full max-w-lg flex-col rounded-lg bg-neutral-900 shadow-xl ring-1 ring-neutral-800">
+        <div className="flex shrink-0 items-center justify-between border-b border-neutral-800 px-5 py-3">
           <h2
             id="art-modal-title"
             className="text-sm font-medium tracking-tight text-neutral-100"
@@ -279,7 +277,7 @@ export function ArtOverrideModal({
           </button>
         </div>
 
-        <div className="flex gap-2 border-b border-neutral-800 px-5 pt-3">
+        <div className="flex shrink-0 gap-2 border-b border-neutral-800 px-5 pt-3">
           <TabButton active={tab === "upload"} onClick={() => setTab("upload")}>
             Upload
           </TabButton>
@@ -293,7 +291,7 @@ export function ArtOverrideModal({
           )}
         </div>
 
-        <div className="px-5 py-4">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4">
           {tab === "upload" ? (
             <div className="space-y-3">
               <p className="text-xs text-neutral-400">
@@ -440,15 +438,7 @@ function SearchPanel({
               className="group flex flex-col items-stretch overflow-hidden rounded border border-neutral-800 bg-neutral-950 text-left transition hover:border-hive focus:outline-none focus:ring-1 focus:ring-focus disabled:opacity-50"
               aria-label={`Apply ${c.label}`}
             >
-              <div className="aspect-[2/3] w-full overflow-hidden bg-neutral-900">
-                <img
-                  src={c.url}
-                  alt={c.label}
-                  loading="lazy"
-                  decoding="async"
-                  className="h-full w-full object-cover"
-                />
-              </div>
+              <CandidateImage candidate={c} />
               <div className="flex items-center justify-between gap-1 px-2 py-1">
                 <span className="line-clamp-1 text-[10px] uppercase tracking-wide text-neutral-400 group-hover:text-neutral-200">
                   {c.label}
@@ -471,6 +461,27 @@ function SearchPanel({
           </button>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+// Tile image: loads the small preview, never the full-size apply URL. If the
+// preview fails to load it tries the full URL once before giving up.
+function CandidateImage({ candidate }: { candidate: Candidate }) {
+  const preview = candidateTileSrc(candidate);
+  const [src, setSrc] = useState(preview);
+  return (
+    <div className="aspect-[2/3] w-full overflow-hidden bg-neutral-900">
+      <img
+        src={src}
+        alt={candidate.label}
+        loading="lazy"
+        decoding="async"
+        onError={() => {
+          if (src !== candidate.url) setSrc(candidate.url);
+        }}
+        className="h-full w-full object-cover"
+      />
     </div>
   );
 }

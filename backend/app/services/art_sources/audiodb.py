@@ -21,6 +21,8 @@ from typing import Any, Optional
 
 import httpx
 
+from app.services.art_sources import previews
+
 
 _BASE = "https://www.theaudiodb.com/api/v1/json"
 _TIMEOUT = 6.0
@@ -100,6 +102,8 @@ def _normalize(artist: dict[str, Any]) -> list[dict[str, Any]]:
             "source": "audiodb",
             "ref": url,
             "url": url,
+            # `<image>.jpg/small` is a 250 px copy; applying downloads `url`.
+            "preview_url": previews.audiodb_url(url, previews.AUDIODB_PREVIEW_VARIANT),
             "label": f"AudioDB {label_suffix}",
         })
     return out

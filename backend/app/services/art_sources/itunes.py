@@ -30,6 +30,8 @@ from typing import Any, Optional
 
 import httpx
 
+from app.services.art_sources import previews
+
 
 _BASE = "https://itunes.apple.com"
 _TIMEOUT = 6.0
@@ -136,6 +138,8 @@ def _normalize_albums(
             "source": "itunes",
             "ref": hi,
             "url": hi,
+            # The tile loads a 300 px copy; applying downloads `url`.
+            "preview_url": previews.itunes_url(hi, previews.ITUNES_PREVIEW_SIZE),
             "label": f"iTunes album: {title}",
         })
     return out

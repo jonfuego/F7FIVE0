@@ -2,10 +2,12 @@
 
 For a given (kind, entity_id) pair, this asks each source that applies to
 the kind for images, normalizes them into a flat list of
-`{source, ref, url, label}` dicts, and returns it. The frontend renders
-each candidate as a tile in the modal's Search tab (the `source` tag
-labels the tile); the admin clicks one and the backend downloads it
-through the existing `fetch_and_save_url`.
+`{source, ref, url, preview_url, label}` dicts, and returns it. The frontend
+renders each candidate as a tile in the modal's Search tab (the `source` tag
+labels the tile, `preview_url` is the small image the tile loads); the admin
+clicks one and the backend downloads `url` (full size) through the existing
+`fetch_and_save_url`. `preview_url` is always set: a source that has no
+smaller variant gets `url` there (see `_ensure_previews`).
 
 Sources per kind:
   artist / music video -> Lidarr, TheAudioDB, iTunes (iTunes is music-video
@@ -56,6 +58,7 @@ from app.services.arr._base import ArrClientError
 from app.services.art_sources import audiodb as audiodb_source
 from app.services.art_sources import coverart as coverart_source
 from app.services.art_sources import itunes as itunes_source
+from app.services.art_sources import previews
 from app.services.art_sources import tmdb as tmdb_source
 
 
@@ -70,11 +73,13 @@ def search_candidates(
 ) -> list[dict[str, Any]]:
     """Return a flat list of candidate art for the entity.
 
-    Each entry: `{source, ref, url, label}`. `source` is the provider
-    name (`lidarr` / `radarr` / `sonarr` / `tmdb` / `audiodb` / `itunes` /
-    `coverart`). `ref` is the candidate's upstream identifier (the image
-    URL itself today). `url` is the resolvable image URL. `label` is the
-    display string the modal puts under the thumbnail.
+    Each entry: `{source, ref, url, preview_url, label}`. `source` is the
+    provider name (`lidarr` / `radarr` / `sonarr` / `tmdb` / `audiodb` /
+    `itunes` / `coverart`). `ref` is the candidate's upstream identifier (the
+    image URL itself today). `url` is the full-size image URL that applying
+    downloads. `preview_url` is a small copy for the modal's tile (the same
+    as `url` when the source has no smaller variant). `label` is the display
+    string the modal puts under the thumbnail.
 
     Empty list when no source returns anything useful. Individual source
     failures are swallowed here; use `search_candidates_with_notes` when
@@ -100,16 +105,19 @@ def search_candidates_with_notes(
     search here."). No raw error codes reach this list.
     """
     if kind == ENTITY_ARTIST:
-        return _artist_candidates(db, entity_id)
-    if kind == ENTITY_MOVIE:
-        return _movie_candidates(db, entity_id)
-    if kind == ENTITY_SERIES:
-        return _series_candidates(db, entity_id)
-    if kind == ENTITY_MUSIC_VIDEO:
-        return _music_video_candidates(db, entity_id)
-    if kind == ENTITY_ALBUM:
-        return _album_candidates(db, entity_id)
-    return [], []
+        found = _artist_candidates(db, entity_id)
+    elif kind == ENTITY_MOVIE:
+        found = _movie_candidates(db, entity_id)
+    elif kind == ENTITY_SERIES:
+        found = _series_candidates(db, entity_id)
+    elif kind == ENTITY_MUSIC_VIDEO:
+        found = _music_video_candidates(db, entity_id)
+    elif kind == ENTITY_ALBUM:
+        found = _album_candidates(db, entity_id)
+    else:
+        return [], []
+    candidates, notes = found
+    return _ensure_previews(candidates), notes
 
 
 # ---------------------------------------------------------------------------
@@ -348,6 +356,18 @@ def _audiodb_artist_images(name: Optional[str]) -> list[dict[str, Any]]:
     return audiodb_source.search_artist(settings.audiodb_api_key, name)
 
 
+def _ensure_previews(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Give every candidate a `preview_url`.
+
+    Sources that know a size scheme set their own. Anything missing one
+    shows its full-size `url` in the tile.
+    """
+    for item in items:
+        if not item.get("preview_url"):
+            item["preview_url"] = item.get("url")
+    return items
+
+
 def _dedupe_by_url(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Stable dedupe across sources. First occurrence wins so Lidarr/Radarr
     sit above iTunes/TMDB when both return the same upstream URL (rare in
@@ -383,6 +403,10 @@ def _lidarr_artist_images(
     return _normalize_images("lidarr", "Lidarr", images)
 
 
+# *arr cover types that are 16:9 art, so a TMDB URL uses the backdrop sizes.
+_BACKDROP_COVER_TYPES = frozenset({"fanart", "banner", "background", "screenshot"})
+
+
 def _normalize_images(
     source: str, label_prefix: str, images: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
@@ -408,10 +432,12 @@ def _normalize_images(
             continue
         seen_urls.add(url)
         cover_type = img.get("coverType") or "image"
+        backdrop = cover_type in _BACKDROP_COVER_TYPES
         out.append({
             "source": source,
             "ref": url,
             "url": url,
+            "preview_url": previews.preview_for(url, backdrop=backdrop) or url,
             "label": f"{label_prefix} {cover_type}",
         })
     return out
