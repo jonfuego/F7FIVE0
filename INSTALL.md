@@ -100,7 +100,12 @@ your account; click the button it shows.
 `music.yourdomain.com`. Click **Sign in to Cloudflare**, sign in, click
 your domain, and **Authorize**. Cloudflare gives you about 9 minutes; the
 page counts down. F7FIVE0 creates the tunnel, the DNS record, and an
-`F7FIVE0-Tunnel` service.
+`F7FIVE0-Tunnel` service. Each install gets its own tunnel, named
+`f7five0-<computer name>` and saved in `.env` as `CLOUDFLARE_TUNNEL_NAME`, and
+a rerun keeps it. If that name is already running on another PC, F7FIVE0 stops
+and says so instead of joining it: set a different `CLOUDFLARE_TUNNEL_NAME` in
+`.env` and run it again. It also checks that your address ends up pointing at
+this tunnel, and stops with a message if another tunnel still has it.
 
 **Port forwarding (advanced).** For people comfortable with their router.
 F7FIVE0 installs Caddy as the `F7FIVE0-Proxy` service, which gets and

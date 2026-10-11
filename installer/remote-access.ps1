@@ -52,6 +52,8 @@ $ProgressPreference = "SilentlyContinue"
 if (-not $InstallDir) { $InstallDir = Split-Path -Parent $PSScriptRoot }
 $InstallDir = [IO.Path]::GetFullPath($InstallDir)
 . (Join-Path $PSScriptRoot "common.ps1")
+# Pure decisions for the Cloudflare tunnel step (name, reuse, connectors, DNS).
+. (Join-Path $PSScriptRoot "tunnel-logic.ps1")
 
 # Pinned downloads (SEC-P0-2): exact version, immutable URL, and SHA-256 per
 # file in installer\downloads.manifest.psd1. Get-DownloadSpec (common.ps1)
@@ -83,6 +85,9 @@ $script:RunLog = Join-Path $RaDir "run.log"
 
 $script:Cancelled = $false
 $script:LastWarn = ""
+# The tunnel Setup-Cloudflare settled on; saved to .env as
+# CLOUDFLARE_TUNNEL_NAME once the whole run succeeds.
+$script:TunnelNameToSave = ""
 # Open sign-in links in a browser only when someone is at this console. The
 # scheduled task runs as SYSTEM with no desktop; the admin page shows the link.
 $OpenLinks = -not $FromRequest
@@ -282,6 +287,55 @@ function Wait-ServiceRunning([string]$name, [int]$seconds) {
     return $false
 }
 
+# The CNAME target of $hostName read from the Cloudflare API with the account
+# and zone cloudflared saved in cert.pem. A proxied record hides its CNAME from
+# a plain DNS lookup, so this is the one that can see it. $null when it cannot
+# be read (the caller falls back to a DNS lookup). The token stays in memory.
+function Get-CloudflareCnameTarget([string]$certPath, [string]$hostName) {
+    try {
+        $t = Read-OriginCertToken (Get-Content -Raw -Path $certPath)
+        if (-not $t) { return $null }
+        $uri = "https://api.cloudflare.com/client/v4/zones/$($t.ZoneId)/dns_records?type=CNAME&name=$hostName"
+        $r = Invoke-RestMethod -Uri $uri -Headers @{ Authorization = "Bearer $($t.ApiToken)" } -UseBasicParsing -TimeoutSec 15
+        if ($r.success -and $r.result) { return [string](@($r.result)[0].content) }
+    } catch { }
+    return $null
+}
+
+# The CNAME target of $hostName from public DNS (1.1.1.1, then this PC's
+# resolver), or $null. Empty for a proxied record.
+function Get-PublicCnameTarget([string]$hostName) {
+    foreach ($server in @("1.1.1.1", "")) {
+        try {
+            if ($server) { $r = Resolve-DnsName -Name $hostName -Type CNAME -Server $server -DnsOnly -ErrorAction Stop }
+            else { $r = Resolve-DnsName -Name $hostName -Type CNAME -DnsOnly -ErrorAction Stop }
+            $c = @($r | Where-Object { $_.Type -eq "CNAME" -and $_.NameHost }) | Select-Object -First 1
+            if ($c) { return [string]$c.NameHost }
+        } catch { }
+    }
+    return $null
+}
+
+# `route dns --overwrite-dns` exits 0 even when it leaves the record on
+# another tunnel, so check where the record really points. Throws (Fail) when
+# it points at another tunnel; nothing has been written or started yet then.
+function Confirm-TunnelDns([string]$certPath, [string]$hostName, [string]$tunnelId, [string]$routeText) {
+    Step "Checking where $hostName points"
+    $verdict = $null
+    for ($try = 1; $try -le 5; $try++) {
+        $target = Get-CloudflareCnameTarget $certPath $hostName
+        if (-not $target) { $target = Get-PublicCnameTarget $hostName }
+        $verdict = Get-RouteDnsVerdict $routeText $tunnelId $target $hostName
+        if ($verdict.State -eq "ok" -or -not $verdict.Retryable) { break }
+        if ($try -lt 5) {
+            Info "$hostName does not show this tunnel yet; asking again in a few seconds (DNS can take a moment)."
+            Start-Sleep -Seconds 4
+        }
+    }
+    if ($verdict.State -eq "failed") { Fail $verdict.Message }
+    if ($verdict.State -eq "unknown") { Warn $verdict.Message } else { Ok $verdict.Message }
+}
+
 function Setup-Cloudflare([string]$hostName) {
     $cfd = Get-Cloudflared
     $cfDir = Join-Path $InstallDir "cloudflared"
@@ -289,7 +343,7 @@ function Setup-Cloudflare([string]$hostName) {
     $cert = Join-Path $cfDir "cert.pem"
     $cred = Join-Path $cfDir "tunnel.json"
     $cfg  = Join-Path $cfDir "config.yml"
-    $name = "f7five0"
+    $stamp = (Get-Date).ToString("yyyyMMddHHmmss")
     $prev = $ErrorActionPreference; $ErrorActionPreference = "Continue"
     try {
         if (-not (Test-Path $cert)) {
@@ -309,43 +363,103 @@ function Setup-Cloudflare([string]$hostName) {
             if (Test-Path "$userCert.bak-f7five0") { Move-Item -Force "$userCert.bak-f7five0" $userCert }
             Set-PrivateAcl $cert
         }
-        Step "Creating the Cloudflare tunnel"
+
+        Step "Choosing the Cloudflare tunnel"
         # `tunnel list` only returns live tunnels. Don't filter on deleted_at:
         # live tunnels report it as "0001-01-01T00:00:00Z", not blank.
-        $findTunnel = {
-            $json = & $cfd tunnel --origincert $cert list --name $name --output json 2>$null | Out-String
-            if (-not $json.Trim()) { return $null }
-            try { @($json | ConvertFrom-Json) | Where-Object { $_.name -eq $name } | Select-Object -First 1 } catch { $null }
+        $listTunnels = {
+            $json = & $cfd tunnel --origincert $cert list --output json 2>$null | Out-String
+            if ($LASTEXITCODE -ne 0) { return [pscustomobject]@{ Ok = $false; Tunnels = @() } }
+            $items = @()
+            if ($json.Trim() -and $json.Trim() -ne "null") {
+                # ConvertFrom-Json hands a JSON array back as ONE object; foreach unrolls it.
+                try { $parsed = $json | ConvertFrom-Json } catch { return [pscustomobject]@{ Ok = $false; Tunnels = @() } }
+                foreach ($t in @($parsed)) { if ($t -and $t.name) { $items += $t } }
+            }
+            return [pscustomobject]@{ Ok = $true; Tunnels = @($items) }
         }
-        $tunnel = & $findTunnel
+        $account = & $listTunnels
+        if (-not $account.Ok) { Warn "Could not read the tunnel list from Cloudflare. Check the internet connection and try again."; return $null }
+
+        # What this install already runs: the tunnel named in its own
+        # cloudflared\config.yml (or in tunnel.json), matched on the account by
+        # id or name. Each install gets its own tunnel, so a rerun keeps it.
+        $cfgText = if (Test-Path $cfg) { Get-Content -Raw -Path $cfg } else { "" }
+        $credText = if (Test-Path $cred) { Get-Content -Raw -Path $cred } else { "" }
+        $local = Read-LocalTunnel $cfgText $credText
+        $localTunnel = $null
+        if ($local.Ref) { $localTunnel = $account.Tunnels | Where-Object { $_.id -eq $local.Ref -or $_.name -eq $local.Ref } | Select-Object -First 1 }
+        $localName = if ($localTunnel) { [string]$localTunnel.name } else { "" }
+        $decision = Get-TunnelNameDecision (Get-EnvValue "CLOUDFLARE_TUNNEL_NAME") $localName $env:COMPUTERNAME
+        $name = $decision.Name
+        $script:TunnelNameToSave = $name
+        Info "Tunnel '$name': $($decision.Reason)"
+
+        $tunnel = $account.Tunnels | Where-Object { $_.name -eq $name } | Select-Object -First 1
+        $credUse = ""
         if (-not $tunnel) {
+            Step "Creating the Cloudflare tunnel"
+            # A credentials file here belongs to a tunnel that is gone from the account.
+            if (Test-Path $cred) { Move-Item -Force $cred "$cred.old-$stamp"; Info "Moved the old credentials file aside (tunnel.json.old-$stamp)." }
             $out = @(& $cfd tunnel --origincert $cert create --credentials-file $cred $name 2>&1 | ForEach-Object { "$_" })
             $out | ForEach-Object { Info $_ }
-            $tunnel = & $findTunnel
-            if (-not $tunnel) { Warn "Could not create the Cloudflare tunnel."; return $null }
+            $account = & $listTunnels
+            $tunnel = $account.Tunnels | Where-Object { $_.name -eq $name } | Select-Object -First 1
+            if (-not $tunnel -or -not (Test-Path $cred)) { Warn "Could not create the Cloudflare tunnel."; return $null }
+            $credUse = $cred
+        } else {
+            # Credentials this PC already has for that exact tunnel (this folder's
+            # tunnel.json, or the file the existing config.yml points at).
+            foreach ($c in @($cred, $local.CredFile)) {
+                if ($credUse -or -not $c -or -not (Test-Path $c)) { continue }
+                if (Test-SameTunnelId (Get-CredTunnelId (Get-Content -Raw -Path $c)) ([string]$tunnel.id)) { $credUse = $c }
+            }
         }
-        if (-not (Test-Path $cred)) {
-            # The tunnel exists on Cloudflare (an earlier install) but this PC
-            # has no credentials for it. Fetch them.
-            Info "Found the existing '$name' tunnel on your Cloudflare account; fetching its credentials."
+
+        if (-not $credUse) {
+            # The tunnel exists on the account and this PC has no credentials
+            # for it. Never fetch them for a tunnel somebody else is running.
+            Info "The tunnel '$name' exists on your Cloudflare account; checking nothing else is connected to it."
+            $info = @(& $cfd tunnel --origincert $cert info $name 2>&1 | ForEach-Object { "$_" }) -join "`n"
+            $svc = Get-Service -Name "F7FIVE0-Tunnel" -ErrorAction SilentlyContinue
+            $own = [bool]($svc -and $svc.Status -eq "Running" -and $local.Ref -and ($local.Ref -eq $tunnel.id -or $local.Ref -eq $tunnel.name))
+            $use = Get-TunnelUseDecision $info $name $own
+            Info "Connectors on '$name': $($use.State)$(if ($use.Count -gt 0) { ", $($use.Count) seen" })."
+            if ($use.InUse) { Warn $use.Message; return $null }
+            if ($use.Note) { Info $use.Note }
+            Info "Nothing else is connected to '$name'; fetching its credentials."
+            if (Test-Path $cred) { Move-Item -Force $cred "$cred.old-$stamp" }
             & $cfd tunnel --origincert $cert token --cred-file $cred $name 2>&1 | Out-Null
-            if (-not (Test-Path $cred)) {
+            if (Test-Path $cred) {
+                $credUse = $cred
+            } elseif ($decision.Source -eq "new") {
+                # Only a tunnel Setup named itself (and nothing is connected to) is replaced.
                 Info "Could not fetch them. Replacing the old tunnel with a new one."
                 & $cfd tunnel --origincert $cert cleanup $name 2>&1 | ForEach-Object { Info "$_" }
                 & $cfd tunnel --origincert $cert delete -f $name 2>&1 | ForEach-Object { Info "$_" }
                 & $cfd tunnel --origincert $cert create --credentials-file $cred $name 2>&1 | ForEach-Object { Info "$_" }
-                $tunnel = & $findTunnel
+                $account = & $listTunnels
+                $tunnel = $account.Tunnels | Where-Object { $_.name -eq $name } | Select-Object -First 1
+                if ($tunnel -and (Test-Path $cred)) { $credUse = $cred }
+            } else {
+                Warn "Could not fetch the credentials for the tunnel '$name'. It was left alone."
+                return $null
             }
         }
-        if (-not $tunnel -or -not (Test-Path $cred)) { Warn "Cloudflare tunnel credentials are missing."; return $null }
-        Set-PrivateAcl $cred
+        if (-not $tunnel -or -not $credUse) { Warn "Cloudflare tunnel credentials are missing."; return $null }
+        if ($credUse.StartsWith($cfDir, [StringComparison]::OrdinalIgnoreCase)) { Set-PrivateAcl $credUse }
+
         Step "Pointing $hostName at the tunnel"
-        & $cfd tunnel --origincert $cert route dns --overwrite-dns $name $hostName 2>&1 | ForEach-Object { Info "$_" }
-        if ($LASTEXITCODE -ne 0) { Warn "Could not point $hostName at the tunnel. Is that domain on the Cloudflare account you picked?"; return $null }
+        $routeOut = @(& $cfd tunnel --origincert $cert route dns --overwrite-dns $name $hostName 2>&1 | ForEach-Object { "$_" })
+        $routeCode = $LASTEXITCODE
+        $routeOut | ForEach-Object { Info $_ }
+        if ($routeCode -ne 0) { Warn "Could not point $hostName at the tunnel. Is that domain on the Cloudflare account you picked?"; return $null }
+        Confirm-TunnelDns $cert $hostName ([string]$tunnel.id) ($routeOut -join "`n")
+
         $yaml = @(
             "# Written by F7FIVE0 setup.",
             "tunnel: $($tunnel.id)",
-            "credentials-file: $cred",
+            "credentials-file: $credUse",
             "ingress:",
             "  - hostname: $hostName",
             "    service: http://127.0.0.1:$WebPort",
@@ -508,6 +622,8 @@ try {
     } else {
         Step "Saving the address"
         Set-EnvKey "PUBLIC_URL" $url
+        # Each install keeps its own tunnel: remember its name for reruns.
+        if ($Method -eq "cloudflare" -and $script:TunnelNameToSave) { Set-EnvKey "CLOUDFLARE_TUNNEL_NAME" $script:TunnelNameToSave }
         # Keep read access for the services' account (none when SYSTEM).
         Set-PrivateAcl $EnvFile @(Get-ServiceAccountSid)
         if ($Method -eq "off") {
