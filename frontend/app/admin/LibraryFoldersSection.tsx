@@ -2,7 +2,7 @@
 // videos) can use several source folders. Paths are typed (the browser
 // can't browse the server's drives); after saving, the server reports which
 // folders it can open, as the account its services run under, and starts a
-// folder scan.
+// folder scan. Watching and starting scans lives in Admin > Scans.
 //
 // TV and music merge across folders; the same movie in two folders shows up
 // twice. Removing a folder takes its items out of the library without
@@ -18,7 +18,6 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { apiGet, apiPut, apiDelete, ApiError } from "@/lib/client-api";
-import { ScanStatusBlock } from "./ScanStatusBlock";
 import type {
   LibraryFolder,
   LibraryFolderKind,
@@ -73,15 +72,13 @@ function same(a: Draft, b: Draft): boolean {
   );
 }
 
-export function LibraryFoldersSection() {
+export function LibraryFoldersSection({ onSaved }: { onSaved?: () => void }) {
   const [data, setData] = useState<LibraryFolders | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [adding, setAdding] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
-  // Bumped after a save: saving folders starts a scan, and the status block looks for it.
-  const [scanRefresh, setScanRefresh] = useState(0);
 
   // NAS sign-in inline form. Keyed by the row it hangs under; the credential
   // itself applies to the whole server.
@@ -148,12 +145,15 @@ export function LibraryFoldersSection() {
       const res = await apiPut<LibraryFolders>("/api/admin/library-folders", { folders: draft });
       setData(res);
       setDraft(toDraft(res));
-      setScanRefresh((n) => n + 1);
+      // Saving starts a scan on the server; the Scans card looks for it now and
+      // again once the job has had time to mark itself running.
+      onSaved?.();
+      window.setTimeout(() => onSaved?.(), 2000);
       const offline = res.libraries.flatMap((l) => l.folders).filter((f) => !f.reachable).length;
       setStatus(
         offline
-          ? `Saved. Scanning now. ${offline} folder${offline === 1 ? "" : "s"} can't be opened by the server yet.`
-          : "Saved. Scanning now; new items show up as they're found.",
+          ? `Saved. Scanning now (see Scans). ${offline} folder${offline === 1 ? "" : "s"} can't be opened by the server yet.`
+          : "Saved. Scanning now (see Scans); new items show up as they're found.",
       );
     } catch (err) {
       if (err instanceof ApiError && err.detail) setError(err.detail);
@@ -402,8 +402,6 @@ export function LibraryFoldersSection() {
         {status ? <span className="text-xs text-neutral-400">{status}</span> : null}
         {nasNotice ? <span className="text-xs text-neutral-400">{nasNotice}</span> : null}
       </div>
-
-      <ScanStatusBlock refreshKey={scanRefresh} />
     </div>
   );
 }

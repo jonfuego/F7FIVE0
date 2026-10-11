@@ -13,17 +13,16 @@ import { CollapsibleSection } from "@/components/CollapsibleSection";
 import { RemoteAccessSection } from "./RemoteAccessSection";
 import { UpdatesSection } from "./UpdatesSection";
 import { LibraryFoldersSection } from "./LibraryFoldersSection";
-import { MusicVideosScanBlock } from "./MusicVideosScanBlock";
+import { ScansSection, scanInputs, useScanStatuses } from "./ScansSection";
 import { ArrSection } from "./ArrSection";
 import { MetadataSection } from "./MetadataSection";
 import { apiGet, apiPatch, apiPost, apiDelete, ApiError } from "@/lib/client-api";
 import { loadMe } from "@/lib/load-me";
-import { useFeatures } from "@/lib/features";
-import { showArrSync, type FolderScanStatus } from "@/lib/library-scan";
-import { remoteAccessSummary, scanSummary, updatesSummary, type SectionSummary } from "@/lib/admin-sections";
+import { remoteAccessSummary, updatesSummary, type SectionSummary } from "@/lib/admin-sections";
 import {
   errorMessage, okMessage, ownRowReason, rowMessageFor, userActionErrorText, type RowMessage,
 } from "@/lib/admin-users";
+import { buildScanRows, scansSummary } from "@/lib/scans-rows";
 import { useViewPref } from "@/lib/use-view-pref";
 import type { AdminSectionId } from "@/lib/view-prefs";
 import type {
@@ -33,37 +32,33 @@ import type {
 
 // Lightweight status probes for the section summaries shown when a card is
 // folded. These run whether or not the section is expanded, so a collapsed
-// section can still surface a running scan, a failed scan, an update available
-// or a running update. They are cheap on a home-scale instance; the section
+// section can still surface an update available or a running update (the
+// Scans card has its own poll, useScanStatuses). They are cheap on a home-scale instance; the section
 // bodies keep their own fetches for the full view.
 type SectionStatuses = {
   updates: SectionSummary;
   remote: SectionSummary;
-  scan: SectionSummary;
 };
 
 function useSectionSummaries(enabled: boolean): SectionStatuses {
   const [updates, setUpdates] = useState<UpdatesStatus | null>(null);
   const [remote, setRemote] = useState<RemoteAccessStatus | null>(null);
-  const [scan, setScan] = useState<FolderScanStatus | null>(null);
 
   useEffect(() => {
     if (!enabled) return;
     let cancelled = false;
     const load = async () => {
-      const [u, r, s] = await Promise.allSettled([
+      const [u, r] = await Promise.allSettled([
         apiGet<UpdatesStatus>("/api/admin/updates"),
         apiGet<RemoteAccessStatus>("/api/admin/remote-access"),
-        apiGet<FolderScanStatus>("/api/admin/library/scan"),
       ]);
       if (cancelled) return;
       if (u.status === "fulfilled") setUpdates(u.value);
       if (r.status === "fulfilled") setRemote(r.value);
-      if (s.status === "fulfilled") setScan(s.value);
     };
     void load();
-    // Refresh so a scan or update that starts while the admin watches shows up
-    // in a folded summary.
+    // Refresh so an update that starts while the admin watches shows up in a
+    // folded summary.
     const id = window.setInterval(() => void load(), 10_000);
     return () => {
       cancelled = true;
@@ -74,7 +69,6 @@ function useSectionSummaries(enabled: boolean): SectionStatuses {
   return {
     updates: updatesSummary(updates),
     remote: remoteAccessSummary(remote),
-    scan: scanSummary(scan),
   };
 }
 
@@ -123,6 +117,10 @@ export default function AdminPage() {
   );
 
   const summaries = useSectionSummaries(isAdmin);
+  // The Scans card: its statuses are polled here so a folded card still shows
+  // a running or failed scan and opens itself.
+  const { statuses: scanStatuses, refresh: refreshScans } = useScanStatuses(isAdmin);
+  const scansInfo = scansSummary(buildScanRows(scanInputs(scanStatuses)));
 
   // A reminder banner links to /admin#metadata: force Metadata open on that hash
   // so a collapsed card can't hide where the admin was sent.
@@ -150,7 +148,7 @@ export default function AdminPage() {
         <header className="mb-4">
           <h1 className="text-2xl font-semibold tracking-tight">Admin</h1>
           <p className="mt-1 text-sm text-neutral-500">
-            Manage users, updates, remote access, and library folders, trigger library sync, inspect active streams and recent history.
+            Manage users, updates, remote access, library folders and scans, inspect active streams and recent history.
           </p>
         </header>
 
@@ -185,11 +183,19 @@ export default function AdminPage() {
               title="Library folders"
               collapsed={collapsed.has("library-folders")}
               onToggle={toggle}
-              summary={summaries.scan.text}
-              attention={summaries.scan.attention}
-              forceOpen={summaries.scan.attention}
             >
-              <LibraryFoldersSection />
+              <LibraryFoldersSection onSaved={() => void refreshScans()} />
+            </CollapsibleSection>
+            <CollapsibleSection
+              id="scans"
+              title="Scans"
+              collapsed={collapsed.has("scans")}
+              onToggle={toggle}
+              summary={scansInfo.text}
+              attention={scansInfo.attention}
+              forceOpen={scansInfo.attention}
+            >
+              <ScansSection statuses={scanStatuses} refresh={refreshScans} />
             </CollapsibleSection>
             <CollapsibleSection
               id="metadata"
@@ -202,9 +208,6 @@ export default function AdminPage() {
             </CollapsibleSection>
             <CollapsibleSection id="arr" title="Radarr, Sonarr and Lidarr" collapsed={collapsed.has("arr")} onToggle={toggle}>
               <ArrSection />
-            </CollapsibleSection>
-            <CollapsibleSection id="library" title="Library" collapsed={collapsed.has("library")} onToggle={toggle}>
-              <LibrarySection />
             </CollapsibleSection>
             <CollapsibleSection id="audio-analysis" title="Audio analysis" collapsed={collapsed.has("audio-analysis")} onToggle={toggle}>
               <AudioAnalysisSection />
@@ -506,59 +509,6 @@ function NewUserForm({ onCreated }: { onCreated: (u: AdminUser) => void }) {
         </p>
       ) : null}
     </form>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Library sync
-// ---------------------------------------------------------------------------
-function LibrarySection() {
-  // "Run *arr sync now" only shows when Radarr, Sonarr or Lidarr is set up;
-  // folder libraries are scanned from Admin > Library folders. Music videos
-  // are scanned off the filesystem on demand, in their own status block below.
-  const features = useFeatures();
-  const showArr = showArrSync(features?.arr);
-  const [busy, setBusy] = useState(false);
-  const [status, setStatus] = useState<string | null>(null);
-
-  async function runSync() {
-    if (busy) return;
-    setBusy(true);
-    setStatus(null);
-    try {
-      await apiPost("/api/admin/library/sync", {});
-      setStatus("Sync queued. Full *arr fetch runs in the background.");
-    } catch (err) {
-      setStatus(err instanceof Error ? err.message : "Failed to enqueue sync.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <div>
-      <p className="text-xs text-neutral-500">
-        {showArr ? "The *arr sync scheduler already runs every 5 minutes. " : ""}
-        Music videos are scanned off the filesystem on demand; trigger one
-        after dropping new files into the Music Videos share. Scan the movie,
-        TV and music folders from Library folders above.
-      </p>
-      {showArr ? (
-        <div className="mt-4 flex flex-wrap items-center gap-3">
-          <button
-            type="button"
-            onClick={runSync}
-            disabled={busy}
-            className={primaryButtonCls}
-          >
-            {busy ? "Queuing..." : "Run *arr sync now"}
-          </button>
-          {status ? <span className="text-xs text-neutral-400">{status}</span> : null}
-        </div>
-      ) : null}
-
-      <MusicVideosScanBlock />
-    </div>
   );
 }
 

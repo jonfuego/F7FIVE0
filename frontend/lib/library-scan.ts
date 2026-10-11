@@ -46,8 +46,12 @@ export type FolderScanStatus = {
   started_at: string | null;
   finished_at: string | null;
   current_library: string | null;
+  /** The libraries this scan was asked to do; null means all of them. */
+  scope?: string[] | null;
   libraries: Record<string, LibraryScanCounts>;
   last_error: string | null;
+  /** How many folders each library has (movies, tv, music, music_videos). */
+  folders?: Record<string, number>;
 };
 
 export const LIBRARY_LABEL: Record<string, string> = { movies: "Movies", tv: "TV", music: "Music" };
@@ -136,3 +140,15 @@ export function mvCountsText(status: MusicVideosScanStatus): string {
   if (status.errors) parts.push(plural(status.errors, "error", "errors"));
   return parts.join(", ");
 }
+
+/** GET /api/admin/library/arr-sync: the *arr sync, one app after another. */
+export type ArrSyncStatus = {
+  state: "idle" | "running" | string;
+  started_at: string | null;
+  finished_at: string | null;
+  current_app: string | null;
+  apps: Record<string, { state: string; synced?: number; errors?: number }>;
+  last_error: string | null;
+  /** Which apps have a key (that app owns its library). */
+  configured: { radarr: boolean; sonarr: boolean; lidarr: boolean };
+};
