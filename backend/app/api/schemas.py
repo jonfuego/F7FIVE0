@@ -350,6 +350,7 @@ class MergePreviewOut(BaseModel):
     target_name: str
     albums: int
     tracks: int
+    music_videos: int = 0
 
 
 class MergeArtistIn(BaseModel):
@@ -366,6 +367,7 @@ class MergeResultOut(BaseModel):
     target_name: str
     albums_moved: int
     tracks_moved: int
+    music_videos_moved: int = 0
 
 
 class UndoMergeResultOut(BaseModel):

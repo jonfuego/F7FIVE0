@@ -1,9 +1,13 @@
 """Merge one artist into another, durably, with undo.
 
 An admin merges a collaboration-credit artist (for example "2Pac Featuring KC
-And Jojo") into the main artist ("2Pac"). This:
+And Jojo") into the main artist ("2Pac"), or a music videos artist into the
+music library artist it duplicates ("Birthday Party" into "The Birthday
+Party"). This:
 
-  1. Moves the source artist's albums and tracks to the target.
+  1. Moves the source artist's albums and tracks to the target, and its music
+     video releases and videos. (Those rows cascade with their artist, so
+     before this a merge deleted a music videos artist's videos.)
   2. Saves an alias (artist_aliases) so the folder scan and the Lidarr sync
      resolve the source name and MBID to the target and do not recreate it.
   3. Records the merge (artist_merges) with enough of the source artist to
@@ -11,7 +15,9 @@ And Jojo") into the main artist ("2Pac"). This:
   4. Deletes the source artist row.
 
 Undo removes the alias, recreates the source artist from the record, moves the
-albums that moved back onto it, and marks the merge undone. Album.credited_as /
+albums and music video releases that moved back onto it, and marks the merge
+undone. The moved release ids sit in `source_snapshot` under
+`_moved_music_video_release_ids` (no new column, so no migration). Album.credited_as /
 Track.credited_as are left in place either way so the record of who was on each
 release survives both the merge and the undo.
 """
@@ -25,7 +31,9 @@ from typing import Optional
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models.music import Album, Artist, ArtistAlias, ArtistMerge, Track
+from app.models.music import (
+    Album, Artist, ArtistAlias, ArtistMerge, MusicVideo, MusicVideoRelease, Track,
+)
 
 
 log = logging.getLogger("f7five0.artist_merge")
@@ -43,7 +51,8 @@ class MergeError(Exception):
 
 
 def preview(db: Session, source: Artist) -> dict:
-    """How much moves: album and track counts under the source artist.
+    """How much moves: album, track and music video counts under the source
+    artist.
 
     Used by the confirm dialog so it can name what the merge moves.
     """
@@ -55,7 +64,13 @@ def preview(db: Session, source: Artist) -> dict:
         .join(Album, Album.id == Track.album_id)
         .where(Album.artist_id == source.id)
     ) or 0
-    return {"albums": int(album_count), "tracks": int(track_count)}
+    video_count = db.scalar(
+        select(func.count(MusicVideo.id)).where(MusicVideo.artist_id == source.id)
+    ) or 0
+    return {
+        "albums": int(album_count), "tracks": int(track_count),
+        "music_videos": int(video_count),
+    }
 
 
 def _snapshot(artist: Artist) -> dict:
@@ -94,11 +109,38 @@ def merge(db: Session, source: Artist, target: Artist) -> ArtistMerge:
             album.credited_as = source.name
         album.artist_id = target.id
 
+    # Music video releases and their videos move too. A release is unique per
+    # (artist, folder), so a target that already has a release in the same
+    # folder name would collide; stop before anything changes rather than
+    # lose either one.
+    releases = list(db.scalars(
+        select(MusicVideoRelease).where(MusicVideoRelease.artist_id == source.id)
+    ))
+    if releases:
+        target_subpaths = set(db.scalars(
+            select(MusicVideoRelease.source_subpath).where(
+                MusicVideoRelease.artist_id == target.id,
+            )
+        ))
+        clash = sorted(r.source_subpath for r in releases if r.source_subpath in target_subpaths)
+        if clash:
+            raise MergeError(
+                "both artists have a music video release in the folder "
+                + ", ".join(repr(c) for c in clash)
+            )
+    release_ids = [r.id for r in releases]
+    for release in releases:
+        release.artist_id = target.id
+    for video in db.scalars(select(MusicVideo).where(MusicVideo.artist_id == source.id)):
+        video.artist_id = target.id
+
+    snapshot = _snapshot(source)
+    snapshot["_moved_music_video_release_ids"] = [str(r) for r in release_ids]
     record = ArtistMerge(
         target_artist_id=target.id,
         source_name=source.name,
         source_mbid=source.mbid,
-        source_snapshot=_snapshot(source),
+        source_snapshot=snapshot,
         moved_album_ids=[str(a) for a in album_ids],
     )
     db.add(record)
@@ -111,11 +153,18 @@ def merge(db: Session, source: Artist, target: Artist) -> ArtistMerge:
         source_mbid=source.mbid,
     )
 
+    # Flush the moves, then drop any loaded child collections on the source:
+    # Artist.albums / music_videos / music_video_releases are delete-orphan, so
+    # a stale loaded list would delete rows that already moved. Reloaded after
+    # the flush they are empty.
+    db.flush()
+    db.expire(source, ["albums", "music_videos", "music_video_releases"])
     db.delete(source)
     db.flush()
     log.info(
-        "merged artist %r into %r: %d albums, %d tracks",
+        "merged artist %r into %r: %d albums, %d tracks, %d music videos",
         record.source_name, target.name, counts["albums"], counts["tracks"],
+        counts["music_videos"],
     )
     return record
 
@@ -163,6 +212,20 @@ def undo(db: Session, record: ArtistMerge) -> Artist:
     moved = [uuid.UUID(a) if isinstance(a, str) else a for a in (record.moved_album_ids or [])]
     for album in db.scalars(select(Album).where(Album.id.in_(moved))):
         album.artist_id = restored.id
+
+    moved_releases = [
+        uuid.UUID(r) if isinstance(r, str) else r
+        for r in (snap.get("_moved_music_video_release_ids") or [])
+    ]
+    if moved_releases:
+        for release in db.scalars(
+            select(MusicVideoRelease).where(MusicVideoRelease.id.in_(moved_releases))
+        ):
+            release.artist_id = restored.id
+        for video in db.scalars(
+            select(MusicVideo).where(MusicVideo.release_id.in_(moved_releases))
+        ):
+            video.artist_id = restored.id
 
     # Remove the alias(es) that pointed the source at the target.
     for alias in db.scalars(select(ArtistAlias).where(

@@ -42,6 +42,8 @@ from app.models.art import ENTITY_MUSIC_VIDEO, ROLE_THUMB, ArtOverride
 from app.models.media_file import MediaFile, MediaKind, ScanState
 from app.models.music import Artist, MusicVideo, MusicVideoRelease
 from app.services import ffprobe, library_folders, scan_library
+from app.services.art_sources import names
+from app.services.credits import resolve_artist
 from app.services.path_map import translate as translate_path
 
 
@@ -365,14 +367,49 @@ def _scan_root(
 # Upsert helpers
 # ---------------------------------------------------------------------------
 def _upsert_artist(db: Session, name: str, stats: ScanStats) -> Artist:
+    """The Artist for a music videos artist folder. In order:
+
+    1. A saved merge alias (Admin merged this name into another artist), the
+       same routing the music scan uses, so a merged-away folder name is not
+       recreated on the next scan.
+    2. An artist with the same name, ignoring case.
+    3. Exactly one artist whose name is the same after folding (a leading
+       "The", accents, punctuation, "&" vs "and"; art_sources/names.py), so
+       the folder "Birthday Party" files under the music library's
+       "The Birthday Party" instead of becoming a second artist that blocks
+       Fix Match. Two or more such artists is ambiguous: none is picked.
+    4. Otherwise a new artist.
+
+    Step 3 only runs for a folder name no artist has yet (a new folder), so
+    loading the artist names there is rare.
+    """
+    _res_name, _res_mbid, target = resolve_artist(db, name=name)
+    if target is not None:
+        return target
+
     artist = db.scalar(
         select(Artist).where(func.lower(Artist.name) == name.lower())
     )
-    if artist is None:
-        artist = Artist(name=name)
-        db.add(artist)
-        db.flush()
-        stats.artists_upserted += 1
+    if artist is not None:
+        return artist
+
+    key = names.match_key(name)
+    if key:
+        near = [
+            artist_id
+            for artist_id, other in db.execute(select(Artist.id, Artist.name))
+            if names.match_key(other or "") == key
+        ]
+        if len(near) == 1:
+            found = db.get(Artist, near[0])
+            if found is not None:
+                log.info("music videos folder %r filed under artist %r", name, found.name)
+                return found
+
+    artist = Artist(name=name)
+    db.add(artist)
+    db.flush()
+    stats.artists_upserted += 1
     return artist
 
 
