@@ -58,6 +58,7 @@ export type DownloadAction =
   | { type: "complete"; id: string; localPath: string; bytes: number }
   | { type: "fail"; id: string; error: string }
   | { type: "cancel"; id: string }
+  | { type: "retry"; id: string }
   | { type: "remove"; id: string }
   | { type: "setLimit"; bytes: number }
   | { type: "hydrate"; state: DownloadState };
@@ -87,6 +88,24 @@ export function canEnqueue(state: DownloadState): boolean {
 
 function upsert(items: DownloadItem[], id: string, patch: Partial<DownloadItem>): DownloadItem[] {
   return items.map((i) => (i.id === id ? { ...i, ...patch } : i));
+}
+
+/** Put a failed download back in the queue. Only an `error` entry is retried:
+ * anything else (queued, downloading, done, canceled, unknown id) is returned
+ * unchanged, so a stray tap can never restart a working or finished download.
+ * The entry keeps its title, kind and meta, so an album track stays grouped. */
+export function retryDownload(state: DownloadState, id: string): DownloadState {
+  const item = state.items.find((i) => i.id === id);
+  if (!item || item.status !== "error") return state;
+  return {
+    ...state,
+    items: upsert(state.items, id, { status: "queued", progress: 0, bytes: 0, totalBytes: undefined, error: undefined }),
+  };
+}
+
+/** Failed entries, in queue order (what a Retry action can act on). */
+export function failedItems(state: DownloadState): DownloadItem[] {
+  return state.items.filter((i) => i.status === "error");
 }
 
 export function reduce(state: DownloadState, action: DownloadAction): DownloadState {
@@ -133,6 +152,8 @@ export function reduce(state: DownloadState, action: DownloadAction): DownloadSt
       return { ...state, items: upsert(state.items, action.id, { status: "error", error: action.error }) };
     case "cancel":
       return { ...state, items: upsert(state.items, action.id, { status: "canceled", progress: 0 }) };
+    case "retry":
+      return retryDownload(state, action.id);
     case "remove":
       return { ...state, items: state.items.filter((i) => i.id !== action.id) };
     case "setLimit":

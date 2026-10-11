@@ -17,14 +17,14 @@ import { Screen } from "@/ui/Screen";
 const LIMIT_OPTIONS = [0, 1024, 5120, 10240, 20480]; // MB (0 = unlimited)
 
 /** Downloads screen (crit 42/43): per-item size + status, total storage,
- * delete, cancel, a storage-limit setting (SETTINGS.storageLimitMb), and play:
- * tap a finished song to play every downloaded song from local files, or a
+ * delete, cancel, retry for failed rows, a storage-limit setting
+ * (SETTINGS.storageLimitMb), and play: tap a finished song to play every downloaded song from local files, or a
  * finished movie/episode to watch it from disk. With no network the app opens
  * here. Nothing here stores a URL. */
 export default function DownloadsScreen(): React.ReactElement {
   const router = useRouter();
   const { playSongs } = usePlayer();
-  const { state, usedBytes, online, cancel, remove, setLimitMb } = useDownloads();
+  const { state, usedBytes, online, cancel, retry, remove, setLimitMb } = useDownloads();
 
   const play = (it: DownloadItem) => {
     const kind = it.kind ?? "track";
@@ -124,6 +124,16 @@ export default function DownloadsScreen(): React.ReactElement {
                   </View>
                 ) : null}
               </Pressable>
+              {it.status === "error" ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Retry download of ${it.title}`}
+                  onPress={() => retry(it.id)}
+                  style={({ pressed }) => [styles.retry, pressed && styles.retryPressed]}
+                >
+                  <Text style={styles.retryTxt}>Retry</Text>
+                </Pressable>
+              ) : null}
               {it.status === "downloading" || it.status === "queued" ? (
                 <IconButton
                   icon={XCircle}
@@ -179,6 +189,16 @@ const styles = StyleSheet.create({
   rowMeta: { flex: 1 },
   rowTitle: { ...typography.body },
   rowSub: { ...typography.caption },
+  retry: {
+    minHeight: MIN_TOUCH,
+    paddingHorizontal: spacing.lg,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.accent,
+    justifyContent: "center",
+  },
+  retryPressed: { opacity: 0.7 },
+  retryTxt: { color: colors.accent, fontWeight: "600" },
   rowBar: { height: 4, borderRadius: radius.pill, backgroundColor: colors.surfaceAlt, marginTop: spacing.xs },
   rowBarFill: { height: 4, borderRadius: radius.pill, backgroundColor: colors.accent },
 });

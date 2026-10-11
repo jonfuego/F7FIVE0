@@ -27,6 +27,7 @@ import {
 import {
   canEnqueue,
   initialState,
+  retryDownload,
   localFileName,
   nextToStart,
   reduce,
@@ -60,6 +61,9 @@ interface DownloadContextValue {
   /** A finished download's record (kind/meta/localPath), if any. */
   itemFor: (mediaFileId: string) => DownloadItem | undefined;
   cancel: (mediaFileId: string) => void;
+  /** Queue a failed download again. Returns false when it isn't failed (or the
+   * storage limit blocks it). */
+  retry: (mediaFileId: string) => boolean;
   remove: (mediaFileId: string) => Promise<void>;
   setLimitMb: (mb: number) => void;
   isDownloaded: (mediaFileId: string) => boolean;
@@ -267,6 +271,17 @@ export function DownloadProvider({ children }: { children: React.ReactNode }): R
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const retry = useCallback((mediaFileId: string): boolean => {
+    const cur = stateRef.current;
+    if (!canEnqueue(cur)) return false;
+    if (retryDownload(cur, mediaFileId) === cur) return false;
+    // A failed transfer can leave a partial file; the retry starts clean.
+    tasks.current.delete(mediaFileId);
+    for (const p of pathsFor(mediaFileId)) void FileSystem.deleteAsync(p, { idempotent: true }).catch(() => {});
+    dispatch({ type: "retry", id: mediaFileId });
+    return true;
+  }, []);
+
   const remove = useCallback(async (mediaFileId: string) => {
     const paths = pathsFor(mediaFileId);
     const t = tasks.current.get(mediaFileId);
@@ -315,13 +330,14 @@ export function DownloadProvider({ children }: { children: React.ReactNode }): R
       enqueueMany,
       itemFor,
       cancel,
+      retry,
       remove,
       setLimitMb,
       isDownloaded,
       localPathFor,
       bufferOffline,
     }),
-    [state, online, enqueue, enqueueMany, itemFor, cancel, remove, setLimitMb, isDownloaded, localPathFor, bufferOffline],
+    [state, online, enqueue, enqueueMany, itemFor, cancel, retry, remove, setLimitMb, isDownloaded, localPathFor, bufferOffline],
   );
 
   return <DownloadContext.Provider value={value}>{children}</DownloadContext.Provider>;

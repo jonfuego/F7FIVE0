@@ -1,10 +1,11 @@
 import { useLocalSearchParams } from "expo-router";
-import { Ellipsis, Shuffle } from "lucide-react-native";
-import React, { useState } from "react";
+import { Ellipsis, Play, Shuffle } from "lucide-react-native";
+import React, { useEffect, useRef, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View, RefreshControl } from "react-native";
 
 import { useAlbum } from "@/api/queries";
 import type { SongRow } from "@/api/types";
+import { albumDownloadSummary, downloadConfirmation, trackDownloadStatus } from "@/download/albumStatus";
 import { useDownloads } from "@/download/DownloadProvider";
 import { songEntries } from "@/download/entries";
 import { usePlayer } from "@/player/PlayerProvider";
@@ -29,8 +30,22 @@ export default function AlbumDetailScreen(): React.ReactElement {
   const { id } = useLocalSearchParams<{ id: string }>();
   const album = useAlbum(id ?? "");
   const { playSongs, playNext, addToQueue, nowPlaying } = usePlayer();
-  const { enqueueMany } = useDownloads();
+  const { state: downloads, enqueueMany } = useDownloads();
   const [menuOpen, setMenuOpen] = useState(false);
+  // Confirmation after Download is tapped; clears itself after a few seconds.
+  const [notice, setNotice] = useState<string | null>(null);
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (noticeTimer.current) clearTimeout(noticeTimer.current);
+    },
+    [],
+  );
+  const showNotice = (msg: string) => {
+    setNotice(msg);
+    if (noticeTimer.current) clearTimeout(noticeTimer.current);
+    noticeTimer.current = setTimeout(() => setNotice(null), 5000);
+  };
 
   return (
     <Screen title="Album">
@@ -54,6 +69,13 @@ export default function AlbumDetailScreen(): React.ReactElement {
             artist_name: detail.artist_name ?? "",
             media_files: t.media_files,
           }));
+          const entries = songEntries(songs, detail.title);
+          const fileIds = entries.map((e) => e.mediaFileId);
+          const summary = albumDownloadSummary(downloads, fileIds);
+          const download = () => {
+            const accepted = enqueueMany(entries);
+            showNotice(downloadConfirmation(downloads, fileIds, accepted));
+          };
           return (
             <ScrollView
               refreshControl={
@@ -65,6 +87,15 @@ export default function AlbumDetailScreen(): React.ReactElement {
                 <Text style={styles.title}>{detail.title}</Text>
                 <Text style={styles.sub}>{detail.artist_name}</Text>
                 <View style={styles.actions}>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Play album"
+                    onPress={() => playSongs(songs, 0)}
+                    style={({ pressed }) => [styles.shuffleBtn, pressed && styles.pressed]}
+                  >
+                    <Icon icon={Play} size={18} color={colors.background} fill />
+                    <Text style={styles.shuffleText}>Play</Text>
+                  </Pressable>
                   <Pressable
                     accessibilityRole="button"
                     accessibilityLabel="Shuffle album"
@@ -83,6 +114,19 @@ export default function AlbumDetailScreen(): React.ReactElement {
                     <Icon icon={Ellipsis} size={22} color={colors.text} />
                   </Pressable>
                 </View>
+                {summary.label ? (
+                  <Text
+                    style={[styles.status, summary.state === "failed" && styles.statusFailed]}
+                    accessibilityLabel={`Album download: ${summary.label}`}
+                  >
+                    {summary.label}
+                  </Text>
+                ) : null}
+                {notice ? (
+                  <Text style={styles.notice} accessibilityLiveRegion="polite" accessibilityRole="alert">
+                    {notice}
+                  </Text>
+                ) : null}
               </View>
               {songs.map((s, i) => (
                 <TrackRow
@@ -91,6 +135,8 @@ export default function AlbumDetailScreen(): React.ReactElement {
                   subtitle={s.artist_name}
                   artPath={s.cover_path}
                   active={nowPlaying?.mediaFileId === s.media_files[0]?.id}
+                  downloadStatus={trackDownloadStatus(downloads, s.media_files[0]?.id)}
+                  downloadProgress={downloads.items.find((it) => it.id === s.media_files[0]?.id)?.progress}
                   onPress={() => playSongs(songs, i)}
                   menu={{ song: s, playSongs, playNext, addToQueue }}
                 />
@@ -102,7 +148,7 @@ export default function AlbumDetailScreen(): React.ReactElement {
                 onPlayNext={() => void playNext(songs)}
                 onAddToQueue={() => void addToQueue(songs)}
                 onShuffle={() => playSongs(shuffled(songs), 0)}
-                onDownload={() => enqueueMany(songEntries(songs, detail.title))}
+                onDownload={download}
                 onClose={() => setMenuOpen(false)}
               />
             </ScrollView>
@@ -128,6 +174,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.accent,
   },
   shuffleText: { fontFamily: fonts.uiSemiBold, color: colors.background, fontSize: 15 },
+  status: { ...typography.caption, marginTop: spacing.sm, color: colors.accent },
+  statusFailed: { color: colors.danger },
+  notice: { ...typography.caption, marginTop: spacing.xs, color: colors.text },
   pressed: { opacity: 0.8 },
   kebab: { minWidth: MIN_TOUCH, minHeight: MIN_TOUCH, alignItems: "center", justifyContent: "center" },
 });
