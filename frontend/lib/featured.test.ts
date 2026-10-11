@@ -5,7 +5,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  heroFacts, heroSubtitleParts, pickFeatured, type FeaturedCandidate,
+  heroBioExcerpt, heroFacts, heroSubtitleParts, pickFeatured, type FeaturedCandidate,
 } from "./featured.ts";
 
 function item(id: string, added: string, art: string | null): FeaturedCandidate {
@@ -140,4 +140,28 @@ test("missing fields are skipped, never blank or zero", () => {
   assert.deepEqual(heroFacts("series", { episodes: [] }), []);
   assert.deepEqual(heroFacts("album", { tracks: [], genres: null }), []);
   assert.deepEqual(heroFacts("series", { genres: ["Comedy"] }), ["Comedy"]);
+});
+
+test("album hero shows the artist bio excerpt, trimmed", () => {
+  assert.equal(
+    heroBioExcerpt("album", {
+      artist_bio_excerpt: "  Radiohead are an English rock band formed in 1985.  ",
+    }),
+    "Radiohead are an English rock band formed in 1985.",
+  );
+});
+
+test("no bio excerpt when the artist has none, it is blank, or the pick is not an album", () => {
+  assert.equal(heroBioExcerpt("album", { artist_bio_excerpt: null }), null);
+  assert.equal(heroBioExcerpt("album", { artist_bio_excerpt: "   " }), null);
+  assert.equal(heroBioExcerpt("album", {}), null);
+  assert.equal(heroBioExcerpt("album", null), null);
+  assert.equal(
+    heroBioExcerpt("movie", { artist_bio_excerpt: "Not for movies." }),
+    null,
+  );
+  assert.equal(
+    heroBioExcerpt("series", { artist_bio_excerpt: "Not for series." }),
+    null,
+  );
 });

@@ -15,7 +15,7 @@ import { Row } from "@/components/Row";
 import { apiGet, apiPost } from "@/lib/client-api";
 import { colorForTitle, hueFromString, joinMeta } from "@/lib/format";
 import {
-  heroFacts, heroSubtitleParts, pickFeatured, type HeroFactsSource,
+  heroBioExcerpt, heroFacts, heroSubtitleParts, pickFeatured, type HeroFactsSource,
 } from "@/lib/featured";
 import { heroEmptyMessage, resolveHeroState } from "@/lib/hero-state";
 import { resolveHeroPlay } from "@/lib/play-action";
@@ -335,6 +335,8 @@ function Hero({
   // Facts line (runtime, genres, rating, season or track counts) read from
   // the same detail call; heroFacts skips whatever is missing.
   const [facts, setFacts] = useState<string[]>([]);
+  // Albums only: a short bio of the artist, from the same detail call.
+  const [bioExcerpt, setBioExcerpt] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
     const path = item.kind === "movie"
@@ -357,6 +359,7 @@ function Hero({
         setBackdrop(data.backdrop_path ?? null);
         setArtistId(item.kind === "album" ? data.artist_id ?? null : null);
         setFacts(heroFacts(item.kind, data));
+        setBioExcerpt(heroBioExcerpt(item.kind, data));
       })
       .catch(() => {
         if (cancelled) return;
@@ -364,6 +367,7 @@ function Hero({
         setBackdrop(null);
         setArtistId(null);
         setFacts([]);
+        setBioExcerpt(null);
       });
     return () => {
       cancelled = true;
@@ -429,6 +433,7 @@ function Hero({
             </div>
           ) : null}
           {overview ? <p className="blurb">{overview}</p> : null}
+          {bioExcerpt ? <p className="blurb bio-excerpt">{bioExcerpt}</p> : null}
           <div className="ctas">
             <button
               type="button"
