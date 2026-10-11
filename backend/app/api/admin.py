@@ -17,6 +17,7 @@ from urllib.parse import unquote
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 import uuid
@@ -1091,6 +1092,20 @@ def _lidarr_album_search(q: str) -> list[Optional[MatchCandidate]]:
     return [_normalize_lidarr_album(p) for p in raw or []]
 
 
+def _commit_match(db: Session) -> None:
+    """Commit a Fix Match id write. The external id columns are unique, so
+    pinning an id that another row already holds (a duplicate artist, say)
+    would raise out of the commit as a 500; answer 409 instead."""
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="already_matched: another record already uses that match",
+        )
+
+
 @router.post("/match/{kind}/{entity_id}", response_model=OverrideOut)
 def apply_match(
     kind: str,
@@ -1132,7 +1147,7 @@ def apply_match(
             row.tmdb_id = int(ref)
         except ValueError:
             raise HTTPException(status_code=422, detail="ref_not_int")
-        db.commit()
+        _commit_match(db)
         enrich_movie(db, row.id, force=True)
     elif kind == "series":
         if source == "tvdb":
@@ -1147,7 +1162,7 @@ def apply_match(
                 raise HTTPException(status_code=422, detail="ref_not_int")
         else:
             raise HTTPException(status_code=422, detail="source_must_be_tvdb_or_tmdb")
-        db.commit()
+        _commit_match(db)
         # With a TMDB id and a key, pull canonical fields and art now so the
         # match is useful without Sonarr. A TVDB-only match (no TMDB id)
         # still waits for the next *arr sync; enrich_series no-ops on it.
@@ -1157,19 +1172,19 @@ def apply_match(
         if source != "musicbrainz":
             raise HTTPException(status_code=422, detail="source_must_be_musicbrainz")
         row.mbid = ref
-        db.commit()
+        _commit_match(db)
         enrich_artist(db, row.id, force=True)
     elif kind == "album":
         if source != "musicbrainz":
             raise HTTPException(status_code=422, detail="source_must_be_musicbrainz")
         row.mbid = ref
-        db.commit()
+        _commit_match(db)
         enrich_album(db, row.id, force=True)
     elif kind == "music_video_release":
         if source != "musicbrainz":
             raise HTTPException(status_code=422, detail="source_must_be_musicbrainz")
         row.mbid = ref
-        db.commit()
+        _commit_match(db)
         # MusicVideoRelease has no MB-driven canonical columns today, so
         # there is nothing to enrich. The mbid pin is the whole apply.
     else:
