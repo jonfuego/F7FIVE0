@@ -1140,6 +1140,43 @@ def _commit_match(db: Session) -> None:
         )
 
 
+def _artist_where(db: Session, artist: Artist) -> str:
+    """Where an artist shows up, for the already_matched message."""
+    places = []
+    if db.scalar(select(Album.id).where(Album.artist_id == artist.id).limit(1)) is not None:
+        places.append("music library")
+    if db.scalar(
+        select(MusicVideo.id).where(MusicVideo.artist_id == artist.id).limit(1)
+    ) is not None:
+        places.append("music videos")
+    return " and ".join(places) if places else "no albums or videos"
+
+
+def _check_mbid_free(db: Session, kind: str, model_cls: Any, row: Any, mbid: str) -> None:
+    """409 naming the record that already holds `mbid`, before the write.
+
+    The mbid columns are unique, so Fix Match cannot pin an id another row
+    holds. The bare "another record" message left the admin guessing (the
+    usual case is a music videos folder "Birthday Party" next to the music
+    library's "The Birthday Party"), so name it and say what to do.
+    """
+    holder = db.scalar(
+        select(model_cls).where(model_cls.mbid == mbid, model_cls.id != row.id)
+    )
+    if holder is None:
+        return
+    if kind == "artist":
+        detail = (
+            f"already_matched: {holder.name} ({_artist_where(db, holder)}) already "
+            "uses this MusicBrainz artist. Merge the two artists instead "
+            "(Merge into... on the artist page)."
+        )
+    else:
+        label = getattr(holder, "title", None) or getattr(holder, "name", None) or str(holder.id)
+        detail = f"already_matched: {label} already uses this MusicBrainz id."
+    raise HTTPException(status_code=409, detail=detail)
+
+
 @router.post("/match/{kind}/{entity_id}", response_model=OverrideOut)
 def apply_match(
     kind: str,
@@ -1205,18 +1242,21 @@ def apply_match(
     elif kind == "artist":
         if source != "musicbrainz":
             raise HTTPException(status_code=422, detail="source_must_be_musicbrainz")
+        _check_mbid_free(db, kind, model_cls, row, ref)
         row.mbid = ref
         _commit_match(db)
         enrich_artist(db, row.id, force=True)
     elif kind == "album":
         if source != "musicbrainz":
             raise HTTPException(status_code=422, detail="source_must_be_musicbrainz")
+        _check_mbid_free(db, kind, model_cls, row, ref)
         row.mbid = ref
         _commit_match(db)
         enrich_album(db, row.id, force=True)
     elif kind == "music_video_release":
         if source != "musicbrainz":
             raise HTTPException(status_code=422, detail="source_must_be_musicbrainz")
+        _check_mbid_free(db, kind, model_cls, row, ref)
         row.mbid = ref
         _commit_match(db)
         # MusicVideoRelease has no MB-driven canonical columns today, so
@@ -1303,6 +1343,7 @@ def merge_preview(
         source_id=source.id, source_name=source.name,
         target_id=target.id, target_name=target.name,
         albums=counts["albums"], tracks=counts["tracks"],
+        music_videos=counts["music_videos"],
     )
 
 
@@ -1358,6 +1399,7 @@ def merge_artist(
     return MergeResultOut(
         merge_id=record.id, target_id=target.id, target_name=target.name,
         albums_moved=counts["albums"], tracks_moved=counts["tracks"],
+        music_videos_moved=counts["music_videos"],
     )
 
 

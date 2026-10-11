@@ -18,6 +18,7 @@ type Preview = {
   target_name: string;
   albums: number;
   tracks: number;
+  music_videos?: number;
 };
 
 type MergeResult = {
@@ -26,6 +27,7 @@ type MergeResult = {
   target_name: string;
   albums_moved: number;
   tracks_moved: number;
+  music_videos_moved?: number;
 };
 
 export function ArtistMergeDialog({
@@ -144,8 +146,11 @@ export function ArtistMergeDialog({
             </p>
             <p style={{ margin: "0 0 14px", color: "var(--ink-2)" }}>
               {preview.albums} {preview.albums === 1 ? "album" : "albums"} and{" "}
-              {preview.tracks} {preview.tracks === 1 ? "track" : "tracks"} move
-              to {preview.target_name}. {preview.source_name} is then removed.
+              {preview.tracks} {preview.tracks === 1 ? "track" : "tracks"}
+              {preview.music_videos
+                ? `, and ${preview.music_videos} music ${preview.music_videos === 1 ? "video" : "videos"}`
+                : ""}{" "}
+              move to {preview.target_name}. {preview.source_name} is then removed.
             </p>
             <div style={rowStyle}>
               <button

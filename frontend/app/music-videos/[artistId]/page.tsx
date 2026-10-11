@@ -6,8 +6,9 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
-import { notFound, useParams } from "next/navigation";
+import { notFound, useParams, useRouter } from "next/navigation";
 import { ArtOverrideModal, ArtKind, ArtRole } from "@/components/ArtOverrideModal";
+import { ArtistMergeDialog } from "@/components/ArtistMergeDialog";
 import { AuthShell } from "@/components/AuthShell";
 import { BackButton } from "@/components/BackButton";
 import { Grid, GridEmpty } from "@/components/Grid";
@@ -31,6 +32,8 @@ export default function MusicVideoArtistPage() {
   const [missing, setMissing] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [reloadTick, setReloadTick] = useState(0);
+  const [mergeOpen, setMergeOpen] = useState(false);
+  const router = useRouter();
   const [modal, setModal] = useState<{
     kind: ArtKind;
     role: ArtRole;
@@ -106,6 +109,7 @@ export default function MusicVideoArtistPage() {
           detail={data}
           isAdmin={isAdmin}
           openModal={(m) => setModal(m)}
+          onMerge={() => setMergeOpen(true)}
         />
       )}
       {modal ? (
@@ -118,6 +122,18 @@ export default function MusicVideoArtistPage() {
           hasOverride={modal.hasOverride}
           onClose={() => setModal(null)}
           onApplied={onApplied}
+        />
+      ) : null}
+      {mergeOpen && data ? (
+        <ArtistMergeDialog
+          sourceId={data.id}
+          sourceName={data.name}
+          onClose={() => setMergeOpen(false)}
+          onMerged={(result) => {
+            setMergeOpen(false);
+            // The videos now live under the target artist.
+            router.push(`/music-videos/${result.target_id}`);
+          }}
         />
       ) : null}
     </AuthShell>
@@ -136,10 +152,12 @@ function ArtistHero({
   detail,
   isAdmin,
   openModal,
+  onMerge,
 }: {
   detail: MusicVideoArtistDetail;
   isAdmin: boolean;
   openModal: (m: ModalSpec) => void;
+  onMerge: () => void;
 }) {
   const tint: CSSProperties = {
     ["--pg" as never]: colorForTitle(detail.name),
@@ -188,6 +206,20 @@ function ArtistHero({
         </div>
         <div className="info">
           <h1>{detail.name}</h1>
+          {isAdmin ? (
+            // A music videos folder named a little differently from the music
+            // library artist ("Birthday Party" vs "The Birthday Party") is a
+            // second artist; merging moves its videos to the library artist.
+            <button
+              type="button"
+              className="admin-edit"
+              style={{ position: "static", opacity: 1, marginBottom: 12 }}
+              onClick={onMerge}
+              aria-label="Merge this artist into another"
+            >
+              Merge into...
+            </button>
+          ) : null}
           {meta ? <MetaRow text={meta} /> : null}
 
           <div
