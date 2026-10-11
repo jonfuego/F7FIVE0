@@ -464,6 +464,7 @@ def list_albums(
             "release_date": a.release_date,
             "cover_path": covers.get(a.id),
             "album_type": a.album_type,
+            "secondary_types": a.secondary_types or [],
             "metadata_synced_at": a.metadata_synced_at,
             "metadata_status": a.metadata_status,
             "created_at": a.created_at,
@@ -746,6 +747,7 @@ def get_music_artist(
                 "release_date": a.release_date,
                 "cover_path": album_covers.get(a.id),
                 "album_type": a.album_type,
+                "secondary_types": a.secondary_types or [],
                 "metadata_synced_at": a.metadata_synced_at,
                 "metadata_status": a.metadata_status,
             })

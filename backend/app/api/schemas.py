@@ -259,6 +259,9 @@ class AlbumOut(BaseModel):
     # can render the type badge without a second call. The remaining
     # heavy columns live on AlbumDetailOut.
     album_type: Optional[str] = None
+    # MusicBrainz secondary types (Compilation, Live, ...). On the list shape
+    # because the artist page groups its discography by type and secondary type.
+    secondary_types: list[str] = Field(default_factory=list)
     metadata_synced_at: Optional[datetime] = None
     metadata_status: Optional[str] = None
     # When the row entered the library (sort key "Date added" in the app).
@@ -267,7 +270,6 @@ class AlbumOut(BaseModel):
 
 class AlbumDetailOut(AlbumOut):
     tracks: list[TrackOut] = Field(default_factory=list)
-    secondary_types: list[str] = Field(default_factory=list)
     # Album genre names (Lidarr / MusicBrainz); empty when none were saved.
     # The Home hero shows them in its facts line.
     genres: list[str] = Field(default_factory=list)
