@@ -503,6 +503,14 @@ function FixMatchTab({
   const [notes, setNotes] = useState<string[]>([]);
   const [confirming, setConfirming] = useState<MatchCandidate | null>(null);
   const [applying, setApplying] = useState(false);
+  // The confirm lives inside the clicked row; bring it into view so Apply
+  // never looks dead when the results list is taller than the tab body.
+  const confirmRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (confirming) {
+      confirmRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
+  }, [confirming]);
 
   const search = useCallback(async () => {
     const term = query.trim();
@@ -603,8 +611,9 @@ function FixMatchTab({
           {results.map((c) => (
             <li
               key={`${c.source}:${c.ref}`}
-              className="flex items-start gap-3 rounded border border-neutral-800 bg-neutral-950/60 p-2"
+              className="rounded border border-neutral-800 bg-neutral-950/60 p-2"
             >
+              <div className="flex items-start gap-3">
               {c.image_url ? (
                 <img
                   src={c.image_url}
@@ -644,39 +653,47 @@ function FixMatchTab({
               >
                 Apply
               </button>
+              </div>
+              {confirming && confirming.source === c.source && confirming.ref === c.ref ? (
+                <div
+                  ref={confirmRef}
+                  className="mt-2 rounded border border-line bg-hive-tint p-3"
+                >
+                  <p className="text-xs text-ink">
+                    Re-match <b>{currentLabel}</b> to <b>{c.label}</b>?
+                    Existing manual overrides will not be touched; canonical
+                    metadata will refresh from {c.source}.
+                  </p>
+                  {error ? (
+                    <p className="mt-2 rounded border border-red-900/60 bg-red-950/40 px-3 py-2 text-xs text-red-200">
+                      {error}
+                    </p>
+                  ) : null}
+                  <div className="mt-2 flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setConfirming(null)}
+                      className="rounded px-3 py-1 text-xs text-neutral-300 hover:bg-neutral-800"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => apply(c)}
+                      disabled={applying}
+                      className="rounded bg-hive px-3 py-1 text-xs font-medium text-on-hive hover:bg-hive-hover disabled:opacity-50"
+                    >
+                      {applying ? "Applying..." : "Confirm re-match"}
+                    </button>
+                  </div>
+                </div>
+              ) : null}
             </li>
           ))}
         </ul>
       )}
 
-      {confirming ? (
-        <div className="mt-3 rounded border border-line bg-hive-tint p-3">
-          <p className="text-xs text-ink">
-            Re-match <b>{currentLabel}</b> to <b>{confirming.label}</b>?
-            Existing manual overrides will not be touched; canonical
-            metadata will refresh from {confirming.source}.
-          </p>
-          <div className="mt-2 flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={() => setConfirming(null)}
-              className="rounded px-3 py-1 text-xs text-neutral-300 hover:bg-neutral-800"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={() => apply(confirming)}
-              disabled={applying}
-              className="rounded bg-hive px-3 py-1 text-xs font-medium text-on-hive hover:bg-hive-hover disabled:opacity-50"
-            >
-              {applying ? "Applying..." : "Confirm re-match"}
-            </button>
-          </div>
-        </div>
-      ) : null}
-
-      {error ? (
+      {error && !confirming ? (
         <p className="mt-3 rounded border border-red-900/60 bg-red-950/40 px-3 py-2 text-xs text-red-200">
           {error}
         </p>

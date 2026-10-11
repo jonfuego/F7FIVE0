@@ -126,3 +126,73 @@ def test_one_source_failing_still_returns_others(
     # Radarr failure became a friendly note, not a 502 or raw code.
     assert any("Radarr did not answer." == note for note in body["notes"])
     assert not any("401" in note for note in body["notes"])
+
+
+class _FakeMBEnrich:
+    """Stand-in for MusicBrainzClient on the enrich path (runner.py)."""
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def get_artist(self, mbid):
+        return {
+            "id": mbid,
+            "name": "Bauhaus",
+            "type": "Group",
+            "country": "GB",
+            "life-span": {"begin": "1978", "ended": False},
+            "relations": [],
+            "annotation": "English goth rock band.",
+        }
+
+
+def test_artist_rematch_with_musicbrainz_candidate_changes_mbid(
+    client, db_session, monkeypatch,
+):
+    # The body the web Confirm sends: a MusicBrainz candidate's source and
+    # ref, picked verbatim from the candidates list. All HTTP is mocked.
+    from app.services.metadata import runner
+
+    monkeypatch.setattr(runner, "MusicBrainzClient", _FakeMBEnrich)
+    old_mbid = "11111111-1111-4111-8111-111111111111"
+    new_mbid = "ec3b23be-4a2c-4db8-9e20-5f1d1e5e8e9a"
+    artist = Artist(name="Bauhaus", mbid=old_mbid)
+    db_session.add(artist)
+    db_session.flush()
+
+    r = client.post(
+        f"/api/admin/match/artist/{artist.id}",
+        json={"source": "musicbrainz", "ref": new_mbid},
+    )
+    assert r.status_code // 100 == 2, r.text
+    db_session.refresh(artist)
+    assert artist.mbid == new_mbid
+    assert artist.mbid != old_mbid
+    # The synchronous refresh ran against the new id.
+    assert artist.metadata_status == "ok"
+    assert artist.country == "GB"
+
+
+def test_artist_rematch_to_an_id_another_artist_holds_is_409(
+    client, db_session,
+):
+    # mbid is unique. Pinning one a second artist already holds used to
+    # escape the commit as a 500; it is now a clear 409 and nothing changes.
+    taken = "ec3b23be-4a2c-4db8-9e20-5f1d1e5e8e9a"
+    db_session.add(Artist(name="Bauhaus", mbid=taken))
+    other = Artist(name="Bauhaus (dup)")
+    db_session.add(other)
+    # Commit so the endpoint's rollback only undoes the failed write.
+    db_session.commit()
+
+    r = client.post(
+        f"/api/admin/match/artist/{other.id}",
+        json={"source": "musicbrainz", "ref": taken},
+    )
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"].startswith("already_matched")
+    db_session.refresh(other)
+    assert other.mbid is None
