@@ -2027,10 +2027,13 @@ body[data-dock="1"] .shell > main {
 /* ============ Login (unchanged shell, restyled) ============ */
 
 .login-shell {
+  /* min-height, not height, and no overflow clip: with the phone keyboard open
+     the page must stay scrollable so the password field and button can be reached. */
   min-height: 100vh;
+  min-height: 100dvh;
   display: grid;
   place-items: center;
-  padding: 48px 24px;
+  padding: max(48px, env(safe-area-inset-top)) max(24px, env(safe-area-inset-right)) max(48px, env(safe-area-inset-bottom)) max(24px, env(safe-area-inset-left));
 }
 .login-card {
   width: 100%;

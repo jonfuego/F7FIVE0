@@ -5,6 +5,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -16,6 +17,7 @@ import { passkeysAvailable, serverHasPasskeys } from "@/auth/passkey";
 import { useAuth } from "@/state/auth";
 import { getApiBase, normalizeServerUrl, saveServerUrl, serverFilledFromStamp } from "@/state/config";
 import type { LoginError } from "@/state/auth";
+import { keyboardAvoidBehavior } from "@/lib/keyboardBehavior";
 import { colors, MIN_TOUCH, radius, spacing, typography } from "@/state/theme";
 import { HiveWordmark } from "@/ui/HiveWordmark";
 import { IconButton } from "@/ui/IconButton";
@@ -109,11 +111,13 @@ export default function LoginScreen(): React.ReactElement {
 
   return (
     <SafeAreaView style={styles.safe}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-        style={styles.flex}
-      >
-        <View style={styles.center}>
+      <KeyboardAvoidingView behavior={keyboardAvoidBehavior(Platform.OS)} style={styles.flex}>
+        <ScrollView
+          contentContainerStyle={styles.center}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          showsVerticalScrollIndicator={false}
+        >
           <View style={styles.logo}>
             <HiveWordmark height={40} />
           </View>
@@ -218,7 +222,7 @@ export default function LoginScreen(): React.ReactElement {
               <Text style={styles.buttonText}>Sign in</Text>
             )}
           </Pressable>
-        </View>
+        </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -227,7 +231,7 @@ export default function LoginScreen(): React.ReactElement {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },
   flex: { flex: 1 },
-  center: { flex: 1, justifyContent: "center", padding: spacing.xl, gap: spacing.md },
+  center: { flexGrow: 1, justifyContent: "center", padding: spacing.xl, gap: spacing.md },
   logo: { alignItems: "center", marginBottom: spacing.sm },
   subtitle: { ...typography.body, color: colors.textMuted, textAlign: "center", marginBottom: spacing.lg },
   hint: { ...typography.caption, color: colors.textFaint, marginTop: -spacing.xs, paddingHorizontal: spacing.xs },
