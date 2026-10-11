@@ -220,3 +220,13 @@ def _reset_tmdb_key_cache():
     tmdb_key.reset_cache()
     yield
     tmdb_key.reset_cache()
+
+
+@pytest.fixture(autouse=True)
+def _keyless_art_sources_off(monkeypatch):
+    """No test reaches a real art service. Deezer and TheAudioDB are off unless
+    a test turns them on (and then mocks the HTTP itself)."""
+    from app.config import settings
+    monkeypatch.setattr(settings, "deezer_enabled", False)
+    monkeypatch.setattr(settings, "audiodb_api_key", "")
+    yield

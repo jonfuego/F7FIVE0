@@ -2,7 +2,7 @@
 // badge per result tile, and the missing-source callout block.
 //
 // Both panels now search several sources (TMDB, MusicBrainz, Cover Art
-// Archive, TheAudioDB, iTunes, and the *arr apps), so each result shows
+// Archive, TheAudioDB, Deezer, iTunes, and the *arr apps), so each result shows
 // which source it came from, and the backend's friendly notes render as
 // callouts. The TMDB note gets a link to Admin where the key is set.
 
@@ -13,6 +13,7 @@ const SOURCE_LABELS: Record<string, string> = {
   musicbrainz: "MusicBrainz",
   coverart: "Cover Art Archive",
   audiodb: "TheAudioDB",
+  deezer: "Deezer",
   itunes: "iTunes",
   lidarr: "Lidarr",
   radarr: "Radarr",

@@ -283,9 +283,12 @@ def cmd_scan_art(args: argparse.Namespace) -> int:
                 # Try AudioDB first (real artist portraits).
                 candidates = []
                 if settings.audiodb_api_key and a.name:
-                    candidates = audiodb_source.search_artist(
-                        settings.audiodb_api_key, a.name,
-                    )
+                    try:
+                        candidates = audiodb_source.search_artist(
+                            settings.audiodb_api_key, a.name, a.mbid,
+                        )
+                    except audiodb_source.AudioDBError as exc:
+                        log.warning("  audiodb: %s: %s", a.name, exc)
                 # Fall back to iTunes album art as a proxy.
                 if not candidates and a.name:
                     candidates = itunes_source.search_artist(a.name)

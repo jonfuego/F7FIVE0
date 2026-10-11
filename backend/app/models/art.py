@@ -45,6 +45,11 @@ SOURCE_RADARR = "radarr"
 SOURCE_SONARR = "sonarr"
 SOURCE_FANART = "fanart"
 SOURCE_MUSICBRAINZ = "musicbrainz"
+# An artist picture the background auto-fill job found (TheAudioDB or Deezer)
+# for an artist that had no thumb at all. Like the music-video `frame` grab it
+# is the weakest art there is: any other art replaces it, and it never
+# replaces anything. Written only by services/artist_art_autofill.py.
+SOURCE_ARTIST_AUTO = "artist_auto"
 
 
 class ArtOverride(Base):

@@ -24,7 +24,7 @@ def test_artist_art_from_sources_without_arr(db_session, monkeypatch):
     monkeypatch.setattr(settings, "audiodb_api_key", "2")
     monkeypatch.setattr(
         audiodb_source, "search_artist",
-        lambda key, name: [
+        lambda key, name, mbid=None: [
             {
                 "source": "audiodb",
                 "ref": "https://cdn.example/thumb.jpg",
@@ -53,7 +53,7 @@ def test_music_video_uses_itunes_and_audiodb(db_session, monkeypatch):
     monkeypatch.setattr(settings, "itunes_enabled", True)
     monkeypatch.setattr(
         audiodb_source, "search_artist",
-        lambda key, name: [
+        lambda key, name, mbid=None: [
             {"source": "audiodb", "ref": "a", "url": "https://x/a.jpg", "label": "AudioDB thumb"},
         ],
     )
