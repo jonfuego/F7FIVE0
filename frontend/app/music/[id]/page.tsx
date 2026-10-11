@@ -336,7 +336,7 @@ function TrackRow({
             fontVariantNumeric: "tabular-nums",
           }}
         >
-          {duration || "—"}
+          {duration || "-"}
         </div>
       </button>
       <TrackRowMenu item={queueItem} label={track.title} />
