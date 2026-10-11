@@ -992,11 +992,52 @@ button { border: 0; background: transparent; color: inherit; font: inherit; curs
   text-transform: uppercase;
 }
 
+/* Picture slot: fills the art area; the admin Edit button sits on top. */
+.playbill .pb-art .pb-img {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  object-fit: cover;
+}
+.playbill .pb-art .admin-edit {
+  position: absolute;
+  top: 10px; right: 10px;
+  z-index: 4;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink);
+  background: var(--surface-1);
+  border: 1px solid var(--line);
+  padding: 4px 8px;
+  border-radius: var(--radius-1);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity .15s var(--ease);
+}
+.playbill:hover .pb-art .admin-edit,
+.playbill:focus-within .pb-art .admin-edit { opacity: 1; }
+@media (hover: none) {
+  .playbill .pb-art .admin-edit { opacity: 1; }
+}
+
+/* Home rail mix card: at most as tall as a Recent Arrivals album tile (160px
+   square art) plus its two text lines, about 208px. Picture on top, one tag
+   line, the title, and the foot row. No description. */
+.playbill.compact { max-height: 208px; }
+.playbill.compact .pb-art { height: 92px; }
+.playbill.compact .pb-body { padding: 10px 14px 10px; gap: 4px; }
+.playbill.compact .pb-tag { font-size: 11px; }
+.playbill.compact h3 { font-size: 22px; line-height: 1.05; }
+.playbill.compact .pb-foot { padding-top: 6px; margin-top: 2px; }
+
 /* Mix tile title variants: display-weight geometry only, no per-kind art
    gradients (v3 is flat; the surface carries the tile). */
 .playbill[data-kind="recently-added"] h3 { letter-spacing: 0.02em; }
 .playbill[data-kind="continue-listening"] h3 { font-size: 30px; }
 .playbill[data-kind="most-played"] h3 { font-size: 36px; }
+.playbill.compact[data-kind] h3 { font-size: 22px; }
 .playbill[data-kind="never-played"] h3 { color: var(--ink-3); }
 .playbill[data-kind="artist-random"] h3 { font-size: 30px; }
 .playbill[data-kind="by-year"] h3 { font-size: 36px; }

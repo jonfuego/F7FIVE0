@@ -8,6 +8,7 @@
 import { AuthShell } from "@/components/AuthShell";
 import { MixCard } from "@/components/mixes/MixCard";
 import { useViewPref } from "@/lib/use-view-pref";
+import { useMixArt } from "@/lib/use-mix-art";
 
 const MIXES = [
   {
@@ -138,6 +139,7 @@ export default function MixesPage() {
   // Saved view: the last values typed into each mix's picker (year, decade,
   // genre, artist), stored on the server per user.
   const [inputs, setInputs] = useViewPref("mixes.inputs");
+  const { overrides, isAdmin, reload } = useMixArt();
   return (
     <AuthShell>
       <h1 className="page-title">Mixes</h1>
@@ -153,6 +155,9 @@ export default function MixesPage() {
             buildUrl={m.buildUrl}
             picker={m.picker}
             index={i + 1}
+            mixArt={overrides}
+            isAdmin={isAdmin}
+            onArtChanged={reload}
             savedValues={inputs[m.kind]}
             onSaveValues={(v) => setInputs({ ...inputs, [m.kind]: v })}
           />

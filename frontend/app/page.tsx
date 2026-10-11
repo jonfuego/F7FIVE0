@@ -28,14 +28,17 @@ import type {
   RecentMusicVideo, SeriesDetail,
 } from "@/lib/types";
 import { artSized } from "@/lib/art-url";
+import { useMixArt } from "@/lib/use-mix-art";
+import { MixPicture } from "@/components/mixes/MixPicture";
+import type { MixArtMap } from "@/lib/mix-art";
 
 const ROW_LIMIT = 20;
 
-const MIX_PREVIEW: Array<{ kind: string; tag: string; title: string; sub: string }> = [
-  { kind: "recently-added", tag: "Fresh", title: "Recently Added", sub: "What's new in the library, freshest first." },
-  { kind: "most-played", tag: "Top Spins", title: "Most Played", sub: "What you've listened to the most." },
-  { kind: "continue-listening", tag: "Pick Up", title: "Continue Listening", sub: "Audio you started but didn't finish." },
-  { kind: "random", tag: "Wildcard", title: "Random", sub: "A hundred random tracks, anything goes." },
+const MIX_PREVIEW: Array<{ kind: string; tag: string; title: string }> = [
+  { kind: "recently-added", tag: "Fresh", title: "Recently Added" },
+  { kind: "most-played", tag: "Top Spins", title: "Most Played" },
+  { kind: "continue-listening", tag: "Pick Up", title: "Continue Listening" },
+  { kind: "random", tag: "Wildcard", title: "Random" },
 ];
 
 type State = {
@@ -54,6 +57,7 @@ export default function Home() {
     error: null,
   });
   const progress = useProgressMap();
+  const mixArt = useMixArt();
   // New-arrivals badge: items added since the last home visit. We read the
   // count first, then stamp "seen" so the next visit measures from now.
   const [newCount, setNewCount] = useState(0);
@@ -231,7 +235,15 @@ export default function Home() {
 
       <Row title="Mixes" seeAllHref="/mixes">
         {MIX_PREVIEW.map((m) => (
-          <MixPreviewCard key={m.kind} kind={m.kind} tag={m.tag} title={m.title} sub={m.sub} />
+          <MixPreviewCard
+            key={m.kind}
+            kind={m.kind}
+            tag={m.tag}
+            title={m.title}
+            overrides={mixArt.overrides}
+            isAdmin={mixArt.isAdmin}
+            onArtChanged={mixArt.reload}
+          />
         ))}
       </Row>
     </AuthShell>
@@ -505,7 +517,12 @@ const MIX_PREVIEW_URL: Record<string, string> = {
   random: "/api/library/auto-playlist/random?limit=100",
 };
 
-function MixPreviewCard({ kind, tag, title, sub }: { kind: string; tag: string; title: string; sub: string }) {
+function MixPreviewCard({
+  kind, tag, title, overrides, isAdmin, onArtChanged,
+}: {
+  kind: string; tag: string; title: string;
+  overrides: MixArtMap; isAdmin: boolean; onArtChanged: () => void;
+}) {
   const { playAlbum } = useQueue();
   const [busy, setBusy] = useState(false);
 
@@ -528,7 +545,7 @@ function MixPreviewCard({ kind, tag, title, sub }: { kind: string; tag: string; 
 
   return (
     <div
-      className="playbill"
+      className="playbill compact"
       style={{
         flex: "0 0 auto",
         width: 320,
@@ -537,12 +554,17 @@ function MixPreviewCard({ kind, tag, title, sub }: { kind: string; tag: string; 
       data-kind={kind}
     >
       <div className="pb-art">
-        <div className="big-num" />
+        <MixPicture
+          mixKey={kind}
+          title={title}
+          overrides={overrides}
+          isAdmin={isAdmin}
+          onChanged={onArtChanged}
+        />
       </div>
       <div className="pb-body">
         <div className="pb-tag">{tag}</div>
         <h3>{title}</h3>
-        <p className="pb-sub">{sub}</p>
         <div className="pb-foot">
           <Link href="/mixes">Open Mix</Link>
           <button

@@ -17,6 +17,8 @@
 import { useCallback, useState } from "react";
 import { apiGet, ApiError } from "@/lib/client-api";
 import { useQueue, type QueueItem } from "@/lib/queue";
+import { hasMixArt, type MixArtMap } from "@/lib/mix-art";
+import { MixPicture } from "@/components/mixes/MixPicture";
 
 type MixResponse = {
   kind: string;
@@ -36,6 +38,12 @@ export type MixCardProps = {
    * save them after a successful play or add. */
   savedValues?: PickerInput;
   onSaveValues?: (values: PickerInput) => void;
+  /** Picture overrides by mix key, whether the viewer is an admin (edit
+   * control), and a refresh after an edit. Only the four home mixes have a
+   * picture; the rest keep the typographic art. */
+  mixArt?: MixArtMap;
+  isAdmin?: boolean;
+  onArtChanged?: () => void;
 };
 
 type PickerInput = Record<string, string>;
@@ -58,6 +66,9 @@ export function MixCard({
   index,
   savedValues,
   onSaveValues,
+  mixArt,
+  isAdmin,
+  onArtChanged,
 }: MixCardProps) {
   const { playAlbum, addToQueue } = useQueue();
   const [busy, setBusy] = useState(false);
@@ -131,8 +142,20 @@ export function MixCard({
   return (
     <div className="playbill" data-kind={kind} role="group" aria-label={title}>
       <div className="pb-art">
-        <div className="big-num">{String(index).padStart(2, "0")}</div>
-        <div className="num-stamp">{tag}</div>
+        {hasMixArt(kind) ? (
+          <MixPicture
+            mixKey={kind}
+            title={title}
+            overrides={mixArt ?? {}}
+            isAdmin={Boolean(isAdmin)}
+            onChanged={onArtChanged ?? (() => {})}
+          />
+        ) : (
+          <>
+            <div className="big-num">{String(index).padStart(2, "0")}</div>
+            <div className="num-stamp">{tag}</div>
+          </>
+        )}
       </div>
       <div className="pb-body">
         <div className="pb-tag">{tag}</div>
