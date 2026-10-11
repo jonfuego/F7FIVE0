@@ -1,18 +1,21 @@
-import { useLocalSearchParams } from "expo-router";
-import { Ellipsis, Play, Shuffle } from "lucide-react-native";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import { ArrowLeft, Ellipsis, Play, Shuffle } from "lucide-react-native";
 import React, { useEffect, useRef, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View, RefreshControl } from "react-native";
 
-import { useAlbum } from "@/api/queries";
+import { fetchAutoPlaylistById, useAlbum } from "@/api/queries";
 import type { SongRow } from "@/api/types";
 import { albumDownloadSummary, downloadConfirmation, trackDownloadStatus } from "@/download/albumStatus";
 import { useDownloads } from "@/download/DownloadProvider";
 import { songEntries } from "@/download/entries";
+import { artistRadioId, artistRadioNotice, startArtistRadio } from "@/player/artistRadio";
 import { usePlayer } from "@/player/PlayerProvider";
+import { useApi } from "@/state/auth";
 import { colors, fonts, MIN_TOUCH, spacing, typography } from "@/state/theme";
 import { AlbumTileMenu } from "@/ui/AlbumTileMenu";
 import { Artwork } from "@/ui/Artwork";
 import { Icon } from "@/ui/Icon";
+import { IconButton } from "@/ui/IconButton";
 import { QueryState } from "@/ui/QueryState";
 import { Screen } from "@/ui/Screen";
 import { TrackRow } from "@/ui/TrackRow";
@@ -29,6 +32,8 @@ function shuffled<T>(arr: T[]): T[] {
 export default function AlbumDetailScreen(): React.ReactElement {
   const { id } = useLocalSearchParams<{ id: string }>();
   const album = useAlbum(id ?? "");
+  const router = useRouter();
+  const api = useApi();
   const { playSongs, playNext, addToQueue, nowPlaying } = usePlayer();
   const { state: downloads, enqueueMany } = useDownloads();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -47,8 +52,15 @@ export default function AlbumDetailScreen(): React.ReactElement {
     noticeTimer.current = setTimeout(() => setNotice(null), 5000);
   };
 
+  // Same Back as the season screen. The hardware/gesture back is expo-router's
+  // own; this covers a screen opened with no history (deep link).
+  const back = () => (router.canGoBack() ? router.back() : router.replace("/music"));
+
   return (
-    <Screen title="Album">
+    <Screen
+      title="Album"
+      right={<IconButton icon={ArrowLeft} accessibilityLabel="Back" onPress={back} />}
+    >
       <QueryState
         isLoading={album.isLoading}
         isError={album.isError}
@@ -75,6 +87,16 @@ export default function AlbumDetailScreen(): React.ReactElement {
           const download = () => {
             const accepted = enqueueMany(entries);
             showNotice(downloadConfirmation(downloads, fileIds, accepted));
+          };
+          const radioArtistId = artistRadioId(detail);
+          const artistRadio = async () => {
+            if (!radioArtistId) return;
+            const outcome = await startArtistRadio(
+              () => fetchAutoPlaylistById(api, "artist-radio", radioArtistId),
+              (radio) => playSongs(radio, 0),
+            );
+            const msg = artistRadioNotice(outcome);
+            if (msg) showNotice(msg);
           };
           return (
             <ScrollView
@@ -148,6 +170,7 @@ export default function AlbumDetailScreen(): React.ReactElement {
                 onPlayNext={() => void playNext(songs)}
                 onAddToQueue={() => void addToQueue(songs)}
                 onShuffle={() => playSongs(shuffled(songs), 0)}
+                onArtistRadio={radioArtistId ? () => void artistRadio() : undefined}
                 onDownload={download}
                 onClose={() => setMenuOpen(false)}
               />
