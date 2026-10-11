@@ -60,7 +60,7 @@ from app.services import (
     remote_access as ra, scan_status, server_version, tmdb_key, updates,
 )
 from app.services import art as art_service
-from app.services import artist_merge
+from app.services import artist_merge, auth_events
 from app.services.metadata._base import ProviderError
 from app.services.metadata.musicbrainz import MusicBrainzClient
 from app.services.metadata.runner import (
@@ -1523,16 +1523,8 @@ def start_library_scan(
 def _audit_event(db: Session, user_id: uuid.UUID, event: str, request: Request) -> None:
     """Append an auth-audit row for a sensitive admin action (a NAS sign-in
     change, an update). A password is never a parameter here, so it cannot
-    land in the audit trail."""
-    ip = getattr(request.state, "client_ip", None)
-    ua = request.headers.get("user-agent")
-    db.add(AuthEvent(
-        user_id=user_id,
-        event=event,
-        ip=ip if ip and ip != "unknown" else None,
-        user_agent=ua[:512] if ua else None,
-        at=datetime.now(timezone.utc),
-    ))
+    land in the audit trail. A failed audit write never fails the request."""
+    auth_events.record_auth_event(db, user_id=user_id, event=event, request=request)
 
 
 @router.get("/nas-credentials", response_model=list[NasCredentialOut])

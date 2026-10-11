@@ -21,6 +21,9 @@ import { loadMe } from "@/lib/load-me";
 import { useFeatures } from "@/lib/features";
 import { showArrSync, type FolderScanStatus } from "@/lib/library-scan";
 import { remoteAccessSummary, scanSummary, updatesSummary, type SectionSummary } from "@/lib/admin-sections";
+import {
+  errorMessage, okMessage, ownRowReason, rowMessageFor, userActionErrorText, type RowMessage,
+} from "@/lib/admin-users";
 import { useViewPref } from "@/lib/use-view-pref";
 import type { AdminSectionId } from "@/lib/view-prefs";
 import type {
@@ -247,7 +250,8 @@ export default function AdminPage() {
 function UsersSection({ me }: { me: Me }) {
   const [users, setUsers] = useState<AdminUser[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  // The result of the last action, shown next to the row it belongs to.
+  const [rowMsg, setRowMsg] = useState<RowMessage | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -264,21 +268,13 @@ function UsersSection({ me }: { me: Me }) {
   }, [load]);
 
   async function patchUser(id: string, body: Record<string, unknown>) {
-    setNotice(null);
+    setRowMsg(null);
     try {
       const updated = await apiPatch<AdminUser>(`/api/admin/users/${id}`, body);
       setUsers((prev) => (prev ? prev.map((u) => (u.id === id ? updated : u)) : prev));
-      setNotice("Saved.");
+      setRowMsg(okMessage(id, "Saved."));
     } catch (err) {
-      if (err instanceof ApiError && err.detail === "cannot_disable_last_admin") {
-        setNotice("Cannot disable the last active admin.");
-        return;
-      }
-      if (err instanceof ApiError && err.detail === "cannot_demote_last_admin") {
-        setNotice("Cannot demote the last active admin.");
-        return;
-      }
-      setNotice(err instanceof Error ? err.message : "Something went wrong.");
+      setRowMsg(errorMessage(id, userActionErrorText(err)));
     }
   }
 
@@ -286,25 +282,23 @@ function UsersSection({ me }: { me: Me }) {
     const next = window.prompt("New password (min 8 chars):");
     if (!next) return;
     if (next.length < 8) {
-      setNotice("Password must be at least 8 characters.");
+      setRowMsg(errorMessage(id, "Password must be at least 8 characters."));
       return;
     }
-    setNotice(null);
+    setRowMsg(null);
     try {
       await apiPost(`/api/admin/users/${id}/password`, { new_password: next });
-      setNotice("Password reset. The user will need to sign in again.");
+      setRowMsg(okMessage(id, "Password reset. The user will need to sign in again."));
     } catch (err) {
-      setNotice(err instanceof Error ? err.message : "Password reset failed.");
+      setRowMsg(errorMessage(id, userActionErrorText(err, "Password reset failed.")));
     }
   }
 
   return (
     <div>
-      {notice ? <div className="mb-2 text-xs text-neutral-400">{notice}</div> : null}
-
       <NewUserForm onCreated={(u) => {
         setUsers((prev) => (prev ? [...prev, u] : [u]));
-        setNotice(`Created ${u.username}.`);
+        setRowMsg(okMessage(u.id, `Created ${u.username}.`));
       }} />
 
       <div className="mt-6 overflow-x-auto">
@@ -330,7 +324,10 @@ function UsersSection({ me }: { me: Me }) {
               </tr>
             </thead>
             <tbody>
-              {users.map((u) => (
+              {users.map((u) => {
+                const ownReason = ownRowReason(u.id, me.id);
+                const msg = rowMessageFor(rowMsg, u.id);
+                return (
                 <tr key={u.id} className="border-b border-neutral-900 last:border-b-0">
                   <td className="px-2 py-2 font-sans text-xs text-neutral-300">{u.username}</td>
                   <td className="px-2 py-2">{u.display_name}</td>
@@ -338,7 +335,8 @@ function UsersSection({ me }: { me: Me }) {
                     <select
                       className="rounded border border-neutral-800 bg-neutral-950 px-2 py-1 text-xs"
                       value={u.role}
-                      disabled={u.id === me.id}
+                      disabled={ownReason !== null}
+                      title={ownReason ?? undefined}
                       onChange={(e) => patchUser(u.id, { role: e.target.value })}
                     >
                       <option value="member">member</option>
@@ -361,7 +359,8 @@ function UsersSection({ me }: { me: Me }) {
                       <button
                         type="button"
                         onClick={() => patchUser(u.id, { is_active: !u.is_active })}
-                        disabled={u.id === me.id}
+                        disabled={ownReason !== null}
+                        title={ownReason ?? undefined}
                         className={smallButtonCls}
                       >
                         {u.is_active ? "Disable" : "Enable"}
@@ -374,9 +373,21 @@ function UsersSection({ me }: { me: Me }) {
                         Reset password
                       </button>
                     </div>
+                    {ownReason ? (
+                      <p className="mt-1 text-right text-xs text-neutral-500">{ownReason}</p>
+                    ) : null}
+                    {msg ? (
+                      <p
+                        role={msg.kind === "error" ? "alert" : "status"}
+                        className={`mt-1 text-right text-xs ${msg.kind === "error" ? "text-red-400" : "text-emerald-400"}`}
+                      >
+                        {msg.text}
+                      </p>
+                    ) : null}
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         )}

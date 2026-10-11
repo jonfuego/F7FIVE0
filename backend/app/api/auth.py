@@ -18,14 +18,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import current_user, get_db, require_admin
-from app.services import login_throttle
+from app.services import auth_events, login_throttle
 from app.api.schemas import (
     LoginRequest, LogoutRequest, PasswordChangeRequest, PasswordResetRequest,
     ProfileUpdateRequest, RefreshRequest, TokenPair, UserCreateRequest, UserOut,
     UserUpdateRequest,
 )
 from app.config import settings
-from app.models.user import AuthEvent, Session as UserSession, User, UserRole
+from app.models.user import Session as UserSession, User, UserRole
 from app.services.security import (
     create_access_token, generate_refresh_token, hash_password,
     hash_refresh_token, refresh_days_for, refresh_expires_at, verify_password,
@@ -78,18 +78,11 @@ def _log_auth_event(
     event: str,
     request: Request,
 ) -> None:
-    """Append-only auth audit. Does not commit; caller is expected to."""
-    ip = getattr(request.state, "client_ip", None)
-    ua = request.headers.get("user-agent")
-    db.add(
-        AuthEvent(
-            user_id=user_id,
-            event=event,
-            ip=ip if ip and ip != "unknown" else None,
-            user_agent=ua[:512] if ua else None,
-            at=datetime.now(timezone.utc),
-        )
-    )
+    """Append-only auth audit. Does not commit; caller is expected to.
+
+    Never fails the request: see services/auth_events.py (SAVEPOINT, length).
+    """
+    auth_events.record_auth_event(db, user_id=user_id, event=event, request=request)
 
 
 def _issue_tokens(
@@ -411,7 +404,7 @@ def create_user(
     )
     db.add(user)
     db.flush()
-    _log_auth_event(db, user_id=admin.id, event=f"admin_created_user:{user.id}",
+    _log_auth_event(db, user_id=admin.id, event=auth_events.admin_created_user(user.id),
                     request=request)
     db.commit()
     db.refresh(user)
@@ -474,7 +467,7 @@ def update_user(
     if changes:
         _log_auth_event(
             db, user_id=admin.id,
-            event=f"admin_updated_user:{target.id}:{'+'.join(changes)}",
+            event=auth_events.admin_updated_user(target.id, changes),
             request=request,
         )
     db.commit()
@@ -516,5 +509,5 @@ def reset_password(
         UserSession.revoked_at.is_(None),
     ).update({"revoked_at": datetime.now(timezone.utc)})
     _log_auth_event(db, user_id=admin.id,
-                    event=f"admin_reset_password:{target.id}", request=request)
+                    event=auth_events.admin_reset_password(target.id), request=request)
     db.commit()

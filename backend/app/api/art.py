@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Annotated, Optional
 
 from fastapi import (
@@ -32,8 +32,9 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import current_user, get_bearer_token, get_db, require_admin
 from app.models.art import ArtOverride
-from app.models.user import AuthEvent, User
+from app.models.user import User
 from app.services import art as art_service
+from app.services import auth_events
 from app.services import art_search as art_search_service
 from app.services import security as security_service
 from app.services.arr._base import ArrClientError
@@ -97,17 +98,7 @@ def _serialize(row: ArtOverride) -> ArtOverrideOut:
 def _audit(
     db: Session, user_id: uuid.UUID, event: str, request: Request,
 ) -> None:
-    ip = getattr(request.state, "client_ip", None)
-    ua = request.headers.get("user-agent")
-    db.add(
-        AuthEvent(
-            user_id=user_id,
-            event=event,
-            ip=ip if ip and ip != "unknown" else None,
-            user_agent=ua[:512] if ua else None,
-            at=datetime.now(timezone.utc),
-        )
-    )
+    auth_events.record_auth_event(db, user_id=user_id, event=event, request=request)
 
 
 # ---------------------------------------------------------------------------

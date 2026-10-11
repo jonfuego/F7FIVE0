@@ -60,7 +60,7 @@ from webauthn.helpers.structs import (
 
 from app.api.auth import _client_ip, _issue_tokens, _log_auth_event
 from app.api.deps import current_user, get_db
-from app.services import login_throttle
+from app.services import auth_events, login_throttle
 
 # Passkey logins don't carry a username up front (the credential resolves the
 # user), so they share one throttle bucket under this synthetic account name.
@@ -366,7 +366,7 @@ def login_verify(
     # Event carries the client type so the smoke check can split native vs web.
     # `passkey_login` stays the grep-able prefix (see the documented event list).
     _log_auth_event(
-        db, user_id=user.id, event=f"passkey_login:{client_type}", request=request,
+        db, user_id=user.id, event=auth_events.passkey_login(client_type), request=request,
     )
     db.commit()
     return tokens
