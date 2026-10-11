@@ -57,7 +57,7 @@ from app.services.arr.sonarr import SonarrClient
 from app.config import settings
 from app.services import (
     android_app, app_settings, arr_settings, library_folders, nas_auth, reminders,
-    remote_access as ra, scan_status, server_version, tmdb_key, updates,
+    remote_access as ra, scan_library, scan_status, server_version, tmdb_key, updates,
 )
 from app.services import art as art_service
 from app.services import artist_merge, auth_events
@@ -1487,34 +1487,80 @@ def put_library_folders(
     return _library_folders_out(db)
 
 
+# The libraries the folder scan can do, in the order Admin lists them.
+_FOLDER_SCAN_LIBRARIES = ("movies", "tv", "music")
+
+
+def _folder_scan_out(db: Session) -> dict:
+    """The folder scan's status, plus how many folders each library has, so the
+    Scans card knows which libraries it can start."""
+    out = scan_status.read(db)
+    out["folders"] = {kind: len(library_folders.folders(db, kind)) for kind in library_folders.KINDS}
+    return out
+
+
 @router.get("/library/scan")
 def get_library_scan(
     _admin: Annotated[User, Depends(require_admin)],
     db: Annotated[Session, Depends(get_db)],
 ) -> dict:
     """The folder scan's state: running or idle, which library it is on, counts
-    per library, when the last scan finished, and the last error."""
-    return scan_status.read(db)
+    per library, when the last scan finished, and the last error. Also
+    `folders`: how many folders each library has."""
+    return _folder_scan_out(db)
 
 
 @router.post("/library/scan", status_code=202)
 def start_library_scan(
     _admin: Annotated[User, Depends(require_admin)],
     db: Annotated[Session, Depends(get_db)],
+    library: Annotated[Optional[list[str]], Query()] = None,
 ) -> dict:
-    """Scan the library folders now. 409 while a scan is already running. The
-    scan itself runs on the scheduler; poll GET /library/scan to watch it."""
-    if not scan_status.begin(db):
+    """Scan the library folders now. With no `library` it scans every library
+    the folder scanner owns; `?library=music` (repeatable) scans just those.
+    400 for an unknown library, or one a Radarr / Sonarr / Lidarr key owns or
+    that has no folder yet. 409 while a scan is already running. The scan
+    itself runs on the scheduler; poll GET /library/scan to watch it."""
+    only = None
+    if library:
+        unknown = set(library) - set(_FOLDER_SCAN_LIBRARIES)
+        if unknown:
+            raise HTTPException(status_code=400, detail="unknown_library")
+        only = [k for k in _FOLDER_SCAN_LIBRARIES if k in library]
+        enabled = {
+            "movies": scan_library.movies_enabled,
+            "tv": scan_library.tv_enabled,
+            "music": scan_library.music_enabled,
+        }
+        if not all(enabled[k](db) for k in only):
+            raise HTTPException(status_code=400, detail="library_not_scanned")
+    if not scan_status.begin(db, only=only):
         raise HTTPException(status_code=409, detail="scan_running")
     db.commit()
     try:
-        scheduler.trigger_folder_scan_now()
+        if only:
+            scheduler.trigger_folder_scan_now(only=only)
+        else:
+            scheduler.trigger_folder_scan_now()
     except Exception as exc:
         log.exception("could not queue the folder scan")
         scan_status.finish(db, "The scan could not be started.")
         db.commit()
         raise HTTPException(status_code=500, detail="scan_not_started") from exc
-    return scan_status.read(db)
+    return _folder_scan_out(db)
+
+
+@router.get("/library/arr-sync")
+def get_arr_sync(
+    _admin: Annotated[User, Depends(require_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """The *arr sync's state: running or idle, which app it is on, what each
+    app brought in, when the last sync finished and the last error. Also
+    `configured`: which apps have a key (the app owns that library)."""
+    out = scan_status.arr_read(db)
+    out["configured"] = {app: arr_settings.configured(app) for app in arr_settings.APPS}
+    return out
 
 
 # ---------------------------------------------------------------------------

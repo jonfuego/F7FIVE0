@@ -43,7 +43,7 @@ from app.models.playback import WatchProgress
 from app.models.track_play import TrackPlay
 from app.models.tv import Episode, Series
 from app.models.user import User
-from app.services import scan_status
+from app.services import arr_settings, scan_status
 from app.services.bio_excerpt import bio_excerpt
 from app.services.art import resolve_art, resolve_art_batch
 
@@ -2037,10 +2037,35 @@ def library_scan_state(
 @router.post("/sync/run", status_code=202)
 def trigger_sync_now(
     _admin: Annotated[User, Depends(require_admin)],
+    db: Annotated[Session, Depends(get_db)],
+    app: Annotated[Optional[list[str]], Query()] = None,
 ) -> dict:
-    """Fire a full *arr sync immediately. Returns 202; the job runs async."""
-    scheduler.trigger_full_sync_now()
-    return {"status": "enqueued"}
+    """Fire an *arr sync immediately. Returns 202; the job runs async.
+
+    With no `app` it is the full sync as before (every app that has a key, then
+    a folder scan). `?app=lidarr` (repeatable) syncs just those apps and
+    nothing else: 400 for an unknown app or one with no key, 409 while an *arr
+    sync is already running. Poll GET /admin/library/arr-sync to watch it."""
+    if not app:
+        scheduler.trigger_full_sync_now()
+        return {"status": "enqueued"}
+    unknown = set(app) - set(arr_settings.APPS)
+    if unknown:
+        raise HTTPException(status_code=400, detail="unknown_app")
+    apps = [a for a in arr_settings.APPS if a in app]
+    if not all(arr_settings.configured(a) for a in apps):
+        raise HTTPException(status_code=400, detail="app_not_configured")
+    if not scan_status.arr_begin(db, apps):
+        raise HTTPException(status_code=409, detail="scan_running")
+    db.commit()
+    try:
+        scheduler.trigger_arr_sync_now(apps)
+    except Exception as exc:
+        log.exception("could not queue the *arr sync")
+        scan_status.arr_finish(db, "The sync could not be started.")
+        db.commit()
+        raise HTTPException(status_code=500, detail="scan_not_started") from exc
+    return {"status": "enqueued", **scan_status.arr_read(db)}
 
 
 @router.get("/music-videos/scan")

@@ -24,7 +24,7 @@ import os
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
@@ -111,27 +111,57 @@ def schedule_pending_enrichment(stats: Optional[SyncStats]) -> None:
 # ---------------------------------------------------------------------------
 # Full sync
 # ---------------------------------------------------------------------------
-def full_sync(db: Session) -> SyncStats:
-    """Run a full pass across all three *arr services. Returns aggregate stats.
+def _synced_count(app: str, stats: SyncStats) -> int:
+    """The items an app has brought in so far: movies, series, artists."""
+    return {
+        "radarr": stats.movies_upserted,
+        "sonarr": stats.series_upserted,
+        "lidarr": stats.artists_upserted,
+    }[app]
+
+
+def full_sync(
+    db: Session,
+    only: Optional[list] = None,
+    on_progress: Optional[Callable[[str, str, int, int, Optional[str]], None]] = None,
+) -> SyncStats:
+    """Run a full pass across the *arr services. Returns aggregate stats.
 
     Each service runs in its own sub-transaction via db.begin_nested() so that
     a flush error in one (e.g. Sonarr) does not poison the session and kill
     the others. The outer caller still commits the successful work.
+
+    `only` limits the pass to the named apps (still skipping any that has no
+    key). `on_progress(app, state, synced, errors, error)` is told when each
+    app starts ("running") and ends ("done" or "failed"), for Admin's status.
     """
     stats = SyncStats()
-    for label, enabled, runner in (
-        ("radarr", arr_settings.configured("radarr"), _run_radarr),
-        ("sonarr", arr_settings.configured("sonarr"), _run_sonarr),
-        ("lidarr", arr_settings.configured("lidarr"), _run_lidarr),
+    for label, runner in (
+        ("radarr", _run_radarr),
+        ("sonarr", _run_sonarr),
+        ("lidarr", _run_lidarr),
     ):
-        if not enabled:
+        if only is not None and label not in only:
             continue
+        if not arr_settings.configured(label):
+            continue
+        before_errors = stats.errors
+        before_synced = _synced_count(label, stats)
+        if on_progress is not None:
+            on_progress(label, "running", 0, 0, None)
+        error = None
         try:
             with db.begin_nested():
                 runner(db, stats)
-        except Exception:
+        except Exception as exc:
             log.exception("%s sync failed", label)
             stats.errors += 1
+            error = f"{label} sync failed: {exc}"
+        if on_progress is not None:
+            on_progress(
+                label, "failed" if error else "done",
+                _synced_count(label, stats) - before_synced, stats.errors - before_errors, error,
+            )
     stats.log_summary()
     return stats
 
