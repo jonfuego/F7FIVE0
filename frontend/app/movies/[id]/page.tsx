@@ -26,6 +26,7 @@ import {
 } from "@/lib/format";
 import { movieActivityLine } from "@/lib/movie-activity";
 import { useProgressMap } from "@/lib/progress";
+import { invalidateLists } from "@/lib/list-cache";
 import type { CastMember, MediaFile, MovieDetail, OverrideOut } from "@/lib/types";
 
 const TMDB_PROFILE_BASE = "https://image.tmdb.org/t/p/w185";
@@ -83,7 +84,12 @@ export default function MovieDetailPage() {
     };
   }, [id, reloadTick]);
 
-  const onApplied = useCallback(() => setReloadTick((t) => t + 1), []);
+  // An edit changes this movie's tile on the Movies page too, so drop the
+  // in-memory list and let that page fetch it fresh.
+  const onApplied = useCallback(() => {
+    invalidateLists("movies");
+    setReloadTick((t) => t + 1);
+  }, []);
 
   const openEdit = useCallback(async () => {
     if (!movie) return;

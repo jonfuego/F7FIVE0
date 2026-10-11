@@ -30,6 +30,11 @@ type Props = {
   progressPct?: number;
   onAdminEdit?: () => void;
   adminEditLabel?: string;
+  // First tiles on a page: load the poster at once instead of lazily.
+  priority?: boolean;
+  // Set false on big walls: every tile in view would otherwise fetch its
+  // detail route in the background the moment the wall paints.
+  prefetch?: boolean;
   // When provided, a hover-revealed play button is painted over the
   // frame. The handler is responsible for resolving the item(s) and
   // pushing them into the queue.
@@ -51,6 +56,8 @@ export function MediaCard({
   progressPct,
   onAdminEdit,
   adminEditLabel,
+  priority,
+  prefetch,
   onPlay,
   overlay,
 }: Props) {
@@ -70,6 +77,7 @@ export function MediaCard({
   return (
     <Link
       href={href}
+      prefetch={prefetch}
       className="poster"
       style={tint}
       aria-label={title}
@@ -85,7 +93,7 @@ export function MediaCard({
           <img
             src={artSized(posterPath, 300) ?? posterPath}
             alt={title}
-            loading="lazy"
+            loading={priority ? "eager" : "lazy"}
             decoding="async"
             className="real-art"
           />
