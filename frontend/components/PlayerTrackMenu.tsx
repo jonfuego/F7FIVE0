@@ -14,6 +14,7 @@ import type { CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import { EllipsisVertical } from "lucide-react";
 import { Icon } from "@/components/Icon";
+import { startArtistRadio } from "@/lib/artist-radio";
 import { apiGet } from "@/lib/client-api";
 import { albumToQueueItems, useQueue, type QueueItem } from "@/lib/queue";
 import type { AlbumDetail } from "@/lib/types";
@@ -70,17 +71,7 @@ export function PlayerTrackMenu({
   }
   async function artistRadio() {
     setOpen(false);
-    if (!artistId) return;
-    try {
-      const data = await apiGet<{ items: QueueItem[] }>(
-        `/api/library/auto-playlist/artist-radio/${artistId}`,
-      );
-      if (Array.isArray(data.items) && data.items.length > 0) {
-        playNextBlock(data.items);
-      }
-    } catch {
-      // best-effort
-    }
+    await startArtistRadio<QueueItem>(artistId, { get: apiGet, playNextBlock });
   }
   // Navigate only. No pause / stop / queue clear here, so the dock keeps
   // playing while the Now Playing route closes behind the push.
