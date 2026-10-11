@@ -57,8 +57,9 @@ export const VIEW_PREFS = {
   "musicvideos.sort": { fallback: "name", valid: oneOf("name", "videos") } as Spec<"name" | "videos">,
   // Mixes: the last values typed into each mix's picker (year, decade, genre...).
   "mixes.inputs": { fallback: {}, valid: mixInputs } as Spec<MixInputs>,
-  // Admin page: the list of collapsed section ids (nothing collapsed by default).
-  "admin.collapsed": { fallback: [], valid: adminCollapsed } as Spec<AdminSectionId[]>,
+  // Admin page: the list of collapsed section ids. Every section starts
+  // collapsed until the user opens it; attention (forceOpen) still opens one.
+  "admin.collapsed": { fallback: [...ADMIN_SECTION_IDS], valid: adminCollapsed } as Spec<AdminSectionId[]>,
 };
 
 export type ViewPrefKey = keyof typeof VIEW_PREFS;

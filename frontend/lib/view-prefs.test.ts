@@ -4,7 +4,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mergeViewPrefs, resolveViewPref, viewPrefPath } from "./view-prefs.ts";
+import { ADMIN_SECTION_IDS, mergeViewPrefs, resolveViewPref, viewPrefPath } from "./view-prefs.ts";
 
 test("nothing stored gives every default", () => {
   assert.deepEqual(mergeViewPrefs({}), {
@@ -14,18 +14,24 @@ test("nothing stored gives every default", () => {
     "tv.status": "All",
     "musicvideos.sort": "name",
     "mixes.inputs": {},
-    "admin.collapsed": [],
+    "admin.collapsed": [...ADMIN_SECTION_IDS],
   });
   assert.equal(mergeViewPrefs(null)["music.browse"], "artists");
 });
 
 test("admin.collapsed keeps known section ids and drops the rest", () => {
   assert.deepEqual(resolveViewPref("admin.collapsed", ["updates", "history"]), ["updates", "history"]);
-  // A stale id would otherwise hide a section forever; the whole value is
-  // rejected (falls back to the default) if any id is unknown.
-  assert.deepEqual(resolveViewPref("admin.collapsed", ["updates", "gone"]), []);
-  assert.deepEqual(resolveViewPref("admin.collapsed", "updates"), []);
+  // A stale id is not trusted; the whole value is rejected and falls back to
+  // the default (every section collapsed) if any id is unknown.
+  assert.deepEqual(resolveViewPref("admin.collapsed", ["updates", "gone"]), [...ADMIN_SECTION_IDS]);
+  assert.deepEqual(resolveViewPref("admin.collapsed", "updates"), [...ADMIN_SECTION_IDS]);
+  // An empty list is a real choice (the user opened everything) and is kept.
   assert.deepEqual(resolveViewPref("admin.collapsed", []), []);
+});
+
+test("admin.collapsed with nothing stored collapses every section", () => {
+  assert.deepEqual(resolveViewPref("admin.collapsed", undefined), [...ADMIN_SECTION_IDS]);
+  assert.equal(resolveViewPref("admin.collapsed", null).length, ADMIN_SECTION_IDS.length);
 });
 
 test("a stored view wins over the default (pick Albums, come back, still Albums)", () => {
