@@ -216,7 +216,7 @@ function MenuItem({
 // define --bg and --surface-1..3 only, so the variable was undefined, the
 // declaration was invalid at computed-value time and the menu painted with no
 // background. --surface-2 is a solid colour (#181818 dark); the literal is the
-// fallback so the menu can never go transparent. z-index 400 sits above the
+// fallback so the menu never paints see-through. z-index 400 sits above the
 // player view (.np is 100) and its queue panel.
 const menuStyle: CSSProperties = {
   position: "fixed",
@@ -234,7 +234,7 @@ const menuItemStyle: CSSProperties = {
   display: "block",
   width: "100%",
   padding: "10px 14px",
-  background: "transparent",
+  background: "none",
   border: "none",
   color: "var(--ink, #ffffff)",
   textAlign: "left",
