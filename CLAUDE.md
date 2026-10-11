@@ -212,11 +212,15 @@ INSTALL.md for the operator view.
   rails ask for `w=300` (`lib/art-url.ts`, `resolveArtUri` on the app). A one-time
   job (`backfill_art_copies`, run by the scheduler after boot) builds copies for
   older art and is safe to rerun. Art is private: Cloudflare must not cache it.
-- Mix art: the four Home mixes (`recently-added`, `most-played`,
-  `continue-listening`, `random`) are art kind `mix`, role `cover`, with a fixed
-  uuid5 id per key. Admin sets or resets a picture from the mix cards; with no
-  override the web shows the static default in `frontend/public/mix/`. Unknown
-  mix keys are rejected.
+- Mix art: all 11 mixes on the Mixes page (`random`, `recently-added`,
+  `continue-listening`, `most-played`, `never-played`, `recently-played`,
+  `artist-random`, `by-year`, `by-decade`, `by-genre`, `artist-radio`) are art
+  kind `mix`, role `cover`, with a fixed uuid5 id per key. The first four ids
+  shipped first and must never change. Admin sets or resets a picture from the
+  mix cards (the Home rail shows the first four); with no override the web shows
+  the static default in `frontend/public/mix/<key>.svg`, one per key. Unknown mix
+  keys are rejected. Mixes page cards are small (picture 112px, card under
+  300px); Home rail cards use `.playbill.compact`.
 - Frame-grab thumbs: when a music video has no thumb art, the music videos scan
   grabs one frame with ffmpeg (about 10 percent in) and saves it as
   `music_video` / `thumb` with `source_kind` `frame`. It runs in the scan, never

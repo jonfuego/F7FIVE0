@@ -36,11 +36,36 @@ def art_root(tmp_path, monkeypatch):
     return tmp_path
 
 
+# Ids of the first four mixes as shipped in 10d8332 (uuid5 of the key). A
+# picture saved under one of these must keep resolving, so they never change.
+_SHIPPED_IDS = {
+    "recently-added": "9d5d1273-1f4a-584b-9d9e-7ec8b97b4323",
+    "most-played": "5c09f2a3-bc83-5234-99a6-771c7ac24436",
+    "continue-listening": "87c0cb93-d976-524c-a4d3-c1f858b3bd14",
+    "random": "140c6013-b9c2-5cf9-acc3-ffaa1ed8c0c4",
+}
+
+
 def test_mix_ids_are_stable_and_distinct():
     ids = art_service.MIX_IDS
-    assert set(ids) == {"recently-added", "most-played", "continue-listening", "random"}
-    assert len(set(ids.values())) == 4
+    assert set(ids) == {
+        "random", "recently-added", "continue-listening", "most-played",
+        "never-played", "recently-played", "artist-random", "by-year",
+        "by-decade", "by-genre", "artist-radio",
+    }
+    assert len(set(ids.values())) == 11
+    for key, literal in _SHIPPED_IDS.items():
+        assert str(ids[key]) == literal
     assert art_service.parse_entity_id("mix", "random") == ids["random"]
+
+
+def test_new_mix_cover_can_be_set(client, art_root):
+    up = client.post(
+        "/api/admin/art/mix/by-genre/cover",
+        files={"file": ("m.png", _png(), "image/png")},
+    )
+    assert up.status_code == 201, up.text
+    assert client.get("/api/art/mixes").json()["by-genre"] is not None
 
 
 def test_set_list_serve_and_clear_mix_cover(client, art_root):
