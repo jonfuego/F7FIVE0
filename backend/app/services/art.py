@@ -124,9 +124,12 @@ _VALID_ROLES: dict[str, set[str]] = {
 }
 
 # Mixes have no database row, so their art id is derived: uuid5 of the mix key
-# under a fixed namespace. Only these four home-page mixes can carry a picture.
+# under a fixed namespace. Every mix on the Mixes page can carry a picture. The
+# first four ids shipped first and must never change.
 MIX_KEYS: tuple[str, ...] = (
     "recently-added", "most-played", "continue-listening", "random",
+    "never-played", "recently-played", "artist-random", "by-year",
+    "by-decade", "by-genre", "artist-radio",
 )
 _MIX_NAMESPACE = uuid.UUID("5d0f0c52-7b0e-4c6a-9a43-2f7f5e0c1a77")
 MIX_IDS: dict[str, uuid.UUID] = {
@@ -159,7 +162,7 @@ def parse_entity_id(entity_kind: str, raw: str) -> uuid.UUID:
 
 
 def mix_art_urls(db: Session) -> dict[str, Optional[str]]:
-    """`{mix key: art URL or None}` for the four mixes. A URL means an admin
+    """`{mix key: art URL or None}` for every mix. A URL means an admin
     set a picture (cache key `?v=` like every other art URL); None means the
     web should use its static default."""
     found = resolve_art_batch(

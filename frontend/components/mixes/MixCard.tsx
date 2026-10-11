@@ -39,8 +39,7 @@ export type MixCardProps = {
   savedValues?: PickerInput;
   onSaveValues?: (values: PickerInput) => void;
   /** Picture overrides by mix key, whether the viewer is an admin (edit
-   * control), and a refresh after an edit. Only the four home mixes have a
-   * picture; the rest keep the typographic art. */
+   * control), and a refresh after an edit. Every mix has a picture. */
   mixArt?: MixArtMap;
   isAdmin?: boolean;
   onArtChanged?: () => void;
@@ -173,7 +172,7 @@ export function MixCard({
         <div
           style={{
             display: "flex",
-            gap: 10,
+            gap: 8,
             flexWrap: "wrap",
             alignItems: "center",
           }}
@@ -183,7 +182,7 @@ export function MixCard({
             onClick={onPlay}
             disabled={busy}
             className="btn play"
-            style={{ padding: "10px 18px", fontSize: 13 }}
+            style={{ padding: "7px 16px", fontSize: 13 }}
           >
             <span className="tri" />
             {busy ? "..." : picker && !pickerOpen ? "Choose" : "Play"}
@@ -193,7 +192,7 @@ export function MixCard({
             onClick={onAdd}
             disabled={busy}
             className="btn ghost"
-            style={{ padding: "10px 16px", fontSize: 12 }}
+            style={{ padding: "7px 14px", fontSize: 12 }}
           >
             + Queue
           </button>
@@ -210,7 +209,7 @@ export function MixCard({
                 letterSpacing: "0.16em",
                 textTransform: "uppercase",
                 color: "var(--ink-3)",
-                padding: "10px 6px",
+                padding: "7px 6px",
               }}
             >
               Cancel

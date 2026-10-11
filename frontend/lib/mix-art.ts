@@ -1,5 +1,5 @@
-// Mix pictures. The four home mixes ship a default SVG in /public/mix and an
-// admin can replace it with an uploaded picture. The API reports the override
+// Mix pictures. Every mix on the Mixes page ships a default SVG in /public/mix
+// and an admin can replace it with an uploaded picture. The API reports the override
 // URL (with its ?v= cache key) per mix key, or null when none is set.
 
 export const MIX_ART_KEYS = [
@@ -7,6 +7,13 @@ export const MIX_ART_KEYS = [
   "most-played",
   "continue-listening",
   "random",
+  "never-played",
+  "recently-played",
+  "artist-random",
+  "by-year",
+  "by-decade",
+  "by-genre",
+  "artist-radio",
 ] as const;
 
 export type MixArtKey = (typeof MIX_ART_KEYS)[number];

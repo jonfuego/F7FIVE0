@@ -359,7 +359,7 @@ def mix_art(
     _user: Annotated[User, Depends(current_user)],
     db: Annotated[Session, Depends(get_db)],
 ) -> dict[str, Optional[str]]:
-    """`{mix key: art URL or null}` for the four home mixes. A URL (with the
+    """`{mix key: art URL or null}` for every mix. A URL (with the
     usual `?v=` cache key) means an admin set a picture; null means the web
     shows its static default from /mix/<key>.svg."""
     return art_service.mix_art_urls(db)
