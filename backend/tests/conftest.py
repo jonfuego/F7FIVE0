@@ -216,10 +216,12 @@ def client(db_session: Session):
 @pytest.fixture(autouse=True)
 def _reset_tmdb_key_cache():
     """The saved TMDB key is cached per process; start each test clean."""
-    from app.services import tmdb_key
+    from app.services import arr_settings, tmdb_key
     tmdb_key.reset_cache()
+    arr_settings.reset_cache()
     yield
     tmdb_key.reset_cache()
+    arr_settings.reset_cache()
 
 
 @pytest.fixture(autouse=True)

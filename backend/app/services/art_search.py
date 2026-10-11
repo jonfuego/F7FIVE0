@@ -52,7 +52,7 @@ from app.models.art import (
 from app.models.movie import Movie
 from app.models.music import Album, Artist, MusicVideo
 from app.models.tv import Series
-from app.services import tmdb_key
+from app.services import arr_settings, tmdb_key
 from app.services.arr import LidarrClient, RadarrClient, SonarrClient
 from app.services.arr._base import ArrClientError
 from app.services.art_sources import audiodb as audiodb_source
@@ -481,15 +481,15 @@ def _pick_lookup_match(
 
 
 def _lidarr() -> LidarrClient:
-    return LidarrClient(settings.lidarr_url, settings.lidarr_api_key)
+    return LidarrClient(*arr_settings.creds("lidarr"))
 
 
 def _radarr() -> RadarrClient:
-    return RadarrClient(settings.radarr_url, settings.radarr_api_key)
+    return RadarrClient(*arr_settings.creds("radarr"))
 
 
 def _sonarr() -> SonarrClient:
-    return SonarrClient(settings.sonarr_url, settings.sonarr_api_key)
+    return SonarrClient(*arr_settings.creds("sonarr"))
 
 
 __all__ = [

@@ -10,6 +10,18 @@ import httpx
 class ArrClientError(RuntimeError):
     """Raised when an *arr API call fails in a way the caller should notice."""
 
+    def __init__(self, message: str, *, status_code: Optional[int] = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
+class ArrAuthError(ArrClientError):
+    """The app answered 401: the API key is wrong."""
+
+
+class ArrUnreachableError(ArrClientError):
+    """The app did not answer at all (bad address, refused, timed out)."""
+
 
 class _ArrClient:
     """Base *arr client. Holds the httpx.Client and the API key."""
@@ -47,14 +59,20 @@ class _ArrClient:
         try:
             resp = self._client.get(path, params=params)
         except httpx.HTTPError as exc:
-            raise ArrClientError(f"{self.service_name} GET {path} failed: {exc}") from exc
+            raise ArrUnreachableError(f"{self.service_name} GET {path} failed: {exc}") from exc
         if resp.status_code == 401:
-            raise ArrClientError(f"{self.service_name} rejected API key (401)")
+            raise ArrAuthError(f"{self.service_name} rejected API key (401)", status_code=401)
         if resp.status_code >= 400:
             raise ArrClientError(
-                f"{self.service_name} GET {path} returned {resp.status_code}: {resp.text[:200]}"
+                f"{self.service_name} GET {path} returned {resp.status_code}: {resp.text[:200]}",
+                status_code=resp.status_code,
             )
-        return resp.json()
+        try:
+            return resp.json()
+        except ValueError as exc:
+            raise ArrClientError(
+                f"{self.service_name} GET {path} did not return JSON", status_code=resp.status_code,
+            ) from exc
 
     def _post(self, path: str, json: Optional[dict] = None) -> Any:
         if not self.configured:
@@ -62,9 +80,9 @@ class _ArrClient:
         try:
             resp = self._client.post(path, json=json or {})
         except httpx.HTTPError as exc:
-            raise ArrClientError(f"{self.service_name} POST {path} failed: {exc}") from exc
+            raise ArrUnreachableError(f"{self.service_name} POST {path} failed: {exc}") from exc
         if resp.status_code == 401:
-            raise ArrClientError(f"{self.service_name} rejected API key (401)")
+            raise ArrAuthError(f"{self.service_name} rejected API key (401)", status_code=401)
         if resp.status_code >= 400:
             raise ArrClientError(
                 f"{self.service_name} POST {path} returned {resp.status_code}: {resp.text[:200]}"
@@ -74,6 +92,21 @@ class _ArrClient:
         if not resp.content:
             return None
         return resp.json()
+
+    def system_status(self) -> dict:
+        """GET system/status: version and app name. Used by the Admin Test button."""
+        data = self._get("system/status")
+        return data if isinstance(data, dict) else {}
+
+    def quality_profiles(self) -> list[dict]:
+        """The app's quality profiles (id, name), for the Requests picker."""
+        data = self._get("qualityprofile")
+        return data if isinstance(data, list) else []
+
+    def root_folders(self) -> list[dict]:
+        """The app's root folders (path, freeSpace), for the Requests picker."""
+        data = self._get("rootfolder")
+        return data if isinstance(data, list) else []
 
     def ping(self) -> bool:
         """Cheap reachability check. Returns True if the service answers."""

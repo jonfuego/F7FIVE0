@@ -34,6 +34,10 @@ test("admin.collapsed with nothing stored collapses every section", () => {
   assert.equal(resolveViewPref("admin.collapsed", null).length, ADMIN_SECTION_IDS.length);
 });
 
+test("the Radarr, Sonarr and Lidarr card can be folded and remembered", () => {
+  assert.deepEqual(resolveViewPref("admin.collapsed", ["arr", "metadata"]), ["arr", "metadata"]);
+});
+
 test("a stored view wins over the default (pick Albums, come back, still Albums)", () => {
   const m = mergeViewPrefs({ "music.browse": "albums", "movies.genre": "Comedy", "tv.status": "Watching" });
   assert.equal(m["music.browse"], "albums");

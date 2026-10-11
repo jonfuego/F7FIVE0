@@ -21,7 +21,7 @@ from app.api.deps import current_user, get_db, require_admin
 from app.api.schemas import (
     RequestCreate, RequestDeny, RequestOut, RequestSearchResultOut,
 )
-from app.config import settings
+from app.services import arr_settings
 from app.models.movie import Movie
 from app.models.request import (
     KIND_MOVIE, KIND_SERIES, Request, STATUS_APPROVED, STATUS_AVAILABLE,
@@ -43,9 +43,9 @@ router = APIRouter()
 def requests_enabled(kind: str) -> bool:
     """Requests need the matching *arr: Radarr for movies, Sonarr for series."""
     if kind == KIND_MOVIE:
-        return bool(settings.radarr_api_key)
+        return arr_settings.configured("radarr")
     if kind == KIND_SERIES:
-        return bool(settings.sonarr_api_key)
+        return arr_settings.configured("sonarr")
     return False
 
 
@@ -99,10 +99,10 @@ def search_upstream(
     _require_enabled(kind)
     try:
         if kind == KIND_MOVIE:
-            with RadarrClient(settings.radarr_url, settings.radarr_api_key) as rc:
+            with RadarrClient(*arr_settings.creds("radarr")) as rc:
                 raw = rc.movie_lookup(q)
         else:
-            with SonarrClient(settings.sonarr_url, settings.sonarr_api_key) as sc:
+            with SonarrClient(*arr_settings.creds("sonarr")) as sc:
                 raw = sc.series_lookup(q)
     except ArrClientError as exc:
         raise HTTPException(status_code=502, detail=f"arr_lookup_failed: {exc}")
@@ -242,28 +242,28 @@ def approve_request(
 
     try:
         if req.kind == KIND_MOVIE:
-            if not settings.radarr_quality_profile_id or not settings.radarr_root_folder:
+            if not arr_settings.quality_profile_id("radarr") or not arr_settings.root_folder("radarr"):
                 raise HTTPException(
                     status_code=422,
                     detail="radarr_quality_profile_id / radarr_root_folder not configured",
                 )
-            with RadarrClient(settings.radarr_url, settings.radarr_api_key) as rc:
+            with RadarrClient(*arr_settings.creds("radarr")) as rc:
                 rc.add_movie(
                     int(req.external_id),
-                    settings.radarr_quality_profile_id,
-                    settings.radarr_root_folder,
+                    arr_settings.quality_profile_id("radarr"),
+                    arr_settings.root_folder("radarr"),
                 )
         else:
-            if not settings.sonarr_quality_profile_id or not settings.sonarr_root_folder:
+            if not arr_settings.quality_profile_id("sonarr") or not arr_settings.root_folder("sonarr"):
                 raise HTTPException(
                     status_code=422,
                     detail="sonarr_quality_profile_id / sonarr_root_folder not configured",
                 )
-            with SonarrClient(settings.sonarr_url, settings.sonarr_api_key) as sc:
+            with SonarrClient(*arr_settings.creds("sonarr")) as sc:
                 sc.add_series(
                     int(req.external_id),
-                    settings.sonarr_quality_profile_id,
-                    settings.sonarr_root_folder,
+                    arr_settings.quality_profile_id("sonarr"),
+                    arr_settings.root_folder("sonarr"),
                 )
     except ArrClientError as exc:
         raise HTTPException(status_code=502, detail=f"arr_add_failed: {exc}")

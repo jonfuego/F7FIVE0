@@ -356,8 +356,13 @@ function Compare-SemVer([string]$a, [string]$b) {
 # $Want that are missing get appended; the three port keys in $PortKeys are
 # rewritten to the ports chosen for this run (the services are registered with
 # them, so .env must match). Returns how many keys were added.
+#
+# $FillWhenBlank names generated secrets (ARR_WEBHOOK_SECRET): when the key is
+# in .env but EMPTY (a blank line copied from .env.example), it gets the new
+# value too. A non-empty value is never touched, so a token already pasted into
+# Radarr/Sonarr/Lidarr keeps working across upgrades.
 # ---------------------------------------------------------------------------
-function Merge-EnvFile([string]$Path, $Want, [hashtable]$PortKeys) {
+function Merge-EnvFile([string]$Path, $Want, [hashtable]$PortKeys, [string[]]$FillWhenBlank = @()) {
     $existing = @{}
     $lines = New-Object System.Collections.Generic.List[string]
     if (Test-Path $Path) {
@@ -378,6 +383,12 @@ function Merge-EnvFile([string]$Path, $Want, [hashtable]$PortKeys) {
         }
     }
     $added = 0
+    foreach ($k in $FillWhenBlank) {
+        if (-not $existing.ContainsKey($k) -or "$($existing[$k])".Trim().Trim([char]34, [char]39) -ne "" -or -not $Want.Contains($k) -or -not $Want[$k]) { continue }
+        for ($i = 0; $i -lt $lines.Count; $i++) {
+            if ($lines[$i] -match ('^\s*' + [regex]::Escape($k) + '\s*=')) { $lines[$i] = "$k=$($Want[$k])"; $added++; break }
+        }
+    }
     foreach ($k in $Want.Keys) {
         if ($existing.ContainsKey($k)) { continue }
         if ($k -eq "DATABASE_URL" -and -not $Want[$k]) { Fail ".env has no DATABASE_URL and none could be created." }

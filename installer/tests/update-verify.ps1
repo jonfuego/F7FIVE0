@@ -481,6 +481,38 @@ public static class Stub {
     try { Merge-EnvFile $bare ([ordered]@{ "DATABASE_URL" = "" }) @{} | Out-Null } catch { $threw = $true }
     Check "an .env with no DATABASE_URL and none to add still stops Setup" $threw
 
+    # The *arr webhook token: made when missing or blank, never replaced when set.
+    $arrWant = [ordered]@{ "ARR_WEBHOOK_SECRET" = "generated-token" }
+    $arrFill = @("ARR_WEBHOOK_SECRET")
+    $arrRead = {
+        param($p)
+        $h = @{}
+        foreach ($line in Get-Content $p) { if ($line -match '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$') { $h[$matches[1]] = $matches[2] } }
+        $h
+    }
+    $arrFresh = Join-Path $work "arr-fresh.env"
+    Merge-EnvFile $arrFresh $arrWant @{} $arrFill | Out-Null
+    Check "arr token: a fresh .env gets one" ((& $arrRead $arrFresh)["ARR_WEBHOOK_SECRET"] -eq "generated-token")
+    $arrSet = Join-Path $work "arr-set.env"
+    Set-Content -Path $arrSet -Encoding ASCII -Value @("ARR_WEBHOOK_SECRET=already-pasted-into-radarr", "WEB_PORT=3001")
+    $arrAdded = Merge-EnvFile $arrSet $arrWant @{} $arrFill
+    Check "arr token: an existing value is never changed" ((& $arrRead $arrSet)["ARR_WEBHOOK_SECRET"] -eq "already-pasted-into-radarr" -and $arrAdded -eq 0)
+    $arrBlank = Join-Path $work "arr-blank.env"
+    Set-Content -Path $arrBlank -Encoding ASCII -Value @("WEB_PORT=3001", "ARR_WEBHOOK_SECRET=", "CUSTOM_BY_HAND=yes")
+    $arrAdded = Merge-EnvFile $arrBlank $arrWant @{} $arrFill
+    $arrBack = & $arrRead $arrBlank
+    Check "arr token: a blank value is filled in place, the rest kept" ($arrBack["ARR_WEBHOOK_SECRET"] -eq "generated-token" -and $arrBack["CUSTOM_BY_HAND"] -eq "yes" -and $arrAdded -eq 1 -and @(Get-Content $arrBlank).Count -eq 3)
+    $arrQuoted = Join-Path $work "arr-quoted.env"
+    Set-Content -Path $arrQuoted -Encoding ASCII -Value @("ARR_WEBHOOK_SECRET=" + [char]34 + [char]34)
+    Merge-EnvFile $arrQuoted $arrWant @{} $arrFill | Out-Null
+    Check "arr token: an empty quoted value counts as blank" ((& $arrRead $arrQuoted)["ARR_WEBHOOK_SECRET"] -eq "generated-token")
+    $arrNone = Join-Path $work "arr-none.env"
+    Set-Content -Path $arrNone -Encoding ASCII -Value @("WEB_PORT=3001")
+    Merge-EnvFile $arrNone $arrWant @{} $arrFill | Out-Null
+    Check "arr token: an old .env without the key gets one" ((& $arrRead $arrNone)["ARR_WEBHOOK_SECRET"] -eq "generated-token")
+    $installSrc = Get-Content -Raw -Path (Join-Path $installerDir "install.ps1")
+    Check "install.ps1 makes the token with New-Secret and merges it fill-when-blank" ($installSrc -match '"ARR_WEBHOOK_SECRET"\s*=\s*New-Secret 32' -and $installSrc -match 'Merge-EnvFile \$EnvFile \$want \$portKeys @\("ARR_WEBHOOK_SECRET"\)')
+
     $iss = Get-Content -Raw -Path (Join-Path $installerDir "F7FIVE0.iss")
     $step = $iss.Substring($iss.IndexOf("procedure CurStepChanged"))
     $afterUpgradeBlock = $step.Substring($step.IndexOf("if not IsUpgrade then"))

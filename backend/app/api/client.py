@@ -37,7 +37,7 @@ from app.api.media_files import content_disposition, optional_current_user
 from app.api.schemas import ClientErrorReport, MinClientVersionOut
 from app.config import settings
 from app.models.user import User
-from app.services import android_app, apk_stamp
+from app.services import android_app, apk_stamp, arr_settings
 from app.services import security as security_service
 
 
@@ -83,9 +83,9 @@ def features() -> dict:
         # Which *arr apps are set up. Admin shows "Run *arr sync now" only when
         # at least one is; folder libraries have no *arr to sync.
         "arr": {
-            "radarr": bool(settings.radarr_api_key),
-            "sonarr": bool(settings.sonarr_api_key),
-            "lidarr": bool(settings.lidarr_api_key),
+            "radarr": arr_settings.configured("radarr"),
+            "sonarr": arr_settings.configured("sonarr"),
+            "lidarr": arr_settings.configured("lidarr"),
         },
     }
 

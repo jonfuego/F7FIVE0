@@ -14,6 +14,7 @@ import { RemoteAccessSection } from "./RemoteAccessSection";
 import { UpdatesSection } from "./UpdatesSection";
 import { LibraryFoldersSection } from "./LibraryFoldersSection";
 import { MusicVideosScanBlock } from "./MusicVideosScanBlock";
+import { ArrSection } from "./ArrSection";
 import { MetadataSection } from "./MetadataSection";
 import { apiGet, apiPatch, apiPost, apiDelete, ApiError } from "@/lib/client-api";
 import { loadMe } from "@/lib/load-me";
@@ -195,6 +196,9 @@ export default function AdminPage() {
               forceOpen={metadataHash}
             >
               <MetadataSection />
+            </CollapsibleSection>
+            <CollapsibleSection id="arr" title="Radarr, Sonarr and Lidarr" collapsed={collapsed.has("arr")} onToggle={toggle}>
+              <ArrSection />
             </CollapsibleSection>
             <CollapsibleSection id="library" title="Library" collapsed={collapsed.has("library")} onToggle={toggle}>
               <LibrarySection />

@@ -259,16 +259,17 @@ Restart-Service F7FIVE0-API, F7FIVE0-Stream, F7FIVE0-Web
   reminder banner until a key is set.
 - **MusicBrainz** (`MUSICBRAINZ_USER_AGENT_EMAIL`): your email, sent with
   music lookups as MusicBrainz asks.
-- **Radarr / Sonarr / Lidarr** (`RADARR_API_KEY`, `SONARR_API_KEY`,
-  `LIDARR_API_KEY`, plus the `_URL` keys): when an API key is set, that app
-  owns the matching library instead of the folder scanner. Radarr and
-  Sonarr also switch on **Requests**. Set `RADARR_QUALITY_PROFILE_ID`,
-  `RADARR_ROOT_FOLDER`, `SONARR_QUALITY_PROFILE_ID`, and
-  `SONARR_ROOT_FOLDER` so approved requests land in the right place. For
-  instant updates, add a Webhook connection in each app pointing at
-  `http://<this-PC>:3001/api/webhooks/<radarr|sonarr|lidarr>` with the
-  header `X-Arr-Webhook-Token: <ARR_WEBHOOK_SECRET>` (Lidarr: put the secret
-  in the Password field instead).
+- **Radarr / Sonarr / Lidarr**: set up in **Admin > Radarr, Sonarr and
+  Lidarr** (address and API key per app, a Test button, and no restart). When
+  an app has a key, it owns the matching library instead of the folder
+  scanner; remove the key there to go back to the folder scan. Radarr and
+  Sonarr also switch on **Requests**: pick the quality profile and root folder
+  from the lists the app provides. For instant updates, add a Webhook
+  connection in each app using the address and token shown at the bottom of
+  that card (Copy buttons; Setup makes the token). Values saved in Admin win
+  over `.env`. The `.env` keys (`RADARR_API_KEY`, `RADARR_URL`,
+  `RADARR_QUALITY_PROFILE_ID`, `RADARR_ROOT_FOLDER`, the same for `SONARR_`
+  and `LIDARR_`, and `ARR_WEBHOOK_SECRET`) still work as the starting values.
 
 ## The Android app
 

@@ -39,7 +39,7 @@ from app.models.media_file import MediaFile, MediaKind, ScanState
 from app.models.movie import Movie
 from app.models.music import Album, Artist, Track
 from app.models.tv import Episode, Season, Series
-from app.services import ffprobe
+from app.services import arr_settings, ffprobe
 from app.services.credits import resolve_artist
 from app.services.arr import LidarrClient, RadarrClient, SonarrClient
 from app.services.arr._base import ArrClientError
@@ -120,9 +120,9 @@ def full_sync(db: Session) -> SyncStats:
     """
     stats = SyncStats()
     for label, enabled, runner in (
-        ("radarr", bool(settings.radarr_api_key), _run_radarr),
-        ("sonarr", bool(settings.sonarr_api_key), _run_sonarr),
-        ("lidarr", bool(settings.lidarr_api_key), _run_lidarr),
+        ("radarr", arr_settings.configured("radarr"), _run_radarr),
+        ("sonarr", arr_settings.configured("sonarr"), _run_sonarr),
+        ("lidarr", arr_settings.configured("lidarr"), _run_lidarr),
     ):
         if not enabled:
             continue
@@ -137,17 +137,17 @@ def full_sync(db: Session) -> SyncStats:
 
 
 def _run_radarr(db: Session, stats: SyncStats) -> None:
-    with RadarrClient(settings.radarr_url, settings.radarr_api_key) as rc:
+    with RadarrClient(*arr_settings.creds("radarr")) as rc:
         _sync_radarr(db, rc, stats)
 
 
 def _run_sonarr(db: Session, stats: SyncStats) -> None:
-    with SonarrClient(settings.sonarr_url, settings.sonarr_api_key) as sc:
+    with SonarrClient(*arr_settings.creds("sonarr")) as sc:
         _sync_sonarr(db, sc, stats)
 
 
 def _run_lidarr(db: Session, stats: SyncStats) -> None:
-    with LidarrClient(settings.lidarr_url, settings.lidarr_api_key) as lc:
+    with LidarrClient(*arr_settings.creds("lidarr")) as lc:
         _sync_lidarr(db, lc, stats)
 
 
@@ -225,7 +225,7 @@ def _upsert_movie(
             db,
             entity_kind=ENTITY_MOVIE, entity_id=movie.id, role=ROLE_POSTER,
             images=images, cover_type="poster", source_kind="radarr",
-            arr_base_url=settings.radarr_url, arr_api_key=settings.radarr_api_key,
+            arr_base_url=arr_settings.url("radarr"), arr_api_key=arr_settings.api_key("radarr"),
         ),
         throttle=throttle,
     )
@@ -233,14 +233,14 @@ def _upsert_movie(
         db,
         entity_kind=ENTITY_MOVIE, entity_id=movie.id, role=ROLE_BACKDROP,
         images=images, cover_type="fanart", source_kind="radarr",
-        arr_base_url=settings.radarr_url,
+        arr_base_url=arr_settings.url("radarr"),
     )
     if backdrop is None:
         backdrop = download_art_on_sync(
             db,
             entity_kind=ENTITY_MOVIE, entity_id=movie.id, role=ROLE_BACKDROP,
             images=images, cover_type="banner", source_kind="radarr",
-            arr_base_url=settings.radarr_url, arr_api_key=settings.radarr_api_key,
+            arr_base_url=arr_settings.url("radarr"), arr_api_key=arr_settings.api_key("radarr"),
         )
     _throttle_after(backdrop, throttle=throttle)
 
@@ -337,7 +337,7 @@ def _upsert_series(
             db,
             entity_kind=ENTITY_SERIES, entity_id=series.id, role=ROLE_POSTER,
             images=images, cover_type="poster", source_kind="sonarr",
-            arr_base_url=settings.sonarr_url, arr_api_key=settings.sonarr_api_key,
+            arr_base_url=arr_settings.url("sonarr"), arr_api_key=arr_settings.api_key("sonarr"),
         ),
         throttle=throttle,
     )
@@ -345,14 +345,14 @@ def _upsert_series(
         db,
         entity_kind=ENTITY_SERIES, entity_id=series.id, role=ROLE_BACKDROP,
         images=images, cover_type="fanart", source_kind="sonarr",
-        arr_base_url=settings.sonarr_url,
+        arr_base_url=arr_settings.url("sonarr"),
     )
     if backdrop is None:
         backdrop = download_art_on_sync(
             db,
             entity_kind=ENTITY_SERIES, entity_id=series.id, role=ROLE_BACKDROP,
             images=images, cover_type="banner", source_kind="sonarr",
-            arr_base_url=settings.sonarr_url, arr_api_key=settings.sonarr_api_key,
+            arr_base_url=arr_settings.url("sonarr"), arr_api_key=arr_settings.api_key("sonarr"),
         )
     _throttle_after(backdrop, throttle=throttle)
     return series
@@ -483,14 +483,14 @@ def _upsert_artist(
         db,
         entity_kind=ENTITY_ARTIST, entity_id=artist.id, role=ROLE_THUMB,
         images=images, cover_type="poster", source_kind="lidarr",
-        arr_base_url=settings.lidarr_url,
+        arr_base_url=arr_settings.url("lidarr"),
     )
     if thumb is None:
         thumb = download_art_on_sync(
             db,
             entity_kind=ENTITY_ARTIST, entity_id=artist.id, role=ROLE_THUMB,
             images=images, cover_type="banner", source_kind="lidarr",
-            arr_base_url=settings.lidarr_url, arr_api_key=settings.lidarr_api_key,
+            arr_base_url=arr_settings.url("lidarr"), arr_api_key=arr_settings.api_key("lidarr"),
         )
     _throttle_after(thumb, throttle=throttle)
     return artist
@@ -556,14 +556,14 @@ def _upsert_album(
         db,
         entity_kind=ENTITY_ALBUM, entity_id=album.id, role=ROLE_COVER,
         images=album_images, cover_type="cover", source_kind="lidarr",
-        arr_base_url=settings.lidarr_url,
+        arr_base_url=arr_settings.url("lidarr"),
     )
     if cover is None:
         cover = download_art_on_sync(
             db,
             entity_kind=ENTITY_ALBUM, entity_id=album.id, role=ROLE_COVER,
             images=album_images, cover_type="poster", source_kind="lidarr",
-            arr_base_url=settings.lidarr_url, arr_api_key=settings.lidarr_api_key,
+            arr_base_url=arr_settings.url("lidarr"), arr_api_key=arr_settings.api_key("lidarr"),
         )
     _throttle_after(cover, throttle=throttle)
     return album
@@ -744,18 +744,18 @@ def _mark_missing_for_ref(
 # ---------------------------------------------------------------------------
 def refresh_movie(db: Session, radarr_id: int, stats: Optional[SyncStats] = None) -> Optional[Movie]:
     """Pass `stats`, then call `schedule_pending_enrichment(stats)` after the commit."""
-    if not settings.radarr_api_key:
+    if not arr_settings.configured("radarr"):
         return None
-    with RadarrClient(settings.radarr_url, settings.radarr_api_key) as rc:
+    with RadarrClient(*arr_settings.creds("radarr")) as rc:
         payload = rc.get_movie(radarr_id)
     stats = stats if stats is not None else SyncStats()
     return _upsert_movie(db, payload, stats)
 
 
 def refresh_series(db: Session, sonarr_id: int) -> Optional[Series]:
-    if not settings.sonarr_api_key:
+    if not arr_settings.configured("sonarr"):
         return None
-    with SonarrClient(settings.sonarr_url, settings.sonarr_api_key) as sc:
+    with SonarrClient(*arr_settings.creds("sonarr")) as sc:
         payload = sc.get_series(sonarr_id)
         stats = SyncStats()
         series = _upsert_series(db, payload, stats)
@@ -805,10 +805,10 @@ def rescan_series(db: Session, sonarr_id: int) -> Optional[Series]:
     unrecoverable Sonarr failures; transient poll failures are swallowed
     so refresh_series still runs.
     """
-    if not settings.sonarr_api_key:
+    if not arr_settings.configured("sonarr"):
         return None
 
-    with SonarrClient(settings.sonarr_url, settings.sonarr_api_key) as sc:
+    with SonarrClient(*arr_settings.creds("sonarr")) as sc:
         # Step 1: reconcile known files against disk.
         rescan_envelope = sc.rescan_series(sonarr_id)
         _wait_for_sonarr_command(
@@ -931,9 +931,9 @@ def _manual_import_spec(candidate: dict[str, Any]) -> dict[str, Any]:
 
 def refresh_artist(db: Session, lidarr_id: int, stats: Optional[SyncStats] = None) -> Optional[Artist]:
     """Pass `stats`, then call `schedule_pending_enrichment(stats)` after the commit."""
-    if not settings.lidarr_api_key:
+    if not arr_settings.configured("lidarr"):
         return None
-    with LidarrClient(settings.lidarr_url, settings.lidarr_api_key) as lc:
+    with LidarrClient(*arr_settings.creds("lidarr")) as lc:
         payload = lc.get_artist(lidarr_id)
         stats = stats if stats is not None else SyncStats()
         artist = _upsert_artist(db, payload, stats)

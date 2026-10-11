@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.models.library import Library, LibraryKind
 from app.models.media_file import MediaFile, MediaKind, ScanState
+from app.services import arr_settings
 from app.services.path_map import translate as translate_path
 
 KINDS: tuple[str, ...] = ("movies", "tv", "music", "music_videos")
@@ -133,9 +134,9 @@ def validate(proposed: dict[str, list[str]]) -> dict[str, list[str]]:
 def arr_managed(kind: str) -> bool:
     """Radarr / Sonarr / Lidarr owns this library; the folder list is unused."""
     return {
-        "movies": bool(settings.radarr_api_key),
-        "tv": bool(settings.sonarr_api_key),
-        "music": bool(settings.lidarr_api_key),
+        "movies": arr_settings.configured("radarr"),
+        "tv": arr_settings.configured("sonarr"),
+        "music": arr_settings.configured("lidarr"),
     }.get(kind, False)
 
 

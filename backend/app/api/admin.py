@@ -56,7 +56,7 @@ from app.services.arr.radarr import RadarrClient
 from app.services.arr.sonarr import SonarrClient
 from app.config import settings
 from app.services import (
-    android_app, app_settings, library_folders, nas_auth, reminders,
+    android_app, app_settings, arr_settings, library_folders, nas_auth, reminders,
     remote_access as ra, scan_status, server_version, tmdb_key, updates,
 )
 from app.services import art as art_service
@@ -1042,7 +1042,7 @@ def match_candidates(
             )
         else:
             notes.append(_MATCH_TMDB_MISSING)
-        if settings.radarr_api_key:
+        if arr_settings.configured("radarr"):
             _run_source(notes, "Radarr", lambda: _radarr_search(q), out)
         else:
             notes.append(_MATCH_ARR_MISSING["radarr"])
@@ -1051,19 +1051,19 @@ def match_candidates(
             _run_source(notes, "TMDB", lambda: _tmdb_series_search(q), out)
         else:
             notes.append(_MATCH_TMDB_MISSING)
-        if settings.sonarr_api_key:
+        if arr_settings.configured("sonarr"):
             _run_source(notes, "Sonarr", lambda: _sonarr_search(q), out)
         else:
             notes.append(_MATCH_ARR_MISSING["sonarr"])
     elif kind == "artist":
         _run_source(notes, "MusicBrainz", lambda: _mb_artist_search(q), out)
-        if settings.lidarr_api_key:
+        if arr_settings.configured("lidarr"):
             _run_source(notes, "Lidarr", lambda: _lidarr_artist_search(q), out)
         else:
             notes.append(_MATCH_ARR_MISSING["lidarr"])
     elif kind in ("album", "music_video_release"):
         _run_source(notes, "MusicBrainz", lambda: _mb_release_group_search(q), out)
-        if settings.lidarr_api_key:
+        if arr_settings.configured("lidarr"):
             _run_source(notes, "Lidarr", lambda: _lidarr_album_search(q), out)
         else:
             notes.append(_MATCH_ARR_MISSING["lidarr"])
@@ -1103,25 +1103,25 @@ def _mb_release_group_search(q: str) -> list[Optional[MatchCandidate]]:
 
 
 def _radarr_search(q: str) -> list[Optional[MatchCandidate]]:
-    with RadarrClient(settings.radarr_url, settings.radarr_api_key) as rc:
+    with RadarrClient(*arr_settings.creds("radarr")) as rc:
         raw = rc.movie_lookup(q)
     return [_normalize_radarr_movie(p) for p in raw or []]
 
 
 def _sonarr_search(q: str) -> list[Optional[MatchCandidate]]:
-    with SonarrClient(settings.sonarr_url, settings.sonarr_api_key) as sc:
+    with SonarrClient(*arr_settings.creds("sonarr")) as sc:
         raw = sc.series_lookup(q)
     return [_normalize_sonarr_series(p) for p in raw or []]
 
 
 def _lidarr_artist_search(q: str) -> list[Optional[MatchCandidate]]:
-    with LidarrClient(settings.lidarr_url, settings.lidarr_api_key) as lc:
+    with LidarrClient(*arr_settings.creds("lidarr")) as lc:
         raw = lc.artist_lookup(q)
     return [_normalize_lidarr_artist(p) for p in raw or []]
 
 
 def _lidarr_album_search(q: str) -> list[Optional[MatchCandidate]]:
-    with LidarrClient(settings.lidarr_url, settings.lidarr_api_key) as lc:
+    with LidarrClient(*arr_settings.creds("lidarr")) as lc:
         raw = lc.album_lookup(q)
     return [_normalize_lidarr_album(p) for p in raw or []]
 

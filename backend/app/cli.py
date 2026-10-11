@@ -33,6 +33,7 @@ from app.models.movie import Movie
 from app.models.music import Album, Artist, MusicVideo, Track
 from app.models.tv import Series
 from app.models.user import User, UserRole
+from app.services import arr_settings
 from app.services.security import hash_password
 
 
@@ -104,7 +105,7 @@ def cmd_backfill_genres(args: argparse.Namespace) -> int:
     Skips rows missing a `lidarr_id` since there's nothing upstream to
     look up. Empty list when Lidarr returns no genres.
     """
-    if not settings.lidarr_api_key:
+    if not arr_settings.configured("lidarr"):
         print("LIDARR_API_KEY not configured", file=sys.stderr)
         return 2
 
@@ -118,9 +119,7 @@ def cmd_backfill_genres(args: argparse.Namespace) -> int:
 
     artists_touched = 0
     albums_touched = 0
-    with db_session() as db, LidarrClient(
-        settings.lidarr_url, settings.lidarr_api_key,
-    ) as lc:
+    with db_session() as db, LidarrClient(*arr_settings.creds("lidarr")) as lc:
         for a in db.scalars(select(Artist)):
             if a.lidarr_id is None:
                 continue
