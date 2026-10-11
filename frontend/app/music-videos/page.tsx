@@ -109,10 +109,6 @@ export default function MusicVideosPage() {
       <h1 className="page-title">Music Videos</h1>
 
       <div className="filter-bar">
-        <span className="lbl">Browse</span>
-        <span className="chip on">Artists</span>
-      </div>
-      <div className="filter-bar">
         <span className="lbl">Sort</span>
         <button
           type="button"
