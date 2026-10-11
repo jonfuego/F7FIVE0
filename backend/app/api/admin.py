@@ -1757,6 +1757,7 @@ def put_tmdb_key(
     db.commit()
     for movie in stale:
         scheduler.schedule_enrich_movie(movie.id)
+    scheduler.trigger_movie_genres_backfill(delay_sec=scheduler.ENRICH_DELAY_SEC)
     scheduler.trigger_full_sync_now()
     log.info("tmdb key saved from the admin page; re-enriching %d movie(s)", len(stale))
     return _metadata_out(db)

@@ -14,17 +14,20 @@ backfill CLI, or in-process smoke tests without ceremony.
 from __future__ import annotations
 
 import logging
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Literal, Optional
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models.movie import Movie
 from app.models.music import Album, Artist
 from app.models.tv import Series
+from app.services import tmdb_key
 from app.services.metadata._base import ProviderError
 from app.services.metadata.musicbrainz import MusicBrainzClient
 from app.services.metadata.tmdb import TMDBClient
@@ -104,6 +107,21 @@ def _safe_year(value) -> Optional[int]:
     return None
 
 
+def tmdb_genre_names(payload: Optional[dict]) -> list[str]:
+    """Genre names from a TMDB movie record. TMDB sends `genres` as a list of
+    `{"id": 18, "name": "Drama"}`; the library stores plain names (the same
+    shape Radarr sync saves), in TMDB's order with duplicates and blanks
+    dropped."""
+    out: list[str] = []
+    for g in (payload or {}).get("genres") or []:
+        name = (g.get("name") if isinstance(g, dict) else g)
+        if isinstance(name, str):
+            name = name.strip()
+            if name and name not in out:
+                out.append(name)
+    return out
+
+
 # ---------------------------------------------------------------------------
 # enrich_movie
 # ---------------------------------------------------------------------------
@@ -160,6 +178,10 @@ def enrich_movie(
         if (p.get("job") or "").lower() == "director"
     ]
 
+    # An empty answer never wipes genres Radarr (or an earlier run) saved.
+    genres = tmdb_genre_names(payload)
+    if genres:
+        movie.genres = genres
     movie.tagline = payload.get("tagline") or None
     movie.movie_cast = cast_top
     movie.directors = directors
@@ -171,6 +193,58 @@ def enrich_movie(
     movie.metadata_status = "ok"
     db.commit()
     return MetadataResult(status="ok", provider="tmdb")
+
+
+def backfill_movie_genres(
+    db: Session, *, batch_size: int = 25, pause_sec: float = 0.0,
+) -> int:
+    """Fill `genres` for TMDB-matched movies that have none. Enrichment
+    skipped genres before, so movies already enriched keep an empty list and
+    their `metadata_synced_at` is fresh; this reads TMDB for them directly
+    (the disk cache answers movies enriched within the TTL without a request)
+    and touches nothing but `genres`. Walks the table by id in batches of
+    `batch_size`, commits each batch, and waits `pause_sec` after every movie it
+    has to look up so a big library stays polite. A movie TMDB cannot answer
+    for (no key, 404, error) is left as it is and tried on the next run.
+    Safe to rerun: movies that have genres are never read again, so a second
+    run saves nothing. Returns the number of movies that got genres."""
+    if not tmdb_key.get():
+        return 0
+    filled = 0
+    last_id = None
+    with TMDBClient() as cli:
+        while True:
+            stmt = (
+                select(Movie.id, Movie.genres)
+                .where(Movie.tmdb_id.is_not(None))
+                .order_by(Movie.id)
+                .limit(batch_size)
+            )
+            if last_id is not None:
+                stmt = stmt.where(Movie.id > last_id)
+            rows = db.execute(stmt).all()
+            if not rows:
+                break
+            last_id = rows[-1][0]
+            for movie_id, current in rows:
+                if current:
+                    continue
+                movie = db.get(Movie, movie_id)
+                if movie is None or movie.genres or not movie.tmdb_id:
+                    continue
+                try:
+                    payload = cli.get_movie(int(movie.tmdb_id))
+                except ProviderError as exc:
+                    log.warning("tmdb genres fetch failed for movie %s: %s", movie.id, exc)
+                    payload = None
+                names = tmdb_genre_names(payload)
+                if names:
+                    movie.genres = names
+                    filled += 1
+                if pause_sec > 0:
+                    time.sleep(pause_sec)
+            db.commit()
+    return filled
 
 
 # ---------------------------------------------------------------------------
