@@ -33,6 +33,7 @@ JOB_FOLDER_SCAN = "folder_scan"
 JOB_AUDIO_ANALYSIS = "audio_analysis"
 JOB_UPDATE_CHECK = "update_check"
 JOB_ART_COPIES = "art_copies_backfill"
+JOB_MOVIE_GENRES = "movie_genres_backfill"
 
 # Once a day, give or take an hour, so a fleet of servers doesn't hit GitHub
 # at the same second. Checking never installs anything.
@@ -42,6 +43,9 @@ UPDATE_CHECK_JITTER_SEC = 3600
 # transaction has committed (the scan and the *arr sync both do); the delay is
 # a spacing, not what makes the row visible.
 ENRICH_DELAY_SEC = 5
+
+# Gap after each movie the genres backfill has to look up at TMDB.
+MOVIE_GENRES_PAUSE_SEC = 0.25
 
 # One folder scan at a time in this process: the periodic job, the ad hoc job
 # (Admin, folder save) and a manual start can all be queued together.
@@ -126,6 +130,8 @@ def _scan_folders() -> bool:
             scan_library.schedule_catch_up(db)
         except Exception:
             log.exception("enrichment catch-up raised")
+        # Movies that were matched but enriched before genres were saved.
+        trigger_movie_genres_backfill(delay_sec=ENRICH_DELAY_SEC)
     except Exception as exc:
         log.exception("folder scan raised")
         db.rollback()
@@ -191,6 +197,36 @@ def _run_art_copies_backfill() -> None:
         log.info("art copies backfill: %d created", made)
     except Exception:
         log.exception("art copies backfill raised")
+
+
+def _run_movie_genres_backfill() -> None:
+    """Fill genres for TMDB-matched movies that have none. Batched and paced,
+    own session, never raises; a rerun saves nothing new (see
+    runner.backfill_movie_genres). Does nothing while no TMDB key is set."""
+    try:
+        from app.services.metadata.runner import backfill_movie_genres
+        with db_session() as db:
+            filled = backfill_movie_genres(db, pause_sec=MOVIE_GENRES_PAUSE_SEC)
+        log.info("movie genres backfill: %d filled", filled)
+    except Exception:
+        log.exception("movie genres backfill raised")
+
+
+def trigger_movie_genres_backfill(delay_sec: int = 0) -> None:
+    """Queue the movie genres backfill. One job id, so queuing it again (after
+    each folder scan, after a TMDB key is saved) never stacks two runs. No-op
+    when the scheduler is not running (CLI)."""
+    if _scheduler is None:
+        return
+    _scheduler.add_job(
+        _run_movie_genres_backfill,
+        id=JOB_MOVIE_GENRES,
+        name="fill movie genres from TMDB",
+        max_instances=1,
+        coalesce=True,
+        replace_existing=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=delay_sec),
+    )
 
 
 def _run_audio_analysis_step() -> None:
@@ -316,6 +352,17 @@ def start() -> BackgroundScheduler:
         coalesce=True,
         replace_existing=True,
         next_run_time=datetime.now(timezone.utc) + timedelta(seconds=60),
+    )
+    # Also once after boot, a bit later than the art job. Folder scans and a
+    # saved TMDB key queue it again (same job id, so it never stacks).
+    sched.add_job(
+        _run_movie_genres_backfill,
+        id=JOB_MOVIE_GENRES,
+        name="fill movie genres from TMDB",
+        max_instances=1,
+        coalesce=True,
+        replace_existing=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=90),
     )
     sched.start()
     _scheduler = sched
