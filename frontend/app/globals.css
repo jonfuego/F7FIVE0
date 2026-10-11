@@ -1054,17 +1054,24 @@ button { border: 0; background: transparent; color: inherit; font: inherit; curs
 .playbill.compact h3 { font-size: 22px; line-height: 1.05; }
 .playbill.compact .pb-foot { padding-top: 6px; margin-top: 2px; }
 
-/* Mixes page cards: small. The picture is at most 112px tall and the card at
-   most 300px at a 1440px window (the picker, when open, may grow it). Home
-   rail cards use .compact above and are not touched by this. */
+/* Mixes page cards: small. The picture is 112px tall and the card is capped
+   at 300px at a 1440px window. The title is clamped to one line so a long
+   title cannot push the buttons past the cap. While a card's picker is open
+   or it shows an error (.expanded) the cap is lifted so nothing is clipped.
+   Home rail cards use .compact above and are not touched by this. */
 .playbills { align-items: start; }
-.playbills .playbill .pb-art { height: 112px; }
+.playbills .playbill { max-height: 300px; }
+.playbills .playbill.expanded { max-height: none; }
+.playbills .playbill .pb-art { height: 112px; flex-shrink: 0; }
 /* Whole picture in the short strip (cover would crop a square to its middle band). */
 .playbills .playbill .pb-art { background: #0a0a0a; }
 .playbills .playbill .pb-art .pb-img { object-fit: contain; }
-.playbills .playbill .pb-body { padding: 10px 16px 12px; gap: 8px; }
+.playbills .playbill .pb-body { padding: 10px 16px 10px; gap: 6px; }
 .playbills .playbill .pb-tag { font-size: 11px; line-height: 1.2; }
-.playbills .playbill[data-kind] h3 { font-size: 24px; line-height: 1.05; }
+.playbills .playbill[data-kind] h3 {
+  font-size: 24px; line-height: 1.05;
+  display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden;
+}
 .playbills .playbill .pb-sub {
   font-size: 12px; line-height: 1.35;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
