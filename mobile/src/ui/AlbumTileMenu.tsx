@@ -12,6 +12,8 @@ export interface AlbumTileMenuProps {
   onPlayNext: () => void;
   onAddToQueue: () => void;
   onShuffle: () => void;
+  /** Optional "Artist radio" action (album detail). */
+  onArtistRadio?: () => void;
   /** Optional "Track radio" action for single-song menus (crit 48). */
   onTrackRadio?: () => void;
   /** Optional "Download" action (crit 42). */
@@ -37,6 +39,7 @@ export function AlbumTileMenu({
   onPlayNext,
   onAddToQueue,
   onShuffle,
+  onArtistRadio,
   onTrackRadio,
   onDownload,
   onClose,
@@ -46,6 +49,7 @@ export function AlbumTileMenu({
     { label: "Play next", icon: SkipForward, fill: true, onPress: onPlayNext },
     { label: "Add to queue", icon: List, onPress: onAddToQueue },
     { label: "Shuffle", icon: Shuffle, onPress: onShuffle },
+    ...(onArtistRadio ? [{ label: "Artist radio", icon: Radio, onPress: onArtistRadio }] : []),
     ...(onTrackRadio ? [{ label: "Track radio", icon: Radio, onPress: onTrackRadio }] : []),
     ...(onDownload ? [{ label: "Download", icon: Download, onPress: onDownload }] : []),
   ];
