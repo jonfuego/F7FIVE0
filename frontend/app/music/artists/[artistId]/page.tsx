@@ -1,11 +1,11 @@
 // Music artist detail. Hero with the display name,
-// origin line, About panel (Wikipedia bio), links chips, Shuffle artist
-// + Start radio actions, and a 1:1 album grid below. Existing admin
+// origin line, the bio (Wikipedia, clamped, beside the name and buttons),
+// links chips, Shuffle artist + Start radio actions, and a 1:1 album grid below. Existing admin
 // thumb-edit affordance for the artist tile preserved.
 
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { notFound, useParams, useRouter } from "next/navigation";
 import EditOverridesModal, {
@@ -29,8 +29,6 @@ import { albumToQueueItems, useQueue, type QueueItem } from "@/lib/queue";
 import type { Album, AlbumDetail, MusicArtistDetail, OverrideOut } from "@/lib/types";
 
 type EditInitial = OverrideOut & { algorithmic_sort_hint: string };
-
-const BIO_WORD_LIMIT = 200;
 
 export default function MusicArtistPage() {
   const params = useParams<{ artistId: string }>();
@@ -185,7 +183,7 @@ function ArtistHero({
       : null,
   ]);
   return (
-    <section className="detail" style={tint}>
+    <section className="detail artist-hero" style={tint}>
       <div className="backdrop" />
       <div className="body">
         <BackButton href="/music" />
@@ -196,6 +194,8 @@ function ArtistHero({
           ) : null}
         </div>
         <div className="info">
+          <div className={detail.bio_text ? "artist-head has-bio" : "artist-head"}>
+          <div className="artist-head-main">
           <div className="kicker">
             {isAdmin ? (
               <>
@@ -247,8 +247,9 @@ function ArtistHero({
           {meta ? <MetaRow text={meta} /> : null}
           {originLine ? <div className="origin-line">{originLine}</div> : null}
           <ArtistMixActions artistId={detail.id} />
-          <AboutPanel bioText={detail.bio_text} bioSource={detail.bio_source} />
-
+          </div>
+          <ArtistBio bioText={detail.bio_text} bioSource={detail.bio_source} />
+          </div>
 
           <div
             className="tracks"
@@ -293,7 +294,10 @@ function formatOriginLine(detail: MusicArtistDetail): string | null {
   return parts.length ? parts.join(" • ") : null;
 }
 
-function AboutPanel({
+// The bio, in the right side of the hero beside the name and buttons (below
+// them at phone width, see .artist-head in globals.css). Clamped to a few
+// lines; More / Less shows when the text does not fit.
+function ArtistBio({
   bioText,
   bioSource,
 }: {
@@ -301,66 +305,43 @@ function AboutPanel({
   bioSource: string | null;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [overflows, setOverflows] = useState(false);
+  const textRef = useRef<HTMLParagraphElement>(null);
+
+  useEffect(() => {
+    const el = textRef.current;
+    if (!el) return;
+    const measure = () => {
+      if (!expanded) setOverflows(el.scrollHeight > el.clientHeight + 1);
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [bioText, expanded]);
+
   if (!bioText) return null;
-  const words = bioText.split(/\s+/);
-  const truncated = words.length > BIO_WORD_LIMIT;
-  const visible =
-    expanded || !truncated
-      ? bioText
-      : words.slice(0, BIO_WORD_LIMIT).join(" ") + "…";
   return (
-    <section
-      style={{
-        marginTop: 28,
-        paddingTop: 28,
-        borderTop: "1px solid var(--line-soft)",
-      }}
-    >
-      <h4
-        style={{
-          fontFamily: "var(--mono)",
-          fontSize: 10,
-          letterSpacing: "0.24em",
-          textTransform: "uppercase",
-          color: "var(--hive-text)",
-          margin: "0 0 14px",
-        }}
-      >
-        About
-      </h4>
-      <p
-        className="blurb"
-        style={{
-          whiteSpace: "pre-line",
-          maxWidth: "70ch",
-          marginBottom: 12,
-        }}
-      >
-        {visible}
+    <aside className="artist-bio" aria-label="About the artist">
+      <h4>About</h4>
+      <p ref={textRef} className={expanded ? "bio-text open" : "bio-text"}>
+        {bioText}
       </p>
-      {truncated ? (
+      {overflows || expanded ? (
         <button
           type="button"
-          className="read-more"
+          className="bio-toggle"
+          aria-expanded={expanded}
           onClick={() => setExpanded((v) => !v)}
         >
-          {expanded ? "Show less ←" : "Read more →"}
+          {expanded ? "Less" : "More"}
         </button>
       ) : null}
       {bioSource && bioSource !== "none" ? (
-        <div
-          style={{
-            fontFamily: "var(--mono)",
-            fontSize: 10,
-            letterSpacing: "0.16em",
-            color: "var(--ink-4)",
-            marginTop: 8,
-          }}
-        >
+        <div className="bio-source">
           Source: {bioSource === "wikipedia" ? "Wikipedia" : bioSource}
         </div>
       ) : null}
-    </section>
+    </aside>
   );
 }
 
