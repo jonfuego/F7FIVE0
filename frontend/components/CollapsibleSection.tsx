@@ -5,14 +5,23 @@
 // Collapsed state is remembered per user on the server through useViewPref
 // (admin.collapsed) by the admin page, which passes `collapsed` and `onToggle`.
 // A section that needs attention (a running or failed scan, an update available
-// or running) stays open: `forceOpen` overrides the collapsed preference so a
-// fold can never hide something that matters.
+// or running) opens by itself: `forceOpen` overrides the saved fold so a fold
+// does not hide something that matters. A click on the chevron still wins: it
+// closes a forced-open section, and stays closed until attention newly appears.
+// The rule lives in lib/collapsible.ts.
 
 "use client";
 
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { ChevronDown } from "lucide-react";
 import { Icon } from "@/components/Icon";
+import {
+  choiceAfterClick,
+  choiceAfterForceChange,
+  isSectionOpen,
+  storedNeedsToggle,
+  type UserChoice,
+} from "@/lib/collapsible";
 
 export function CollapsibleSection({
   id,
@@ -33,7 +42,23 @@ export function CollapsibleSection({
   forceOpen?: boolean;
   children: ReactNode;
 }) {
-  const open = !collapsed || forceOpen;
+  const [userChoice, setUserChoice] = useState<UserChoice>(null);
+  const [prevForce, setPrevForce] = useState(forceOpen);
+  // Attention that newly appears drops an earlier click (adjusted during render
+  // so the section never paints in the stale state).
+  if (prevForce !== forceOpen) {
+    setPrevForce(forceOpen);
+    setUserChoice(choiceAfterForceChange(prevForce, forceOpen, userChoice));
+  }
+  const open = isSectionOpen(collapsed, forceOpen, userChoice);
+
+  function onClick() {
+    const choice = choiceAfterClick(open);
+    setUserChoice(choice);
+    // Keep the saved fold in step with the click, but only flip it when it
+    // differs (a forced-open section that was saved collapsed is already right).
+    if (storedNeedsToggle(collapsed, choice === "open")) onToggle(id);
+  }
   const headingId = `admin-${id}-heading`;
   const bodyId = `admin-${id}-body`;
 
@@ -45,7 +70,7 @@ export function CollapsibleSection({
       <button
         type="button"
         id={headingId}
-        onClick={() => onToggle(id)}
+        onClick={onClick}
         aria-expanded={open}
         aria-controls={bodyId}
         className="flex w-full items-center gap-3 px-6 py-4 text-left"
