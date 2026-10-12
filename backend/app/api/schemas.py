@@ -5,7 +5,7 @@ import uuid
 from datetime import date, datetime
 from typing import Annotated, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 # Usernames: lowercase alphanumerics plus . _ - , 3-64 chars. Enforced at
@@ -1267,3 +1267,91 @@ class PodcastSearchOut(BaseModel):
     # "podcastindex" when a key is set, else "itunes".
     provider: str
     results: list[PodcastSearchResultOut]
+
+
+class PodcastOut(BaseModel):
+    id: uuid.UUID
+    title: str
+    author: Optional[str] = None
+    # Plain text. Render it as text, never as HTML.
+    description: Optional[str] = None
+    feed_url: Optional[str] = None
+    # "feed" (from an RSS feed) or "local" (found in a podcasts folder).
+    source: str
+    art_url: Optional[str] = None
+    subscribed: bool = False
+    auto_download: bool = False
+    episode_count: int = 0
+    # Episodes with a file on the server (what "On this server" is built from).
+    files_on_server: int = 0
+    last_checked_at: Optional[datetime] = None
+    last_error: Optional[str] = None
+
+
+class PodcastEpisodeOut(BaseModel):
+    id: uuid.UUID
+    podcast_id: uuid.UUID
+    podcast_title: str
+    art_url: Optional[str] = None
+    title: str
+    # Plain text. Render it as text, never as HTML.
+    description: Optional[str] = None
+    published_at: Optional[datetime] = None
+    duration_sec: Optional[int] = None
+    season: Optional[int] = None
+    episode: Optional[int] = None
+    # True when the publisher's file is video: listed, not played.
+    is_video: bool = False
+    # A file for this episode is on the server and ready.
+    has_file: bool = False
+    downloaded_by_f7five0: bool = False
+    # File type hint for a local copy ("mp3", "m4a"...).
+    container: Optional[str] = None
+    has_chapters: bool = False
+    # The caller's own: {"kind": "new"} | {"kind": "in_progress", "position_sec": n}
+    # | {"kind": "played"}.
+    state: dict
+
+
+class PodcastHomeOut(BaseModel):
+    in_progress: list[PodcastEpisodeOut]
+    mine: list[PodcastOut]
+    on_server: list[PodcastOut]
+
+
+class PodcastDetailOut(BaseModel):
+    podcast: PodcastOut
+    episodes: list[PodcastEpisodeOut]
+    total: int
+
+
+class PodcastSubscribeIn(BaseModel):
+    feed_url: Optional[str] = None
+    podcast_id: Optional[uuid.UUID] = None
+
+    @model_validator(mode="after")
+    def _one_of(self) -> "PodcastSubscribeIn":
+        if bool(self.feed_url) == bool(self.podcast_id):
+            raise ValueError("send either feed_url or podcast_id")
+        if self.feed_url is not None:
+            url = self.feed_url.strip()
+            if not url.lower().startswith(("http://", "https://")) or len(url) > 2048:
+                raise ValueError("feed_url must be a full http or https address")
+            self.feed_url = url
+        return self
+
+
+class PodcastSubscriptionPatchIn(BaseModel):
+    auto_download: bool
+
+
+class PodcastSubscriptionOut(BaseModel):
+    podcast_id: uuid.UUID
+    auto_download: bool
+    created_at: datetime
+
+
+class PodcastOpmlResultOut(BaseModel):
+    added: int
+    already: int
+    failed: int
