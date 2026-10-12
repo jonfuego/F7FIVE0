@@ -34,7 +34,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from webauthn import (
@@ -161,7 +161,18 @@ def _consume_challenge(db: Session, *, challenge: str, kind: str,
         raise HTTPException(status_code=400, detail="challenge_already_used")
     if _as_utc(row.expires_at) <= _now():
         raise HTTPException(status_code=400, detail="challenge_expired")
-    row.consumed_at = _now()
+    # Claim it with one conditional UPDATE. Two simultaneous submissions of the
+    # same assertion both pass the checks above; only one sees consumed_at IS
+    # NULL here. The other gets challenge_already_used, so a replayed assertion
+    # cannot issue a second session.
+    claimed = db.execute(
+        update(WebAuthnChallenge)
+        .where(WebAuthnChallenge.id == row.id, WebAuthnChallenge.consumed_at.is_(None))
+        .values(consumed_at=_now())
+        .returning(WebAuthnChallenge.id)
+    ).first()
+    if claimed is None:
+        raise HTTPException(status_code=400, detail="challenge_already_used")
     return row
 
 

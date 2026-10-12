@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.api.deps import current_user, get_db, require_admin
@@ -51,6 +51,20 @@ def _as_utc(dt: Optional[datetime]) -> Optional[datetime]:
     if dt is None:
         return None
     return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+
+def _reuse_detected(
+    db: Session, *, user_id: uuid.UUID, now: datetime, request: Request,
+) -> None:
+    """A refresh token that must not be accepted: revoke every active session
+    for the user, record it and answer 401. Always raises."""
+    db.query(UserSession).filter(
+        UserSession.user_id == user_id,
+        UserSession.revoked_at.is_(None),
+    ).update({"revoked_at": now})
+    _log_auth_event(db, user_id=user_id, event="refresh_reuse_detected", request=request)
+    db.commit()
+    raise HTTPException(status_code=401, detail="refresh_token_revoked")
+
 
 # Precomputed bcrypt hash of a random string. Used to run a constant-time
 # verify against unknown usernames so timing doesn't distinguish unknown
@@ -223,9 +237,19 @@ def refresh(
                 session.grace_used = True
                 db.commit()
                 raise HTTPException(status_code=401, detail="inactive_or_unknown_user")
-            # Consume the single grace acceptance, then rotate again to a
-            # fresh token so the client is back on a normal chain.
-            session.grace_used = True
+            # Consume the single grace acceptance with one conditional UPDATE:
+            # of two concurrent presentations only one sees grace_used = false.
+            # The loser is a second use of the same previous token, so it takes
+            # the reuse path and never gets a second successor. Then rotate
+            # again to a fresh token so the client is back on a normal chain.
+            claimed = db.execute(
+                update(UserSession)
+                .where(UserSession.id == session.id, UserSession.grace_used.is_(False))
+                .values(grace_used=True)
+                .returning(UserSession.id)
+            ).first()
+            if claimed is None:
+                _reuse_detected(db, user_id=session.user_id, now=now, request=request)
             tokens = _issue_tokens(
                 db, user=user, device_label=session.device_label,
                 client_type=session.client_type or "browser",
@@ -240,14 +264,7 @@ def refresh(
         # window, or one revoked by logout / password change / admin action
         # (rotated_at is null) — is reuse. Treat as compromise: revoke every
         # active session for the user.
-        db.query(UserSession).filter(
-            UserSession.user_id == session.user_id,
-            UserSession.revoked_at.is_(None),
-        ).update({"revoked_at": now})
-        _log_auth_event(db, user_id=session.user_id,
-                        event="refresh_reuse_detected", request=request)
-        db.commit()
-        raise HTTPException(status_code=401, detail="refresh_token_revoked")
+        _reuse_detected(db, user_id=session.user_id, now=now, request=request)
 
     if _as_utc(session.expires_at) <= now:
         session.revoked_at = now
@@ -267,9 +284,21 @@ def refresh(
     # native across rotations (native re-stamps the 90-day window each time),
     # and carry the device metadata forward. `rotated_at` marks this as a
     # rotation revoke so the previous token stays grace-eligible for 60s.
+    #
+    # The session is claimed with one conditional UPDATE (revoked_at IS NULL),
+    # so of two concurrent refreshes with the same token exactly one rotates.
+    # The loser sees the row already taken: that is a second use of a token
+    # that was just spent, so it takes the reuse path (every session revoked)
+    # and never mints a second successor.
     prior_client_type = session.client_type or "browser"
-    session.revoked_at = now
-    session.rotated_at = now
+    claimed = db.execute(
+        update(UserSession)
+        .where(UserSession.id == session.id, UserSession.revoked_at.is_(None))
+        .values(revoked_at=now, rotated_at=now)
+        .returning(UserSession.id)
+    ).first()
+    if claimed is None:
+        _reuse_detected(db, user_id=session.user_id, now=now, request=request)
     tokens = _issue_tokens(
         db, user=user, device_label=session.device_label,
         client_type=prior_client_type,
