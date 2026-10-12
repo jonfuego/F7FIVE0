@@ -129,6 +129,9 @@ class FolderScanStats:
     artists: int = 0
     albums: int = 0
     tracks: int = 0
+    # Podcasts: local shows made, and episodes imported (new files).
+    podcasts: int = 0
+    podcast_episodes: int = 0
     # Media files walked for this library before the slow part, so Admin can
     # draw an `x of y` bar. 0 means "not counted" (an old record or a library
     # with no reachable folder).
@@ -167,8 +170,13 @@ def music_enabled(db: Optional[Session] = None) -> bool:
     return bool(library_folders.folders(db, "music")) and not arr_settings.configured("lidarr")
 
 
+def podcasts_enabled(db: Optional[Session] = None) -> bool:
+    # No *arr app owns podcasts: any folder in the podcasts library is scanned.
+    return bool(library_folders.folders(db, "podcasts"))
+
+
 def any_enabled(db: Optional[Session] = None) -> bool:
-    return movies_enabled(db) or tv_enabled(db) or music_enabled(db)
+    return movies_enabled(db) or tv_enabled(db) or music_enabled(db) or podcasts_enabled(db)
 
 
 # Items (a movie, an episode, a track: whatever the loop counts) per commit.
@@ -248,6 +256,7 @@ def scan_all(
         ("movies", movies_enabled, scan_movies, VIDEO_EXTS),
         ("tv", tv_enabled, scan_tv, VIDEO_EXTS),
         ("music", music_enabled, scan_music, AUDIO_EXTS),
+        ("podcasts", podcasts_enabled, scan_podcasts, AUDIO_EXTS),
     ):
         if only is not None and label not in only:
             continue
@@ -279,6 +288,16 @@ def scan_all(
                 continue
             setattr(total, k, getattr(total, k) + getattr(stats, k))
     return total
+
+
+def scan_podcasts(
+    db: Session, stats: Optional["FolderScanStats"] = None, on_progress: Optional[ProgressFn] = None,
+) -> "FolderScanStats":
+    """The podcasts library (services/podcasts/scan.py), kept out of this module
+    so the two import each other only at call time."""
+    from app.services.podcasts import scan as podcast_scan
+    stats = stats if stats is not None else FolderScanStats()
+    return podcast_scan.scan(db, stats, on_progress)
 
 
 def schedule_catch_up(db: Session) -> dict:

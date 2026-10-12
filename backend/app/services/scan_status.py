@@ -88,7 +88,7 @@ def begin(db: Session, *, force: bool = False, only: Optional[list] = None) -> b
 
 
 def _counts(label: str, state: str, stats) -> dict:
-    added = {"movies": "movies", "tv": "episodes", "music": "tracks"}[label]
+    added = {"movies": "movies", "tv": "episodes", "music": "tracks", "podcasts": "podcast_episodes"}[label]
     return {
         "state": state,
         "total": getattr(stats, "files_total", 0),

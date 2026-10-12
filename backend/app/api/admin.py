@@ -14,7 +14,7 @@ from typing import Annotated, Any, Optional
 
 from urllib.parse import unquote
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Query, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -60,6 +60,7 @@ from app.services import (
     android_app, app_settings, arr_settings, library_folders, nas_auth, podcastindex_key,
     reminders, remote_access as ra, scan_library, scan_status, server_version, tmdb_key, updates,
 )
+from app.services.podcasts import download as podcast_download
 from app.services.podcasts import search as podcast_search
 from app.services import art as art_service
 from app.services import artist_merge, auth_events
@@ -1490,7 +1491,7 @@ def put_library_folders(
 
 
 # The libraries the folder scan can do, in the order Admin lists them.
-_FOLDER_SCAN_LIBRARIES = ("movies", "tv", "music")
+_FOLDER_SCAN_LIBRARIES = ("movies", "tv", "music", "podcasts")
 
 
 def _folder_scan_out(db: Session) -> dict:
@@ -1533,6 +1534,7 @@ def start_library_scan(
             "movies": scan_library.movies_enabled,
             "tv": scan_library.tv_enabled,
             "music": scan_library.music_enabled,
+            "podcasts": scan_library.podcasts_enabled,
         }
         if not all(enabled[k](db) for k in only):
             raise HTTPException(status_code=400, detail="library_not_scanned")
@@ -1958,6 +1960,31 @@ def delete_podcastindex_key(
     podcastindex_key.clear(db)
     db.commit()
     return _metadata_out(db)
+
+
+# ---------------------------------------------------------------------------
+# Podcasts: remove a server download
+# ---------------------------------------------------------------------------
+@router.delete("/podcasts/episodes/{episode_id}/download", status_code=204)
+def delete_podcast_download(
+    episode_id: uuid.UUID,
+    _admin: Annotated[User, Depends(require_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> Response:
+    """Remove the file F7FIVE0 downloaded for an episode (the episode and its
+    feed entry stay, and it can be streamed again). Only files F7FIVE0 put there
+    itself, and only under the podcasts library folders: anything else answers
+    409 and nothing is touched."""
+    from app.models.podcast import PodcastEpisode
+    ep = db.get(PodcastEpisode, episode_id)
+    if ep is None:
+        raise HTTPException(status_code=404, detail="episode_not_found")
+    try:
+        podcast_download.delete_download(db, ep)
+    except podcast_download.RemovalRefused as exc:
+        raise HTTPException(status_code=409, detail=exc.code) from None
+    db.commit()
+    return Response(status_code=204)
 
 
 # ---------------------------------------------------------------------------

@@ -37,6 +37,7 @@ JOB_MOVIE_GENRES = "movie_genres_backfill"
 JOB_ARTIST_ART = "artist_art_autofill"
 JOB_ARTIST_BIOS = "artist_bios_backfill"
 JOB_PODCAST_REFRESH = "podcast_refresh"
+JOB_PODCAST_DOWNLOAD = "podcast_download"
 
 # Once a day, give or take an hour, so a fleet of servers doesn't hit GitHub
 # at the same second. Checking never installs anything.
@@ -68,6 +69,10 @@ _artist_art_lock = threading.Lock()
 # One podcast feed refresh at a time in this process: the hourly job, Admin's
 # "Refresh feeds" and an OPML import can all be queued together.
 _podcast_refresh_lock = threading.Lock()
+
+# At most two episode downloads at once, however many are queued (auto-download
+# can queue a whole back catalogue's worth of new episodes on a busy day).
+_podcast_download_slots = threading.BoundedSemaphore(2)
 
 
 def _arr_status(fn, *args, **kwargs) -> None:
@@ -376,7 +381,7 @@ def _run_podcast_refresh(ids: Optional[list] = None) -> None:
         from app.services.podcasts import refresh
         db = SessionLocal()
         try:
-            stats = refresh.refresh_all(db, only_ids=ids)
+            stats = refresh.refresh_all(db, only_ids=ids, queue_download=queue_podcast_download)
             log.info("podcast refresh: %d shows, %d new episodes, %d errors",
                      stats.shows, stats.new_episodes, stats.errors)
         finally:
@@ -385,6 +390,46 @@ def _run_podcast_refresh(ids: Optional[list] = None) -> None:
         log.exception("podcast refresh raised")
     finally:
         _podcast_refresh_lock.release()
+
+
+def _run_podcast_download(episode_id: uuid.UUID) -> None:
+    """Download one episode into the podcasts library. Owns its own session;
+    never raises. A failure is logged and left for the person to retry."""
+    with _podcast_download_slots:
+        db = SessionLocal()
+        try:
+            from app.models.podcast import PodcastEpisode
+            from app.services.podcasts import download
+            ep = db.get(PodcastEpisode, episode_id)
+            if ep is None:
+                return
+            nas_auth.ensure_all(db)
+            download.download_episode(db, ep)
+            db.commit()
+        except Exception as exc:
+            db.rollback()
+            # DownloadError messages are safe to show; anything else is logged in full.
+            from app.services.podcasts.download import DownloadError
+            if isinstance(exc, DownloadError):
+                log.warning("podcast download of %s failed: %s", episode_id, exc)
+            else:
+                log.exception("podcast download of %s raised", episode_id)
+        finally:
+            db.close()
+
+
+def queue_podcast_download(episode_id: uuid.UUID) -> bool:
+    """Queue a server download of one episode. One job id per episode, so asking
+    twice never downloads it twice at once. False when the scheduler is not
+    running (CLI)."""
+    if _scheduler is None:
+        log.warning("queue_podcast_download called but scheduler not started")
+        return False
+    _scheduler.add_job(
+        _run_podcast_download, args=[episode_id],
+        id=f"{JOB_PODCAST_DOWNLOAD}_{episode_id}", replace_existing=True,
+    )
+    return True
 
 
 def trigger_podcast_refresh_now(ids: Optional[list] = None) -> None:

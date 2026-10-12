@@ -20,6 +20,7 @@ from typing import Annotated, Iterable, Optional
 from urllib.parse import parse_qs, urlsplit
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Response, UploadFile
+from fastapi.responses import JSONResponse
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -42,6 +43,7 @@ from app.services import longform, net_guard
 from app.services.art import resolve_art_batch
 from app.services.security import build_signed_podcast_url
 from app.services.podcasts import chapters as chapters_service
+from app.services.podcasts import download as download_service
 from app.services.podcasts import media_types, opml
 from app.services.podcasts import refresh as refresh_service
 from app.services.podcasts import search as podcast_search
@@ -469,6 +471,37 @@ def start_episode_stream(
         cover_path=cover, art_url=_signed_art_url(request, user.id, session_id, cover),
         position_sec=resume,
     )
+
+
+# ---------------------------------------------------------------------------
+# Download to the server
+# ---------------------------------------------------------------------------
+@router.post("/episodes/{id}/download", status_code=202)
+def request_download(
+    id: uuid.UUID,
+    user: Annotated[User, Depends(current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> JSONResponse:
+    """Queue a download of the episode into the podcasts library. Only a
+    follower of the show may ask. 409 `no_podcast_folder` when no podcasts
+    folder is set up in Admin > Library folders. Answers 200 when the server
+    already has the file."""
+    ep = _get_episode(db, id)
+    if db.get(PodcastSubscription, (user.id, ep.podcast_id)) is None:
+        raise HTTPException(status_code=403, detail="not_subscribed")
+    if download_service._has_ready_file(db, ep) is not None:
+        return JSONResponse(status_code=200, content={"episode_id": str(ep.id), "already_downloaded": True})
+    if not ep.enclosure_url:
+        raise HTTPException(status_code=404, detail="nothing_to_download")
+    if media_types.is_video_type(ep.enclosure_type):
+        raise HTTPException(status_code=422, detail="video_not_supported")
+    if not download_service.configured_folders(db):
+        raise HTTPException(status_code=409, detail="no_podcast_folder")
+    if download_service.first_reachable_folder(db) is None:
+        raise HTTPException(status_code=409, detail="podcast_folder_unreachable")
+    if not scheduler.queue_podcast_download(ep.id):
+        raise HTTPException(status_code=503, detail="download_not_started")
+    return JSONResponse(status_code=202, content={"episode_id": str(ep.id), "queued": True})
 
 
 # ---------------------------------------------------------------------------
