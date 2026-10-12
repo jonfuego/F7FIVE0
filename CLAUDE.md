@@ -116,12 +116,35 @@ INSTALL.md for the operator view.
   LAN machine name on its own (a single label like `mediabox`, or a `.local`
   name); any other dotted name goes in `APP_ALLOWED_HOSTS`. A hostile dotted
   `Host` is still rejected and never lands in a `Location`.
-- Libraries: when a `*_API_KEY` for Radarr/Sonarr/Lidarr is set, that app
-  owns the library (`services/sync.py`). Otherwise `services/scan_library.py`
+- Libraries: when a Radarr/Sonarr/Lidarr API key is set, that app owns the
+  library (`services/sync.py`). Otherwise `services/scan_library.py`
   scans `LIBRARY_ROOT_*` folders. Never let both write the same library.
   Requests need Radarr/Sonarr; `/api/client/features` tells clients (it also
-  reports `arr: {radarr, sonarr, lidarr}`; Admin shows "Run *arr sync now"
-  only when one is set up).
+  reports `arr: {radarr, sonarr, lidarr}`).
+- *arr settings (Admin > *arr card): never read `settings.radarr_*`,
+  `settings.sonarr_*`, `settings.lidarr_*` or `settings.arr_webhook_secret`
+  directly. Use `services/arr_settings` (`creds(app)`, `url(app)`,
+  `api_key(app)`, `configured(app)`, `quality_profile_id(app)`,
+  `root_folder(app)`, `webhook_secret()`). A value saved in Admin
+  (`app_settings` keys `arr:<app>` and `arr_webhook_secret`) wins over `.env`
+  per field, a blank saved value means use `.env`, and the cache is replaced on
+  save, so no restart is needed. The admin endpoints (`api/admin_arr.py`, under
+  `/api/admin/arr`) never return a stored key, only `has_key` and a masked tail.
+  The card says that a key hands that library from the folder scan to the app.
+  The webhook receiver takes the token as the `X-Arr-Webhook-Token` header or
+  the Basic-auth password, never in the query string. Setup generates
+  `ARR_WEBHOOK_SECRET` when it is blank (`install.ps1`, upgrades included; a
+  non-blank value never changes).
+- Admin > Scans is the one place to start and watch scans: Movies, TV, Music,
+  Music videos and the *arr sync, with Scan all and a button per row. The rows
+  come from the pure helper `frontend/lib/scans-rows.ts`. Music is driven by the
+  folder scan when Lidarr is not set and by the Lidarr sync when it is, so music
+  is always scannable. `POST /api/admin/library/scan?library=movies|tv|music`
+  (repeatable) starts one folder library and answers 400 `library_not_scanned`
+  for a library an *arr app owns; `POST /api/sync/run?app=<app>` syncs one app,
+  and the *arr sync keeps its own status (`arr_sync_status`,
+  `GET /api/admin/library/arr-sync`). Library folders keeps folder editing and
+  NAS sign-in only.
   The folder scan saves as it goes: it commits every 25 items (`BATCH_SIZE`)
   and at the end of each library, so rows show up while it runs and a library
   that fails loses only its open batch (the others still run). Never wrap a
@@ -156,6 +179,17 @@ INSTALL.md for the operator view.
   admin-only undo. `albums.credited_as` / `tracks.credited_as` keep the credited
   text. At scan time a "feat." / "ft." / "Featuring" credit attaches to the main
   artist; "&" and "And" are never auto-split.
+  Merge also moves the source's music video releases and videos (they cascade
+  with their artist, so a merge used to delete them); undo moves them back, with
+  the release ids kept in `source_snapshot._moved_music_video_release_ids` (no
+  migration). A release folder both artists have stops the merge (422) with
+  nothing changed. The music videos scan (`scan_music_videos._upsert_artist`)
+  files an artist folder under a merge alias, then the same name, then the one
+  artist with the same `art_sources/names.py::match_key` folding ("Birthday
+  Party" under "The Birthday Party"); two or more candidates make a new artist.
+  Fix Match checks `_check_mbid_free` first: a MusicBrainz id another artist
+  already holds answers 409 `already_matched` naming the holder, and the fix is
+  Merge into... (also on the Music Videos artist page).
 - Fix Match and art search go beyond *arr: the admin lookup
   (`api/admin.py`) searches MusicBrainz (artist, album) and TMDB (movie, series
   via `tmdb_key.get()`) with *arr optional, and `services/art_search.py` uses
@@ -191,6 +225,34 @@ INSTALL.md for the operator view.
   artists nobody had a picture for in `app_settings` `artist_art_autofill_misses`
   for 30 days (a service error is not remembered, and 5 in a row stop the run),
   and a rerun creates nothing new. Off with `ARTIST_ART_AUTOFILL_ENABLED=false`.
+- Artist bios come from Wikipedia through Wikidata. MusicBrainz artists carry a
+  `wikidata` url-rel and almost never a `wikipedia` one (checked live on five
+  artists), so `services/metadata/wikidata.py` follows MusicBrainz `url-rels` to
+  the Wikidata entity, takes its English Wikipedia sitelink, and
+  `runner.wikipedia_bio` fetches the page summary extract. `enrich_artist` keeps
+  an existing bio when a lookup errors. Background job `artist_bios_backfill`
+  (`backfill_artist_bios` in the runner, queued by the scheduler once after boot
+  and after each folder scan, one job id so it never stacks, 0.5 s between
+  artists, a miss is remembered as `not_found`, a service error is not, five in
+  a row stop the run). MusicBrainz and Wikipedia calls use the project
+  User-Agent and at most one request a second. The artist page shows the bio in
+  the right side of the hero (clamped, More / Less); Home shows a one or two
+  sentence excerpt (`services/bio_excerpt.py`, API field `artist_bio_excerpt` on
+  album detail) when the featured pick is an album with an artist bio.
+- Auth events: `auth_events.event` is `String(64)` and PostgreSQL enforces it
+  (SQLite does not, so a long event passed every test and answered HTTP 500 on
+  Admin > Users > Disable). Every event string is built in
+  `services/auth_events.py`, and `record_auth_event` is the only writer. It runs
+  in a SAVEPOINT and never fails the request. `test_auth_events.py` checks every
+  builder and every literal against the column length, so a new event that
+  does not fit breaks a test. Never build an event inline.
+- Sign-out only on a real 401 from the refresh call. A 5xx, a timeout or a
+  dropped connection during token refresh is "try again" (two retries, 0.5 s
+  then 1.5 s) and then keeps the session. The decision is the pure helper
+  `decideRefresh` in `frontend/lib/refresh-outcome.ts` and
+  `mobile/src/api/refreshOutcome.ts`; the web refresh route clears cookies only
+  for a 401 from the API. Do not add another path that clears a session on a
+  non-401.
 - Library folders: several per library (`app/services/library_folders.py`).
   Source is the `libraries` table once Admin > Library folders saves (then for
   every library), else `LIBRARY_ROOT_*` split on `;`. TV and music merge
@@ -270,7 +332,8 @@ INSTALL.md for the operator view.
   the full image the admin's pick downloads.
 - `--bg-2` is not a design token (the v3 tokens define `--bg` and
   `--surface-1..3`), so `background: var(--bg-2)` paints nothing. Use
-  `--surface-2` for an opaque panel.
+  `var(--surface-2, #181818)` for an opaque panel. Batch 8 swept the last users
+  out of `frontend/`; `git grep bg-2 -- frontend` should stay empty.
 - Migrations go through Alembic. Keep revision ids stable: existing installs
   upgrade through them. Register new models in `app/models/__init__.py`.
 - Config comes from `.env` at the install root via pydantic-settings. New
@@ -332,11 +395,21 @@ INSTALL.md for the operator view.
   `status.json` / `run.log` (`backend/app/services/remote_access.py` is the
   other side). The helper treats the request as untrusted input. Methods:
   Tailscale Funnel; a named Cloudflare tunnel run by its own NSSM service
-  `F7FIVE0-Tunnel` (never touch a pre-existing `Cloudflared` service); a
-  dashboard tunnel token (same service); or Caddy (`F7FIVE0-Proxy`, automatic
-  HTTPS, optional DuckDNS refresh task). Never offer plain-HTTP port
-  forwarding. The result lands in `.env` as `PUBLIC_URL`; the helper restarts
-  API and Web, and clients read it from `/api/client/features`.
+  `F7FIVE0-Tunnel` (never touch a pre-existing `Cloudflared` service). One
+  tunnel per install: the name is `f7five0-<computer name>` (lowercase), saved
+  as `CLOUDFLARE_TUNNEL_NAME` in `.env` and reused on reruns by that install
+  only; an install that already runs a tunnel (found from its own
+  `cloudflared\config.yml`) keeps it. Setup never fetches credentials for a
+  tunnel that has active connectors (`cloudflared tunnel info`) and stops with a
+  clear message, and after `route dns --overwrite-dns` it checks where the
+  record points and fails if it is another tunnel (cloudflared exits 0 and
+  says "already configured to route to your tunnel <id>" without moving it).
+  The pure decisions live in `installer/tunnel-logic.ps1` with Pester tests.
+  The other methods are a dashboard tunnel token (same service) and Caddy
+  (`F7FIVE0-Proxy`, automatic HTTPS, optional DuckDNS refresh task). Never
+  offer plain-HTTP port forwarding. The result lands in `.env` as `PUBLIC_URL`;
+  the helper restarts API and Web, and clients read it from
+  `/api/client/features`.
   `install.ps1 -RemoteAccess <method>` and `remote-access.ps1 -Method` are the
   console (advanced / recovery) paths.
 - Updates: Admin > Updates updates the server from the latest GitHub release
