@@ -233,18 +233,24 @@ class _Batcher:
                     log.exception("could not schedule enrichment for %s", item_id)
 
 
-def scan_all(db: Session, on_progress: Optional[ProgressFn] = None) -> FolderScanStats:
+def scan_all(
+    db: Session, on_progress: Optional[ProgressFn] = None, only: Optional[list] = None,
+) -> FolderScanStats:
     """Scan every library this scanner owns, saving as it goes.
 
     Each library commits every BATCH_SIZE items and at its end. A library that
     raises loses only the batch it was in: what it committed earlier stays, a
-    rollback drops the rest, and the other libraries still run."""
+    rollback drops the rest, and the other libraries still run. `only` limits
+    the pass to the named libraries; one this scanner does not own (an *arr app
+    has it) is still skipped."""
     total = FolderScanStats()
     for label, enabled, fn, exts in (
         ("movies", movies_enabled, scan_movies, VIDEO_EXTS),
         ("tv", tv_enabled, scan_tv, VIDEO_EXTS),
         ("music", music_enabled, scan_music, AUDIO_EXTS),
     ):
+        if only is not None and label not in only:
+            continue
         if not enabled(db):
             continue
         stats = FolderScanStats()

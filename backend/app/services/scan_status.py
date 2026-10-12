@@ -4,9 +4,12 @@ Kept in `app_settings` under `folder_scan_status` so every process and the
 web app read the same thing:
 
     {state: "idle" | "running", started_at, finished_at, current_library,
-     libraries: {movies | tv | music: {state, seen, added, probed, missing,
-                                       errors}},
-     last_error}
+     scope: null | ["movies", ...], libraries: {movies | tv | music: {state,
+     seen, added, probed, missing, errors}}, last_error}
+
+`scope` is the list of libraries the running (or last) scan was asked to do;
+null means every library the scanner owns. A scan of one library keeps the
+other libraries' last results.
 
 A library's `state` is queued, running, done, or failed. The scan writes this
 at the start, at every batch commit, and at the end. Nothing here commits:
@@ -44,7 +47,7 @@ def _now() -> str:
 def _blank() -> dict:
     return {
         "state": "idle", "started_at": None, "finished_at": None,
-        "current_library": None, "libraries": {}, "last_error": None,
+        "current_library": None, "scope": None, "libraries": {}, "last_error": None,
     }
 
 
@@ -63,18 +66,23 @@ def is_running(db: Session) -> bool:
     return read(db)["state"] == "running"
 
 
-def begin(db: Session, *, force: bool = False) -> bool:
+def begin(db: Session, *, force: bool = False, only: Optional[list] = None) -> bool:
     """Mark a scan as running. False (and nothing changes) when one is already
     marked running, unless `force` (the scan job itself, which restarts the
-    record it was queued under)."""
+    record it was queued under). `only` names the libraries this scan covers;
+    the other libraries keep their last result."""
     current = read(db)
     if current["state"] == "running" and not force:
         return False
+    scope = list(only) if only else None
+    kept = {}
+    if scope is not None:
+        kept = {k: v for k, v in current["libraries"].items() if k not in scope}
     app_settings.put(db, KEY, {
         "state": "running", "started_at": _now(),
         # The last finished time stays until this scan finishes.
         "finished_at": current["finished_at"],
-        "current_library": None, "libraries": {}, "last_error": None,
+        "current_library": None, "scope": scope, "libraries": kept, "last_error": None,
     })
     return True
 
@@ -118,11 +126,12 @@ def finish(db: Session, error: Optional[str] = None) -> None:
 
 def reset_stale(db: Session) -> bool:
     """On API start: a `running` record belongs to a process that is gone.
-    Covers both the folder scan and the music-videos scan; returns True when
-    either one was reset."""
+    Covers the folder scan, the music-videos scan and the *arr sync; returns
+    True when any of them was reset."""
     folder = _reset_stale_folder(db)
     music_videos = mv_reset_stale(db)
-    return folder or music_videos
+    arr = arr_reset_stale(db)
+    return folder or music_videos or arr
 
 
 def _reset_stale_folder(db: Session) -> bool:
@@ -227,4 +236,97 @@ def mv_reset_stale(db: Session) -> bool:
     current["state"] = "idle"
     current["last_error"] = INTERRUPTED
     app_settings.put(db, MV_KEY, current)
+    return True
+
+
+# ---------------------------------------------------------------------------
+# *arr sync (sibling key, one app after another)
+# ---------------------------------------------------------------------------
+ARR_KEY = "arr_sync_status"
+
+
+def _arr_blank() -> dict:
+    return {
+        "state": "idle", "started_at": None, "finished_at": None,
+        "current_app": None, "apps": {}, "last_error": None,
+    }
+
+
+def arr_read(db: Session) -> dict:
+    """The stored *arr sync status, with every field present:
+
+        {state: "idle" | "running", started_at, finished_at, current_app,
+         apps: {radarr | sonarr | lidarr: {state, synced, errors}}, last_error}
+
+    An app's `state` is queued, running, done or failed; `synced` is the items
+    it brought in (movies, series, artists)."""
+    out = _arr_blank()
+    stored = app_settings.get(db, ARR_KEY)
+    if stored:
+        out.update({k: v for k, v in stored.items() if k in out})
+        if not isinstance(out["apps"], dict):
+            out["apps"] = {}
+    return out
+
+
+def arr_is_running(db: Session) -> bool:
+    return arr_read(db)["state"] == "running"
+
+
+def arr_begin(db: Session, apps: list, *, force: bool = False) -> bool:
+    """Mark the *arr sync as running for `apps`. False (nothing changes) when
+    one is already running, unless `force` (the job restarting its record).
+    Apps not in this run keep their last result."""
+    current = arr_read(db)
+    if current["state"] == "running" and not force:
+        return False
+    kept = {k: v for k, v in current["apps"].items() if k not in apps}
+    for name in apps:
+        kept[name] = {"state": "queued", "synced": 0, "errors": 0}
+    app_settings.put(db, ARR_KEY, {
+        "state": "running", "started_at": _now(),
+        "finished_at": current["finished_at"],
+        "current_app": None, "apps": kept, "last_error": None,
+    })
+    return True
+
+
+def arr_set_app(db: Session, name: str, state: str, synced: int = 0, errors: int = 0,
+                error: Optional[str] = None) -> None:
+    """Record one app's state and counts. `error` also becomes `last_error`."""
+    current = arr_read(db)
+    current["apps"][name] = {"state": state, "synced": synced, "errors": errors}
+    if state == "running":
+        current["current_app"] = name
+    elif current["current_app"] == name:
+        current["current_app"] = None
+    if error:
+        current["last_error"] = error
+    app_settings.put(db, ARR_KEY, current)
+
+
+def arr_finish(db: Session, error: Optional[str] = None) -> None:
+    """The *arr sync is over."""
+    current = arr_read(db)
+    current["state"] = "idle"
+    current["finished_at"] = _now()
+    current["current_app"] = None
+    if error:
+        current["last_error"] = error
+    app_settings.put(db, ARR_KEY, current)
+
+
+def arr_reset_stale(db: Session) -> bool:
+    """On API start: a `running` *arr sync record belongs to a process that is
+    gone."""
+    current = arr_read(db)
+    if current["state"] != "running":
+        return False
+    current["state"] = "idle"
+    current["current_app"] = None
+    current["last_error"] = INTERRUPTED
+    for entry in current["apps"].values():
+        if isinstance(entry, dict) and entry.get("state") in ("queued", "running"):
+            entry["state"] = "interrupted"
+    app_settings.put(db, ARR_KEY, current)
     return True

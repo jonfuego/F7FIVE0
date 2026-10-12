@@ -38,6 +38,14 @@ test("the Radarr, Sonarr and Lidarr card can be folded and remembered", () => {
   assert.deepEqual(resolveViewPref("admin.collapsed", ["arr", "metadata"]), ["arr", "metadata"]);
 });
 
+test("the Scans card can be folded and remembered, and is collapsed by default", () => {
+  assert.ok((ADMIN_SECTION_IDS as readonly string[]).includes("scans"));
+  assert.deepEqual(resolveViewPref("admin.collapsed", ["scans", "arr"]), ["scans", "arr"]);
+  assert.ok((resolveViewPref("admin.collapsed", undefined) as string[]).includes("scans"));
+  // A list saved before the Library section went away is still valid.
+  assert.deepEqual(resolveViewPref("admin.collapsed", ["library", "updates"]), ["library", "updates"]);
+});
+
 test("a stored view wins over the default (pick Albums, come back, still Albums)", () => {
   const m = mergeViewPrefs({ "music.browse": "albums", "movies.genre": "Comedy", "tv.status": "Watching" });
   assert.equal(m["music.browse"], "albums");

@@ -18,7 +18,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from app.config import settings
 from app.db import SessionLocal, db_session
 from app.services import (
-    library_folders, live_hub, nas_auth, scan_library, scan_music_videos, scan_status, sync, updates,
+    arr_settings, library_folders, live_hub, nas_auth, scan_library, scan_music_videos, scan_status, sync, updates,
 )
 
 
@@ -56,20 +56,62 @@ ARTIST_BIOS_PAUSE_SEC = 0.5
 # (Admin, folder save) and a manual start can all be queued together.
 _folder_scan_lock = threading.Lock()
 
+# One *arr sync at a time in this process: the 5-minute job, Admin's buttons
+# and a key save can all be queued together.
+_arr_sync_lock = threading.Lock()
+
 # One artist art auto-fill run at a time, even if a queued run starts while
 # the previous one is still walking artists.
 _artist_art_lock = threading.Lock()
 
 
-def _run_full_sync() -> None:
-    """Scheduler-invoked wrapper around sync.full_sync. Owns its own session."""
-    stats = None
+def _arr_status(fn, *args, **kwargs) -> None:
+    """Write the *arr sync status in its own short session, so Admin sees it
+    while the sync's own session is still open. A failed write is logged, not
+    raised: the status must never stop a sync."""
+    db = SessionLocal()
     try:
-        with db_session() as db:
-            stats = sync.full_sync(db)
+        fn(db, *args, **kwargs)
+        db.commit()
     except Exception:
-        log.exception("scheduled full_sync raised")
+        log.exception("could not write the *arr sync status")
+        db.rollback()
+    finally:
+        db.close()
+
+
+def _run_full_sync(apps: Optional[list] = None) -> None:
+    """Scheduler-invoked wrapper around sync.full_sync. Owns its own session.
+    `apps` limits the pass to those apps (Admin's per-app buttons); none means
+    every app that has a key. The status (`arr_sync_status`) is written along
+    the way, so Admin shows the sync running, per app, and how it ended."""
+    names = [a for a in (apps or arr_settings.APPS) if arr_settings.configured(a)]
+    if not _arr_sync_lock.acquire(blocking=False):
+        log.info("an *arr sync is already running; skipping this one")
         return
+    stats = None
+    error = None
+    try:
+        if not names:
+            if apps:
+                # Asked for apps that have no key any more: close the record
+                # Admin's button opened, so it does not stay "running".
+                _arr_status(scan_status.arr_finish)
+            return
+        _arr_status(scan_status.arr_begin, names, force=True)
+
+        def progress(app, state, synced, errors, err):
+            _arr_status(scan_status.arr_set_app, app, state, synced, errors, err)
+
+        try:
+            with db_session() as db:
+                stats = sync.full_sync(db, only=names, on_progress=progress)
+        except Exception as exc:
+            log.exception("scheduled full_sync raised")
+            error = f"The sync stopped: {exc}"
+        _arr_status(scan_status.arr_finish, error)
+    finally:
+        _arr_sync_lock.release()
     # The session has committed; the rows are visible to the enrichment jobs.
     sync.schedule_pending_enrichment(stats)
 
@@ -114,17 +156,19 @@ def _run_music_videos_scan() -> None:
         trigger_artist_art_autofill(delay_sec=ENRICH_DELAY_SEC)
 
 
-def _scan_folders() -> bool:
+def _scan_folders(only: Optional[list] = None) -> bool:
     """One pass over the library folders. The scan saves as it goes (every
     batch and at the end of each library, see scan_library), so this owns its
     session and does not wrap the pass in one commit-on-exit block. Admin's
-    scan status is written along the way. Returns whether a music-videos
-    folder is configured."""
+    scan status is written along the way. `only` names the libraries to scan
+    (Admin's per-library buttons); none means every library this scanner owns.
+    Returns whether a music-videos folder is configured and should now be
+    scanned: always False for a scan of named libraries."""
     has_music_videos = False
     error = None
     db = SessionLocal()
     try:
-        scan_status.begin(db, force=True)
+        scan_status.begin(db, force=True, only=only)
         db.commit()
 
         def progress(label, state, stats, err=None):
@@ -133,8 +177,12 @@ def _scan_folders() -> bool:
         # Connect any saved NAS sign-ins before walking folders, so a UNC
         # share is readable for this scan. Cheap when already connected.
         nas_auth.ensure_all(db)
-        scan_library.scan_all(db, on_progress=progress)
-        has_music_videos = bool(library_folders.folders(db, "music_videos"))
+        if only is None:
+            scan_library.scan_all(db, on_progress=progress)
+        else:
+            scan_library.scan_all(db, on_progress=progress, only=only)
+        if only is None:
+            has_music_videos = bool(library_folders.folders(db, "music_videos"))
         db.commit()
         # Everything is saved: re-queue enrichment for rows that missed it.
         try:
@@ -162,16 +210,18 @@ def _scan_folders() -> bool:
     return has_music_videos
 
 
-def _run_folder_scan() -> None:
+def _run_folder_scan(only: Optional[list] = None) -> None:
     """Scan the libraries that have no *arr (movies / TV / music folders),
-    then the music-videos folder when one is configured. Finally kick off one
+    then the music-videos folder when one is configured (not when `only`
+    names libraries: that is Admin's per-library button, and music videos have
+    their own). Finally kick off one
     low-priority audio-analysis step so new music gets loudness / waveform /
     similarity filled in without an operator running the CLI."""
     if not _folder_scan_lock.acquire(blocking=False):
         log.info("a folder scan is already running; skipping this one")
         return
     try:
-        has_music_videos = _scan_folders()
+        has_music_videos = _scan_folders(only)
     finally:
         _folder_scan_lock.release()
     if has_music_videos:
@@ -494,12 +544,28 @@ def trigger_full_sync_now() -> None:
     _scheduler.add_job(_run_folder_scan, id=f"{JOB_FOLDER_SCAN}_adhoc", replace_existing=True)
 
 
-def trigger_folder_scan_now() -> None:
-    """Scan the library folders now (after Admin > Library folders changes)."""
+def trigger_folder_scan_now(only: Optional[list] = None) -> None:
+    """Scan the library folders now (after Admin > Library folders changes, or
+    from Admin > Scans). `only` names the libraries; none scans them all."""
     if _scheduler is None:
         log.warning("trigger_folder_scan_now called but scheduler not started")
         return
-    _scheduler.add_job(_run_folder_scan, id=f"{JOB_FOLDER_SCAN}_adhoc", replace_existing=True)
+    _scheduler.add_job(
+        _run_folder_scan, args=[list(only)] if only else None,
+        id=f"{JOB_FOLDER_SCAN}_adhoc", replace_existing=True,
+    )
+
+
+def trigger_arr_sync_now(apps: list) -> None:
+    """Sync just these *arr apps now (Admin > Scans). Unlike
+    `trigger_full_sync_now` this does not also start a folder scan: Admin
+    starts each scan on its own."""
+    if _scheduler is None:
+        log.warning("trigger_arr_sync_now called but scheduler not started")
+        return
+    _scheduler.add_job(
+        _run_full_sync, args=[list(apps)], id=f"{JOB_FULL_SYNC}_adhoc", replace_existing=True,
+    )
 
 
 def trigger_music_videos_scan_now() -> None:
