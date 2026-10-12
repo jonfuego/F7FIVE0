@@ -46,6 +46,10 @@ FEED_MAX_BYTES = 20 * 1024 * 1024
 CHAPTERS_MAX_BYTES = 2 * 1024 * 1024
 OPML_MAX_BYTES = 1 * 1024 * 1024
 
+# Statuses that send the fetch somewhere else. Not 304: that one means "your copy
+# is current", and the caller wants to see it.
+_REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
+
 # Test seam: a transport that every guarded client uses instead of the network.
 # None in production.
 _transport_override: Optional[httpx.BaseTransport] = None
@@ -161,7 +165,7 @@ def open_stream(url: str, *, headers: Optional[dict] = None, method: str = "GET"
             assert_public_host(current)
             request = client.build_request(method, current)
             response = client.send(request, stream=True)
-            if response.is_redirect:
+            if response.status_code in _REDIRECT_STATUSES:
                 location = response.headers.get("location")
                 response.close()
                 if not location:

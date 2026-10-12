@@ -181,11 +181,16 @@ class Settings(BaseSettings):
     library_root_tv: str = ""
     library_root_music: str = ""
     library_root_music_videos: str = ""
+    library_root_podcasts: str = ""
 
     # How often the folder scanner walks libraries that have no *arr
     # (see app/services/scan_library.py). The walk is incremental: only new
     # or changed files are probed.
     folder_scan_interval_minutes: int = 30
+
+    # Podcasts. How often the feeds of the shows people follow are checked for
+    # new episodes (minutes; the scheduler never goes below 5).
+    podcast_refresh_minutes: int = 60
 
     # Seconds the automatic audio-analysis job waits between tracks (see
     # app/scheduler.py:_run_audio_analysis_step). It analyzes one track per
