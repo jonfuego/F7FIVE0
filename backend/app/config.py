@@ -192,6 +192,12 @@ class Settings(BaseSettings):
     # new episodes (minutes; the scheduler never goes below 5).
     podcast_refresh_minutes: int = 60
 
+    # Podcast Index (podcastindex.org) key and secret for podcast search. Optional:
+    # with none, search uses Apple's iTunes Search API. A pair saved in Admin >
+    # Metadata wins over these. Always read them with `services/podcastindex_key`.
+    podcastindex_api_key: str = ""
+    podcastindex_api_secret: str = ""
+
     # Seconds the automatic audio-analysis job waits between tracks (see
     # app/scheduler.py:_run_audio_analysis_step). It analyzes one track per
     # step and reschedules itself, so this spacing keeps a first-install

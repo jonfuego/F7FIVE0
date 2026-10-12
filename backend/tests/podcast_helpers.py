@@ -14,8 +14,11 @@ from typing import Callable, Optional
 
 import httpx
 
+from fastapi.testclient import TestClient
+
 from app.models.user import User
 from app.services import net_guard
+from tests.conftest import make_active_session
 
 FIXTURES = Path(__file__).parent / "fixtures" / "podcasts"
 PUBLIC_IP = "93.184.216.34"
@@ -122,3 +125,34 @@ def subscribe(db, user: User, pod: "Podcast", *, auto_download: bool = False,
     db.add(sub)
     db.flush()
     return sub
+
+
+class Api:
+    """One TestClient, acting as whichever user a test names (or nobody)."""
+
+    def __init__(self, db) -> None:
+        from app.api.deps import current_session_id, current_user, get_db
+        from app.main import app
+
+        self.db, self.app = db, app
+        self._current_user, self._current_session_id, self._get_db = current_user, current_session_id, get_db
+        app.dependency_overrides[get_db] = self._db
+        self.client = TestClient(app)
+
+    def _db(self):
+        yield self.db
+
+    def as_user(self, user) -> TestClient:
+        _, sess = make_active_session(self.db, user=user)
+        self.app.dependency_overrides[self._current_user] = lambda: user
+        self.app.dependency_overrides[self._current_session_id] = lambda: sess.id
+        return self.client
+
+    def anonymous(self) -> TestClient:
+        self.app.dependency_overrides.pop(self._current_user, None)
+        self.app.dependency_overrides.pop(self._current_session_id, None)
+        return self.client
+
+    def close(self) -> None:
+        self.client.close()
+        self.app.dependency_overrides.clear()

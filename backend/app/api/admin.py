@@ -31,6 +31,7 @@ from app.api.schemas import (
     LibraryFolderOut, LibraryFoldersIn, LibraryFoldersLibraryOut, LibraryFoldersOut,
     MergeArtistIn, MergePreviewOut, MergeResultOut, UndoMergeResultOut,
     MetadataSettingsOut, NasCredentialIn, NasCredentialOut, NasSaveOut,
+    PodcastIndexKeyIn, PodcastIndexStatusOut,
     ReminderOut, ReminderSnoozeIn, TmdbKeyCheckOut, TmdbKeyIn,
     TmdbKeyStatusOut, UpdateBadgeOut, UpdateRunOut, UpdatesOut,
     ActiveTranscodeOut, AdminSessionOut, AuthEventOut, MatchApply,
@@ -56,9 +57,10 @@ from app.services.arr.radarr import RadarrClient
 from app.services.arr.sonarr import SonarrClient
 from app.config import settings
 from app.services import (
-    android_app, app_settings, arr_settings, library_folders, nas_auth, reminders,
-    remote_access as ra, scan_library, scan_status, server_version, tmdb_key, updates,
+    android_app, app_settings, arr_settings, library_folders, nas_auth, podcastindex_key,
+    reminders, remote_access as ra, scan_library, scan_status, server_version, tmdb_key, updates,
 )
+from app.services.podcasts import search as podcast_search
 from app.services import art as art_service
 from app.services import artist_merge, auth_events
 from app.services.metadata._base import ProviderError
@@ -1841,9 +1843,19 @@ async def upload_update(
 def _metadata_out(db: Session) -> MetadataSettingsOut:
     src = tmdb_key.source(db)
     key = tmdb_key.saved(db) if src == "admin" else (settings.tmdb_api_key or "").strip()
-    return MetadataSettingsOut(tmdb=TmdbKeyStatusOut(
-        configured=src is not None, source=src, masked=tmdb_key.masked(key) if key else None,
-    ))
+    pi_src = podcastindex_key.source(db)
+    pi_key, pi_secret = podcastindex_key.effective(db)
+    return MetadataSettingsOut(
+        tmdb=TmdbKeyStatusOut(
+            configured=src is not None, source=src, masked=tmdb_key.masked(key) if key else None,
+        ),
+        # The secret is never put in a response: only whether it is set.
+        podcastindex=PodcastIndexStatusOut(
+            configured=pi_src is not None, source=pi_src,
+            key_masked=podcastindex_key.masked(pi_key) if pi_key else None,
+            secret_set=bool(pi_secret),
+        ),
+    )
 
 
 @router.get("/metadata", response_model=MetadataSettingsOut)
@@ -1900,6 +1912,50 @@ def delete_tmdb_key(
     """Remove the saved key. TMDB_API_KEY in .env (from Setup) applies again
     if it is set; otherwise TMDB is off."""
     tmdb_key.clear(db)
+    db.commit()
+    return _metadata_out(db)
+
+
+@router.post("/metadata/podcastindex/test", response_model=TmdbKeyCheckOut)
+def test_podcastindex_key(
+    body: PodcastIndexKeyIn,
+    _admin: Annotated[User, Depends(require_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> TmdbKeyCheckOut:
+    """Run one search with a key and secret, without saving them. Blank fields
+    test the pair that is in use now."""
+    key, secret = body.key.strip(), body.secret.strip()
+    if not key and not secret:
+        key, secret = podcastindex_key.effective(db)
+    ok, message = podcast_search.check_credentials(key, secret)
+    return TmdbKeyCheckOut(ok=ok, message=message)
+
+
+@router.put("/metadata/podcastindex", response_model=MetadataSettingsOut)
+def put_podcastindex_key(
+    body: PodcastIndexKeyIn,
+    _admin: Annotated[User, Depends(require_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> MetadataSettingsOut:
+    """Check the pair with Podcast Index (one search), then save it. It takes
+    effect at once, without a restart, and wins over `.env`."""
+    ok, message = podcast_search.check_credentials(body.key, body.secret)
+    if not ok:
+        raise HTTPException(status_code=400, detail=message)
+    podcastindex_key.save(db, body.key, body.secret)
+    db.commit()
+    log.info("podcast index key saved from the admin page")
+    return _metadata_out(db)
+
+
+@router.delete("/metadata/podcastindex", response_model=MetadataSettingsOut)
+def delete_podcastindex_key(
+    _admin: Annotated[User, Depends(require_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> MetadataSettingsOut:
+    """Remove the saved pair. PODCASTINDEX_API_KEY / _SECRET in .env apply again
+    if set; otherwise search uses iTunes."""
+    podcastindex_key.clear(db)
     db.commit()
     return _metadata_out(db)
 

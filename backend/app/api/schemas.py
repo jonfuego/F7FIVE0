@@ -1185,8 +1185,25 @@ class TmdbKeyStatusOut(BaseModel):
     masked: Optional[str] = None
 
 
+class PodcastIndexStatusOut(BaseModel):
+    """The Podcast Index pair, for Admin. The secret is never sent, only
+    whether one is set."""
+    configured: bool
+    # "admin": saved from the Admin page; "env": PODCASTINDEX_API_KEY /
+    # PODCASTINDEX_API_SECRET in .env; None: not set.
+    source: Optional[str] = None
+    key_masked: Optional[str] = None
+    secret_set: bool = False
+
+
 class MetadataSettingsOut(BaseModel):
     tmdb: TmdbKeyStatusOut
+    podcastindex: PodcastIndexStatusOut
+
+
+class PodcastIndexKeyIn(BaseModel):
+    key: str = ""
+    secret: str = ""
 
 
 class TmdbKeyIn(BaseModel):
@@ -1235,3 +1252,18 @@ class ServerTimeOut(BaseModel):
 
     unix_ms: int
     unix_sec: float
+
+
+# ---- Podcasts -----------------------------------------------------------------
+class PodcastSearchResultOut(BaseModel):
+    title: str
+    author: str = ""
+    art_url: Optional[str] = None
+    feed_url: str
+    provider: str
+
+
+class PodcastSearchOut(BaseModel):
+    # "podcastindex" when a key is set, else "itunes".
+    provider: str
+    results: list[PodcastSearchResultOut]
