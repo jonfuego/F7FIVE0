@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from app.api.deps import current_user, get_db, require_admin
+from app.api.deps import current_user, evict_session_caches, get_db, require_admin
 from app.services import auth_events, login_throttle
 from app.api.schemas import (
     LoginRequest, LogoutRequest, PasswordChangeRequest, PasswordResetRequest,
@@ -52,17 +52,28 @@ def _as_utc(dt: Optional[datetime]) -> Optional[datetime]:
         return None
     return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
 
+def _revoke_active_sessions(db: Session, user_id: uuid.UUID, now: datetime) -> list[uuid.UUID]:
+    """Explicitly revoke every active session of `user_id` (rotated_at stays
+    null, so access tokens and signed URLs die at once). Returns the ids; the
+    caller commits and then evicts them from the session cache with
+    `evict_session_caches`."""
+    return list(db.execute(
+        update(UserSession)
+        .where(UserSession.user_id == user_id, UserSession.revoked_at.is_(None))
+        .values(revoked_at=now)
+        .returning(UserSession.id)
+    ).scalars())
+
+
 def _reuse_detected(
     db: Session, *, user_id: uuid.UUID, now: datetime, request: Request,
 ) -> None:
     """A refresh token that must not be accepted: revoke every active session
     for the user, record it and answer 401. Always raises."""
-    db.query(UserSession).filter(
-        UserSession.user_id == user_id,
-        UserSession.revoked_at.is_(None),
-    ).update({"revoked_at": now})
+    revoked = _revoke_active_sessions(db, user_id, now)
     _log_auth_event(db, user_id=user_id, event="refresh_reuse_detected", request=request)
     db.commit()
+    evict_session_caches(revoked)
     raise HTTPException(status_code=401, detail="refresh_token_revoked")
 
 
@@ -271,12 +282,14 @@ def refresh(
         _log_auth_event(db, user_id=session.user_id,
                         event="refresh_expired", request=request)
         db.commit()
+        evict_session_caches([session.id])
         raise HTTPException(status_code=401, detail="refresh_token_expired")
 
     user = db.get(User, session.user_id)
     if user is None or not user.is_active:
         session.revoked_at = now
         db.commit()
+        evict_session_caches([session.id])
         raise HTTPException(status_code=401, detail="inactive_or_unknown_user")
 
     # Rotate: revoke current session, issue a new one. Preserve the original
@@ -320,6 +333,7 @@ def logout(
     db: Annotated[Session, Depends(get_db)],
 ) -> None:
     now = datetime.now(timezone.utc)
+    revoked: list[uuid.UUID] = []
     if body.refresh_token:
         token_hash = hash_refresh_token(body.refresh_token)
         session = db.scalar(
@@ -330,14 +344,15 @@ def logout(
         )
         if session and session.revoked_at is None:
             session.revoked_at = now
+        if session:
+            revoked.append(session.id)
         _log_auth_event(db, user_id=user.id, event="logout", request=request)
     else:
-        db.query(UserSession).filter(
-            UserSession.user_id == user.id,
-            UserSession.revoked_at.is_(None),
-        ).update({"revoked_at": now})
+        revoked = _revoke_active_sessions(db, user.id, now)
         _log_auth_event(db, user_id=user.id, event="logout_all", request=request)
     db.commit()
+    # Logout kills the access token on its next request, not after the cache TTL.
+    evict_session_caches(revoked)
 
 
 # ---------------------------------------------------------------------------
@@ -388,13 +403,12 @@ def change_my_password(
     user.password_hash = hash_password(body.new_password)
     # Revoke all outstanding sessions. The client will get a 401 on its next
     # request and the refresh flow will fail too, forcing a fresh login.
-    # This is intentional: password change invalidates every device.
-    db.query(UserSession).filter(
-        UserSession.user_id == user.id,
-        UserSession.revoked_at.is_(None),
-    ).update({"revoked_at": datetime.now(timezone.utc)})
+    # This is intentional: password change invalidates every device, and the
+    # access tokens on them stop working on their next request.
+    revoked = _revoke_active_sessions(db, user.id, datetime.now(timezone.utc))
     _log_auth_event(db, user_id=user.id, event="password_changed", request=request)
     db.commit()
+    evict_session_caches(revoked)
 
 
 # ---------------------------------------------------------------------------
@@ -455,6 +469,7 @@ def update_user(
         raise HTTPException(status_code=404, detail="user_not_found")
 
     changes: list[str] = []
+    disabled_sessions: list[uuid.UUID] = []
 
     if body.display_name is not None:
         name = body.display_name.strip()
@@ -488,10 +503,8 @@ def update_user(
         # sessions so any open tab can't keep replaying its cookie. Re-enable
         # does not re-issue anything; the user just logs in again.
         if not body.is_active:
-            db.query(UserSession).filter(
-                UserSession.user_id == target.id,
-                UserSession.revoked_at.is_(None),
-            ).update({"revoked_at": datetime.now(timezone.utc)})
+            disabled_sessions = _revoke_active_sessions(
+                db, target.id, datetime.now(timezone.utc))
 
     if changes:
         _log_auth_event(
@@ -500,6 +513,8 @@ def update_user(
             request=request,
         )
     db.commit()
+    # A disabled user's open tabs and phones lose access on their next request.
+    evict_session_caches(disabled_sessions)
     db.refresh(target)
     return target
 

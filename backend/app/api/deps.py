@@ -14,12 +14,17 @@ from app.models.user import Session as UserSession, User, UserRole
 from app.services.security import decode_access_token
 
 
-# Grace window after a session's revoked_at before its access tokens stop
-# working. Normal refresh rotation revokes the old session the instant it
-# issues the new one; an access token already in flight (or the refresh
-# request itself) would otherwise 401 in that race. 120s is comfortably
-# longer than any single request and far shorter than the 15-minute access
-# TTL, so a genuinely revoked token still dies fast.
+# Grace window after a session was revoked BY ROTATION before its access tokens
+# stop working. Normal refresh rotation revokes the old session the instant it
+# issues the new one (revoked_at AND rotated_at); an access token already in
+# flight (or the refresh request itself) would otherwise 401 in that race. 120s
+# is comfortably longer than any single request and far shorter than the
+# 15-minute access TTL.
+#
+# The grace applies ONLY when rotated_at is set. An explicit revoke (logout,
+# logout-all, password change, admin revoke or disable, refresh-reuse detection)
+# leaves rotated_at null and rejects the next request at once, the same rule
+# signed media URLs follow (app/services/signed_urls.py).
 _REVOCATION_GRACE = timedelta(seconds=120)
 
 # In-process micro-cache for the session-revocation lookup. A library grid
@@ -36,24 +41,43 @@ _REVOCATION_GRACE = timedelta(seconds=120)
 # check was meant to shorten. A longer TTL needs a deliberate security
 # decision, not a drive-by change here.
 #
-# Entries are (revoked_at, expires_at, user_id, cached_at). Sync dependencies
-# run across threadpool threads; dict get/set are atomic under the GIL, and the
-# worst case of a race is a redundant DB read or a <=10s-stale entry.
+# Entries are (revoked_at, rotated_at, expires_at, user_id, cached_at). Sync
+# dependencies run across threadpool threads; dict get/set are atomic under the
+# GIL, and the worst case of a race is a redundant DB read or a <=10s-stale
+# entry.
+#
+# Every path that revokes a session evicts it after its commit (logout,
+# logout-all, password change, refresh-reuse, admin revoke and disable, the
+# self-service session endpoints), so an explicit revoke is not held up by the
+# TTL. Only a session revoked by rotation relies on the cache TTL plus the
+# grace window above.
 _SESSION_CACHE_TTL = timedelta(seconds=10)
 _session_cache: dict[
     uuid.UUID,
-    tuple[Optional[datetime], datetime, uuid.UUID, datetime],
+    tuple[Optional[datetime], Optional[datetime], datetime, uuid.UUID, datetime],
 ] = {}
 
 
 def evict_session_cache(session_id: uuid.UUID) -> None:
-    """Drop a session's cached revocation state.
-
-    Called from the admin revoke path so a manual revoke takes effect
-    immediately instead of waiting out the TTL. The 10-second TTL bounds the
-    damage even if this is never called.
-    """
+    """Drop a session's cached revocation state so a revoke takes effect on the
+    next request instead of waiting out the TTL. Call it after the commit that
+    revoked the session (an earlier call lets a concurrent request re-cache the
+    old state). The 10-second TTL bounds the damage if it is ever missed."""
     _session_cache.pop(session_id, None)
+
+
+def evict_session_caches(session_ids) -> None:
+    """`evict_session_cache` for every id in `session_ids`."""
+    for sid in session_ids:
+        _session_cache.pop(sid, None)
+
+
+def _utc(dt: Optional[datetime]) -> Optional[datetime]:
+    """Stored session timestamps as UTC-aware (SQLite in tests hands back naive
+    values; PostgreSQL hands back aware ones)."""
+    if dt is None:
+        return None
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
 
 
 def get_bearer_token(
@@ -86,10 +110,10 @@ def current_user(
     except (KeyError, ValueError):
         raise HTTPException(status_code=401, detail="invalid_token")
 
-    # Bind the token to its session row. Password change, admin disable, and
-    # refresh-reuse detection all revoke sessions; without this check an
-    # already-issued access token stays valid up to its 15-minute TTL. One
-    # indexed lookup on the PK closes that gap.
+    # Bind the token to its session row. Logout, password change, admin
+    # disable, and refresh-reuse detection all revoke sessions; without this
+    # check an already-issued access token stays valid up to its 15-minute TTL.
+    # One indexed lookup on the PK closes that gap.
     try:
         session_id = uuid.UUID(payload["sid"])
     except (KeyError, ValueError):
@@ -97,22 +121,26 @@ def current_user(
 
     now = datetime.now(timezone.utc)
     cached = _session_cache.get(session_id)
-    if cached is not None and now - cached[3] < _SESSION_CACHE_TTL:
-        revoked_at, expires_at, sess_user_id, _ = cached
+    if cached is not None and now - cached[4] < _SESSION_CACHE_TTL:
+        revoked_at, rotated_at, expires_at, sess_user_id, _ = cached
     else:
         session = db.get(UserSession, session_id)
         if session is None or session.user_id != user_id:
             _session_cache.pop(session_id, None)
             raise HTTPException(status_code=401, detail="session_revoked")
-        revoked_at = session.revoked_at
-        expires_at = session.expires_at
+        revoked_at = _utc(session.revoked_at)
+        rotated_at = _utc(session.rotated_at)
+        expires_at = _utc(session.expires_at)
         sess_user_id = session.user_id
-        _session_cache[session_id] = (revoked_at, expires_at, sess_user_id, now)
+        _session_cache[session_id] = (revoked_at, rotated_at, expires_at, sess_user_id, now)
 
     if sess_user_id != user_id:
         raise HTTPException(status_code=401, detail="session_revoked")
-    if revoked_at is not None and now > revoked_at + _REVOCATION_GRACE:
-        raise HTTPException(status_code=401, detail="session_revoked")
+    if revoked_at is not None:
+        # An explicit revoke (no rotated_at) rejects at once. Only a session
+        # revoked by rotation keeps working for the short grace window.
+        if rotated_at is None or now > revoked_at + _REVOCATION_GRACE:
+            raise HTTPException(status_code=401, detail="session_revoked")
     if expires_at <= now:
         raise HTTPException(status_code=401, detail="session_expired")
 
