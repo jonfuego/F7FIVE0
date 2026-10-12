@@ -234,9 +234,9 @@ def revoke_session(
     db: Annotated[Session, Depends(get_db)],
 ) -> None:
     """Revoke one session by id. Idempotent on an already-revoked row;
-    404 only when the id is unknown. The revoked session's access tokens
-    stop working once the deps.current_user grace window elapses, and its
-    refresh token can no longer rotate."""
+    404 only when the id is unknown. The revoked session's access tokens stop
+    working on their next request (an explicit revoke has no grace window; see
+    deps.current_user), and its refresh token can no longer rotate."""
     session = db.get(UserSession, session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="session_not_found")
