@@ -57,7 +57,12 @@ INSTALL.md for the operator view.
   new playback or a cast handoff calls `/api/stream/start` again and binds to
   the then-current session. When changing any signer, keep `sid` in both the
   HMAC payload and the query, and thread it through `_signed_query` so HLS
-  sub-fetches stay bound.
+  sub-fetches stay bound. The 120 s access-token grace in
+  `api/deps.py::current_user` follows the same rule: it applies only to a session
+  revoked by rotation (`rotated_at` set). Logout, logout-all, password change,
+  admin revoke or disable and refresh-reuse detection reject the next request at
+  once, and each of them evicts the revoked sessions from the session cache after
+  its commit (`evict_session_caches`). The cache entry carries `rotated_at`.
 - Stream roots fail closed (SEC-P0-4). The gateway derives its allowed roots
   from the active library-folder configuration (the `libraries` table, else
   `LIBRARY_ROOT_*`) plus any `STREAM_ALLOWED_ROOTS`, and rejects any media
@@ -65,7 +70,17 @@ INSTALL.md for the operator view.
   no roots configured it serves nothing; there is no "empty means allow
   everything" path. The only bypass is `STREAM_UNSAFE_ALLOW_ANY_PATH` (off by
   default, never written by Setup, for local dev only). Setup does not need to
-  write `STREAM_ALLOWED_ROOTS`; the library folders supply the roots.
+  write `STREAM_ALLOWED_ROOTS`; the library folders supply the roots. The gateway
+  is not the only reader of media paths: every other read, probe, extract or byte
+  response (API download, streams, subtitles, stream start, lyrics and its `.lrc`
+  sidecar, audio and marker analysis, podcast chapters) goes through the one
+  helper `app/services/media_paths.py` (`resolve_contained_media_path`, which
+  translates the stored path with `path_map` and applies the same roots, and
+  `is_contained`; `stream.py` uses the same `allowed_roots` and `contain`). Never
+  call `path_map.translate(mf.path)` and read the result. An outside path answers
+  403 `path_outside_library_roots`. The *arr sync checks a path reported by
+  Radarr, Sonarr or Lidarr before the first probe, never probes or stores a path
+  outside the roots, and counts it in `SyncStats.files_refused`.
 - HLS playlists are rewritten so every URI carries the signed query.
 - Tokens never reach the browser. Browser calls go through the Next BFF
   routes (`/api/session|library|stream|admin|art|requests/*`).
@@ -252,10 +267,19 @@ INSTALL.md for the operator view.
   `podcast_episode` media_kind values; downgrade leaves them, PostgreSQL cannot
   drop an enum value). Every outbound podcast fetch (feed, chapters JSON,
   enclosure download, enclosure relay, show art) goes through
-  `services/net_guard.py`, which also holds the art SSRF check: it resolves the
-  host, refuses loopback, private, link-local, reserved, unspecified and multicast
-  addresses on the first request and on every redirect hop (at most
-  `MAX_REDIRECTS` = 5), reads bodies as a stream and stops at the caller's cap
+  `services/net_guard.py`, which also holds the art SSRF check (`art.fetch_url_bytes`
+  uses its `open_stream` too, with no loop of its own): on the first request and on
+  every redirect hop (at most `MAX_REDIRECTS` = 5) it resolves the host once,
+  refuses every address that is not globally routable (`not is_global`, so
+  loopback, private, link-local, reserved, unspecified, multicast and the CGNAT /
+  Tailscale range 100.64.0.0/10 are all out; an IPv4-mapped IPv6 address is judged
+  as the IPv4 address inside it) and then dials only those checked addresses
+  through a pinned httpcore backend, so a rebinding name cannot change where the
+  connection goes. The URL, the Host header and the TLS server name stay on the
+  hostname, so certificate checks are unchanged. Guarded clients set
+  `trust_env=False`, so a proxy in the service environment cannot bypass the
+  check. `_transport_override` still replaces the network in tests, behind the
+  address check. It reads bodies as a stream and stops at the caller's cap
   (feed 20 MB, chapters 2 MB, OPML upload 1 MB, search answer 2 MB), uses 30 s
   connect and read timeouts and the User-Agent `F7FIVE0/<version> (+project URL)`.
   Never fetch a feed-supplied URL any other way. Feeds are parsed by feedparser,
@@ -408,6 +432,32 @@ INSTALL.md for the operator view.
 - Config comes from `.env` at the install root via pydantic-settings. New
   settings need a default, an `.env.example` entry, and (if setup should
   write it) a line in `install.ps1`.
+- Signing secrets. In production (`ENVIRONMENT=production`) `config.py` refuses to
+  start when `JWT_SECRET` or `STREAM_HMAC_SECRET` is empty, contains `CHANGE_ME`,
+  is under 32 characters, or equals the other one (`secret_problems`; the message
+  says how to make one and never prints the value). Development and tests only
+  warn. `.env.example` ships both blank with the generate command. Setup fills a
+  blank or `CHANGE_ME` value in an existing `.env` (`Merge-EnvFile` fill-when-blank
+  list: `ARR_WEBHOOK_SECRET`, `JWT_SECRET`, `STREAM_HMAC_SECRET`), never changes a
+  real one, and warns about a weak real one (`Get-EnvSecretProblems`).
+- Single-use auth transitions are conditional updates, never read-then-write:
+  refresh rotation claims the session with `UPDATE sessions ... WHERE revoked_at IS
+  NULL RETURNING id`, the grace path with `WHERE grace_used = false`, and a WebAuthn
+  challenge with `WHERE consumed_at IS NULL`. The loser of a race takes the reuse
+  path (every session revoked, 401) and never mints a second successor.
+  `tests/test_pg_concurrency.py` runs real concurrent requests and is opt-in:
+  set `F7FIVE0_PG_TEST_URL` to a scratch PostgreSQL database at alembic head (never
+  the live one). Run it when touching these paths; SQLite cannot show a race.
+- Login throttle (`services/login_throttle.py`): `Retry-After` is the real time
+  until enough of the oldest failures in each blocked dimension leave the 15-minute
+  window, so waiting it out and signing in works. A blocked attempt is not
+  recorded, so hammering never pushes the time later. Check-and-record is
+  serialized per username with `pg_advisory_xact_lock` on PostgreSQL (`lock_username`,
+  no-op on SQLite), for password and passkey sign-in. The web BFF
+  (`/api/session/login`, passkey verify) forwards `Retry-After`; the helpers
+  `frontend/lib/login-errors.ts` and `mobile/src/api/throttle.ts` turn it into
+  "Too many attempts. Try again in N minutes." (the web page counts down, the phone
+  maps 429 to `LoginThrottledError`). The raw `too_many_attempts` code is never shown.
 - Backend dependency lock (SEC-P0-1): `backend/requirements.txt` holds loose
   direct ranges; `backend/requirements.lock` is the exact, hash-pinned
   resolution CI and the installer consume with `pip install --require-hashes`.
@@ -425,6 +475,17 @@ INSTALL.md for the operator view.
   `backend/pip-audit-exceptions.txt`, or CI fails. Every `Image.open` in
   `backend/app` must pass an explicit `formats=` allowlist so Pillow never
   selects a parser outside JPEG/PNG/WEBP.
+- npm audit gate. `scripts/npm_audit_gate.mjs <frontend|mobile>` runs
+  `npm audit --omit=dev --json` and fails CI (both the web and the mobile job, after
+  `npm ci`) on any high or critical advisory not listed, unexpired, in
+  `frontend/npm-audit-exceptions.json` or `mobile/npm-audit-exceptions.json`. An
+  entry has an advisory id (or a package), a reason, a scope (`runtime` = ships in
+  the app, `build` = tooling on the build machine) and an expiry on or before
+  2027-01-06. Expo's build tools (Metro, the Expo CLI, Jest) are in `dependencies`,
+  so their advisories sit in the mobile file as `build` exceptions; they retire with
+  the Expo SDK upgrade. Never take npm's suggested Expo downgrade, and an `overrides`
+  entry must be proven with `npx expo export --platform android` (an `image-size`
+  2.x override broke the Metro bundle).
 - Pinned installer downloads (SEC-P0-2): every file Setup fetches by a direct
   URL is pinned in `installer/downloads.manifest.psd1` to an exact version, an
   immutable URL (never a "latest" or rolling URL), and its SHA-256. Entries now:
@@ -551,6 +612,14 @@ INSTALL.md for the operator view.
   `/api/client/android-app*`); the app reads it back with
   `mobile/modules/f7five0-stamp`. Pair id 0x46374635 is fixed: installed apps
   look for it. `/download/android` (web) only redirects to a signed link.
+- Server addresses in the app (`mobile/src/lib/serverUrl.ts`, pure and unit tested):
+  a bare address defaults to `http` only for localhost and loopback, RFC 1918,
+  link-local 169.254/16, CGNAT 100.64/10 (Tailscale), `.local` and single-label
+  names (`isPrivateHost`); everything else, a public IPv4 address included,
+  defaults to `https`. An explicit `http://` to a public host asks for confirmation
+  on the sign-in screen before the address is saved or a password is sent
+  (`isPublicCleartext`, `cleartextWarning`). Stamped addresses keep the scheme they
+  carry.
 - Saved library views (which Music browse tab, movie genre and sort, TV
   filter, Music Videos order, Mixes picker values; on the app the hub chips,
   sort/filter and genre) live on the server, per user, in `user_view_prefs`:
