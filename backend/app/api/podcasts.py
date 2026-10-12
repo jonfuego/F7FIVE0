@@ -17,17 +17,20 @@ import uuid
 from datetime import datetime, timezone
 from typing import Annotated, Iterable, Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile
+from urllib.parse import parse_qs, urlsplit
+
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Response, UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app import scheduler
-from app.api.deps import current_user, get_db
+from app.api.deps import current_session_id, current_user, get_db
+from app.api.stream import _base_url, _signed_art_url
 from app.api.schemas import (
     PodcastChapterOut, PodcastDetailOut, PodcastEpisodeOut, PodcastHomeOut, PodcastOpmlResultOut, PodcastOut,
     PodcastProgressIn, PodcastProgressOut, PodcastSearchOut, PodcastSearchResultOut,
-    PodcastSubscribeIn, PodcastSubscriptionOut, PodcastSubscriptionPatchIn,
+    PodcastStreamOut, PodcastSubscribeIn, PodcastSubscriptionOut, PodcastSubscriptionPatchIn,
 )
 from app.models.art import ENTITY_PODCAST, ROLE_COVER
 from app.models.media_file import MediaFile, ScanState
@@ -37,6 +40,7 @@ from app.models.podcast import (
 from app.models.user import User
 from app.services import longform, net_guard
 from app.services.art import resolve_art_batch
+from app.services.security import build_signed_podcast_url
 from app.services.podcasts import chapters as chapters_service
 from app.services.podcasts import media_types, opml
 from app.services.podcasts import refresh as refresh_service
@@ -425,6 +429,46 @@ def mark_unplayed(
     row.updated_at = _now()
     db.commit()
     return _progress_out(row)
+
+
+# ---------------------------------------------------------------------------
+# Playing: a signed URL on the stream gateway
+# ---------------------------------------------------------------------------
+@router.post("/episodes/{id}/stream", response_model=PodcastStreamOut)
+def start_episode_stream(
+    id: uuid.UUID,
+    request: Request,
+    user: Annotated[User, Depends(current_user)],
+    session_id: Annotated[uuid.UUID, Depends(current_session_id)],
+    db: Annotated[Session, Depends(get_db)],
+) -> PodcastStreamOut:
+    """A signed, session-bound URL for `/stream/podcast/{id}`, plus what the
+    player needs to start: title, length, art and where the caller left off.
+    The gateway plays the file from the server when there is one and otherwise
+    relays the publisher enclosure; the browser never talks to the publisher.
+    A video enclosure is listed but not played (422)."""
+    ep = _get_episode(db, id)
+    pod = db.get(Podcast, ep.podcast_id)
+    mf = db.get(MediaFile, ep.media_file_id) if ep.media_file_id else None
+    has_file = mf is not None and mf.scan_state == ScanState.ready
+    if not has_file:
+        if not ep.enclosure_url:
+            raise HTTPException(status_code=404, detail="nothing_to_play")
+        if media_types.is_video_type(ep.enclosure_type):
+            raise HTTPException(status_code=422, detail="video_not_supported")
+    url = build_signed_podcast_url(_base_url(request), ep.id, user.id, session_id)
+    exp = int(parse_qs(urlsplit(url).query)["exp"][0])
+    row = db.get(PodcastEpisodeProgress, (user.id, ep.id))
+    resume = 0 if row is None or row.played_at is not None else int(row.position_sec or 0)
+    cover = _art_map(db, [ep.podcast_id]).get(ep.podcast_id)
+    return PodcastStreamOut(
+        episode_id=ep.id, url=url, expires_at=datetime.fromtimestamp(exp, tz=timezone.utc),
+        title=ep.title, podcast_title=pod.title if pod else "", duration_sec=ep.duration_sec,
+        container=mf.container if has_file and mf.container else media_types.ext_for(ep.enclosure_type, ep.enclosure_url),
+        source="server_file" if has_file else "publisher",
+        cover_path=cover, art_url=_signed_art_url(request, user.id, session_id, cover),
+        position_sec=resume,
+    )
 
 
 # ---------------------------------------------------------------------------

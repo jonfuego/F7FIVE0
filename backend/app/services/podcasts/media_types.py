@@ -69,7 +69,7 @@ def is_audio_response(content_type: Optional[str], url: Optional[str]) -> bool:
     ctype = main_type(content_type)
     if ctype.startswith("audio/"):
         return True
-    if ctype in ("application/octet-stream", "binary/octet-stream"):
+    if not ctype or ctype in ("application/octet-stream", "binary/octet-stream"):
         return url_ext(url) in AUDIO_EXTS
     return False
 

@@ -348,6 +348,23 @@ def verify_app_download_params(abi: str, uid: str, exp: int, sig: str) -> bool:
     return hmac.compare_digest(sig, _app_download_sig(abi, uid, exp))
 
 
+def build_signed_podcast_url(base: str, episode_id: uuid.UUID, user_id: uuid.UUID,
+                             session_id: uuid.UUID,
+                             ttl_hours: Optional[int] = None) -> str:
+    """Absolute signed URL for a podcast episode on the stream gateway.
+
+    Returns `{base}/stream/podcast/{id}?uid=...&sid=...&exp=...&sig=...`. The
+    signature is bound to the episode id, the action "podcast" and the issuing
+    session, like the subtitle and download URLs; the gateway takes only the
+    episode id from the path, never a publisher URL.
+    """
+    params = sign_media_url_params(
+        episode_id, "podcast", "", user_id, session_id, ttl_hours=ttl_hours,
+    )
+    root = base.rstrip("/")
+    return f"{root}/stream/podcast/{episode_id}?{urlencode(params)}"
+
+
 def build_signed_subtitle_url(base: str, media_file_id: uuid.UUID,
                               stream_index: int, user_id: uuid.UUID,
                               session_id: uuid.UUID,

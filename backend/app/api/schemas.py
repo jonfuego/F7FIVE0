@@ -1377,3 +1377,41 @@ class PodcastChapterOut(BaseModel):
     img: Optional[str] = None
     url: Optional[str] = None
 
+
+class PodcastStreamOut(BaseModel):
+    """Returned by POST /api/podcasts/episodes/{id}/stream: a signed URL on the
+    stream gateway (`/stream/podcast/{id}`), bound to the caller's session."""
+    episode_id: uuid.UUID
+    url: str
+    expires_at: datetime
+    title: str
+    podcast_title: str
+    duration_sec: Optional[int] = None
+    container: Optional[str] = None
+    # "server_file" (the file is on this server) or "publisher" (relayed).
+    source: str
+    cover_path: Optional[str] = None
+    # Absolute, signed art URL for header-less loaders (the Android notification).
+    art_url: Optional[str] = None
+    # Where to resume for the caller: 0 for a new or played episode.
+    position_sec: int = 0
+
+
+class PodcastStreamOut(BaseModel):
+    """Returned by POST /api/podcasts/episodes/{id}/stream: a signed URL on the
+    stream gateway (`/stream/podcast/{id}`), bound to the caller's session."""
+    episode_id: uuid.UUID
+    url: str
+    expires_at: datetime
+    title: str
+    podcast_title: str
+    duration_sec: Optional[int] = None
+    container: Optional[str] = None
+    # "server_file" (the file is on this server) or "publisher" (relayed).
+    source: str
+    cover_path: Optional[str] = None
+    # Absolute, signed art URL for header-less loaders (the Android notification).
+    art_url: Optional[str] = None
+    # Where to resume for the caller: 0 for a new or played episode.
+    position_sec: int = 0
+

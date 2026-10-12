@@ -11,7 +11,7 @@ def test_get_and_put_library_folders(client, tmp_path, monkeypatch):
     present.mkdir()
     r = client.get("/api/admin/library-folders")
     assert r.status_code == 200
-    assert {lib["kind"] for lib in r.json()["libraries"]} == {"movies", "tv", "music", "music_videos"}
+    assert {lib["kind"] for lib in r.json()["libraries"]} == {"movies", "tv", "music", "music_videos", "podcasts"}
 
     r = client.put("/api/admin/library-folders", json={"folders": {
         "movies": [str(present), str(tmp_path / "asleep")],
@@ -30,5 +30,5 @@ def test_put_library_folders_rejects_bad_input(client, tmp_path, monkeypatch):
     monkeypatch.setattr(scheduler, "trigger_folder_scan_now", lambda: None)
     r = client.put("/api/admin/library-folders", json={"folders": {"movies": ["relative"]}})
     assert r.status_code == 400 and "full path" in r.json()["detail"]
-    r = client.put("/api/admin/library-folders", json={"folders": {"podcasts": [str(tmp_path)]}})
+    r = client.put("/api/admin/library-folders", json={"folders": {"games": [str(tmp_path)]}})
     assert r.status_code == 400
