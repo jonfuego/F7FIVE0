@@ -1,12 +1,21 @@
 <p align="center">
-  <img src="design/logos/f7five0-app-icon.svg" width="112" alt="F7FIVE0">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/readme/f7five0_banner-dark_v1.svg">
+    <img src="docs/readme/f7five0_banner-light_v1.svg" width="100%" alt="F7FIVE0">
+  </picture>
 </p>
-
-<h1 align="center">F7FIVE0</h1>
 
 <p align="center">
   <b>Your movies, TV, music, music videos, and podcasts. Your server. Every screen.</b><br>
   A free, self-hosted media server for Windows.
+</p>
+
+<p align="center">
+  <a href="../../releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/jonfuego/F7FIVE0?style=flat-square&label=release&labelColor=000000&color=9C0404"></a>
+  <a href="../../releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/jonfuego/F7FIVE0/total?style=flat-square&labelColor=000000&color=333333"></a>
+  <img alt="Windows 10 and 11" src="https://img.shields.io/badge/server-Windows%2010%20%7C%2011-333333?style=flat-square&labelColor=000000">
+  <img alt="Android, Android TV, Android Auto" src="https://img.shields.io/badge/app-Android%20%7C%20TV%20%7C%20Auto-333333?style=flat-square&labelColor=000000">
+  <a href="LICENSE"><img alt="License: Unlicense" src="https://img.shields.io/badge/license-Unlicense-333333?style=flat-square&labelColor=000000"></a>
 </p>
 
 <p align="center">
@@ -24,6 +33,26 @@ phone, and your TV. It's built for one household plus the friends and family
 you invite.
 
 No subscription. No ads. No account with anyone but you.
+
+<!-- Screenshots: drop PNGs into docs/screenshots/ with these names, then remove
+     this comment's opening and closing lines to show the section.
+## Screenshots
+
+<p align="center">
+  <img src="docs/screenshots/web-home.png" width="100%" alt="Home in the web app">
+</p>
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/web-detail.png" alt="A movie's detail page"></td>
+    <td width="50%"><img src="docs/screenshots/tv-home.png" alt="Home on Android TV"></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/phone-home.png" width="260" alt="Home on the phone app"></td>
+    <td align="center"><img src="docs/screenshots/phone-now-playing.png" width="260" alt="Now playing on the phone app"></td>
+  </tr>
+</table>
+-->
 
 ## Quick start
 
@@ -43,19 +72,19 @@ Want to watch away from home? See [Remote access](#remote-access).
 
 ## Features
 
-| | |
+| Feature | What you get |
 |---|---|
-| 🎬 **Movies and TV** | Continue Watching, On Deck, next episode, skip intro and credits |
-| 🎵 **Music** | Gapless playback, loudness leveling, lyrics, artist radio, mixes, a queue that follows you between devices |
-| 📺 **Music videos** | Organized by artist and release |
-| 🎙️ **Podcasts** | Search and follow shows (or import an OPML list), stream, download to the server or your phone, chapters, speed, skip back 15 and forward 30 seconds, and pick up where you left off on any device |
-| ▶️ **Plays anywhere** | Streams files as-is when your device can play them, converts them on the fly when it can't (uses an NVIDIA GPU if you have one) |
-| 🌐 **Web app** | Installs like an app on phones and desktops, with Chromecast |
-| 📱 **Android app** | Phone, Android TV, and Android Auto, with downloads for offline play |
-| 🔒 **Private by design** | You create every account. There's no public sign-up. Passkeys supported. |
-| 🖼️ **Artwork and details** | From your own folders, plus TMDB and MusicBrainz if you want them |
-| 🗄️ **NAS friendly** | Library folders can live on a network share |
-| 🔁 **Radarr, Sonarr, Lidarr** | Optional. Connect them to manage the library and let people request titles |
+| **Movies and TV** | Continue Watching, On Deck, next episode, skip intro and credits |
+| **Music** | Gapless playback, loudness leveling, lyrics, artist radio, mixes, a queue that follows you between devices |
+| **Music videos** | Organized by artist and release |
+| **Podcasts** | Search and follow shows (or import an OPML list), stream, download to the server or your phone, chapters, speed, skip back 15 and forward 30 seconds, and pick up where you left off on any device |
+| **Plays anywhere** | Streams files as-is when your device can play them, converts them on the fly when it can't (uses an NVIDIA GPU if you have one) |
+| **Web app** | Installs like an app on phones and desktops, with Chromecast |
+| **Android app** | Phone, Android TV, and Android Auto, with downloads for offline play |
+| **Private by design** | You create every account. There's no public sign-up. Passkeys supported. |
+| **Artwork and details** | From your own folders, plus TMDB and MusicBrainz if you want them |
+| **NAS friendly** | Library folders can live on a network share |
+| **Radarr, Sonarr, Lidarr** | Optional. Connect them to manage the library and let people request titles |
 
 ## Organizing your media
 
