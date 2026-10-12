@@ -547,3 +547,41 @@ def test_register_malformed_attestation_is_4xx(auth_client, att):
     resp = auth_client.post(
         "/api/auth/passkey/register/verify", json={"credential": credential})
     assert 400 <= resp.status_code < 500, resp.text
+
+
+def test_login_challenge_claim_loses_the_race(anon_client, db_session, user, monkeypatch):
+    """Two submissions of one assertion both pass the unused-challenge check;
+    the conditional UPDATE lets only one through. Here the other request takes
+    the challenge between our read and our claim."""
+    from datetime import datetime, timezone
+
+    from sqlalchemy import update
+
+    _seed_credential(db_session, user, sign_count=0)
+    real_scalar = db_session.scalar
+    taken = {"n": 0}
+
+    def scalar(stmt, *a, **kw):
+        row = real_scalar(stmt, *a, **kw)
+        if isinstance(row, WebAuthnChallenge) and row.consumed_at is None and not taken["n"]:
+            taken["n"] = 1
+            db_session.execute(
+                update(WebAuthnChallenge).where(WebAuthnChallenge.id == row.id)
+                .values(consumed_at=datetime.now(timezone.utc))
+            )
+        return row
+
+    monkeypatch.setattr(db_session, "scalar", scalar)
+    resp, _ = _do_login(anon_client, db_session, monkeypatch, new_sign_count=1)
+    assert taken["n"] == 1
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "challenge_already_used"
+    from app.models.user import Session as UserSession
+    assert db_session.query(UserSession).count() == 0, "no session may be issued"
+
+
+def test_challenge_is_consumed_by_a_conditional_update():
+    import inspect
+
+    src = inspect.getsource(passkeys_module._consume_challenge)
+    assert "consumed_at.is_(None)" in src and ".returning(" in src
