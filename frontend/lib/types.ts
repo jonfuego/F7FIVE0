@@ -406,7 +406,7 @@ export type UpdatesStatus = {
 export type UpdateBadge = { update_available: boolean; latest_version: string | null };
 
 // ---- Library folders (Admin > Library folders) -----------------------------
-export type LibraryFolderKind = "movies" | "tv" | "music" | "music_videos";
+export type LibraryFolderKind = "movies" | "tv" | "music" | "music_videos" | "podcasts";
 
 // Why the server can or can't open a folder. "ok", local-path reasons
 // ("not_found" / "access_denied"), or the NAS reasons for a UNC share.
@@ -471,7 +471,16 @@ export type TmdbKeyStatus = {
   masked: string | null;
 };
 
-export type MetadataSettings = { tmdb: TmdbKeyStatus };
+// Podcast Index (podcast search). The secret never comes back: only whether one
+// is set.
+export type PodcastIndexStatus = {
+  configured: boolean;
+  source: "admin" | "env" | null;
+  key_masked: string | null;
+  secret_set: boolean;
+};
+
+export type MetadataSettings = { tmdb: TmdbKeyStatus; podcastindex: PodcastIndexStatus };
 
 export type TmdbKeyCheck = { ok: boolean; message: string };
 
@@ -667,3 +676,88 @@ export type ArrWebhook = {
   // Addresses the server knows for itself (home network, public).
   base_urls: { label: string; url: string }[];
 };
+
+// ---- Podcasts -----------------------------------------------------------------
+// Descriptions are plain text (the server strips tags): render them as text,
+// never as HTML.
+export type PodcastEpisodeState =
+  | { kind: "new" }
+  | { kind: "in_progress"; position_sec: number }
+  | { kind: "played" };
+
+export type PodcastShow = {
+  id: string;
+  title: string;
+  author: string | null;
+  description: string | null;
+  feed_url: string | null;
+  source: "feed" | "local";
+  art_url: string | null;
+  subscribed: boolean;
+  auto_download: boolean;
+  episode_count: number;
+  files_on_server: number;
+  last_checked_at: string | null;
+  last_error: string | null;
+};
+
+export type PodcastEpisode = {
+  id: string;
+  podcast_id: string;
+  podcast_title: string;
+  art_url: string | null;
+  title: string;
+  description: string | null;
+  published_at: string | null;
+  duration_sec: number | null;
+  season: number | null;
+  episode: number | null;
+  is_video: boolean;
+  has_file: boolean;
+  downloaded_by_f7five0: boolean;
+  container: string | null;
+  has_chapters: boolean;
+  state: PodcastEpisodeState;
+};
+
+export type PodcastHome = {
+  in_progress: PodcastEpisode[];
+  mine: PodcastShow[];
+  on_server: PodcastShow[];
+};
+
+export type PodcastDetail = { podcast: PodcastShow; episodes: PodcastEpisode[]; total: number };
+
+export type PodcastSearchResult = {
+  title: string;
+  author: string;
+  art_url: string | null;
+  feed_url: string;
+  provider: "podcastindex" | "itunes" | string;
+};
+
+export type PodcastSearch = { provider: string; results: PodcastSearchResult[] };
+
+export type PodcastStreamStart = {
+  episode_id: string;
+  url: string;
+  expires_at: string;
+  title: string;
+  podcast_title: string;
+  duration_sec: number | null;
+  container: string | null;
+  source: "server_file" | "publisher";
+  cover_path: string | null;
+  art_url: string | null;
+  position_sec: number;
+};
+
+export type PodcastProgress = {
+  episode_id: string;
+  position_sec: number;
+  duration_sec: number | null;
+  state: PodcastEpisodeState;
+};
+
+export type PodcastOpmlResult = { added: number; already: number; failed: number };
+

@@ -40,6 +40,19 @@ export type LibraryScanCounts = {
   errors?: number;
 };
 
+/** GET /api/admin/podcasts/refresh: the podcast feed refresh. */
+export type PodcastRefreshStatus = {
+  state: "idle" | "running" | string;
+  started_at: string | null;
+  finished_at: string | null;
+  /** Shows to refresh, shows done, new episodes found, shows that failed. */
+  total: number;
+  count: number;
+  added: number;
+  errors: number;
+  last_error: string | null;
+};
+
 /** GET /api/admin/library/scan */
 export type FolderScanStatus = {
   state: "idle" | "running" | string;
@@ -50,7 +63,7 @@ export type FolderScanStatus = {
   scope?: string[] | null;
   libraries: Record<string, LibraryScanCounts>;
   last_error: string | null;
-  /** How many folders each library has (movies, tv, music, music_videos). */
+  /** How many folders each library has (movies, tv, music, music_videos, podcasts). */
   folders?: Record<string, number>;
 };
 

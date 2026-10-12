@@ -7,11 +7,12 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   buildScanRows, scanAllPlan, scanErrors, scansSummary,
-  type ArrApps, type ArrSyncLike, type FolderScanLike, type MusicVideosLike, type ScanInputs, type ScanRow,
+  type ArrApps, type ArrSyncLike, type FolderScanLike, type MusicVideosLike, type PodcastRefreshLike,
+  type ScanInputs, type ScanRow,
 } from "./scans-rows.ts";
 
 const NONE: ArrApps = { radarr: false, sonarr: false, lidarr: false };
-const FOLDERS = { movies: 1, tv: 1, music: 1, music_videos: 1 };
+const FOLDERS = { movies: 1, tv: 1, music: 1, music_videos: 1, podcasts: 1 };
 
 const idleFolder: FolderScanLike = {
   state: "idle", finished_at: null, scope: null, libraries: {}, last_error: null,
@@ -20,11 +21,14 @@ const idleMv: MusicVideosLike = {
   state: "idle", finished_at: null, total: 0, count: 0, added: 0, missing: 0, errors: 0, last_error: null,
 };
 const idleArr: ArrSyncLike = { state: "idle", finished_at: null, current_app: null, apps: {}, last_error: null };
+const idlePodcasts: PodcastRefreshLike = {
+  state: "idle", finished_at: null, total: 0, count: 0, added: 0, errors: 0, last_error: null,
+};
 
 function inputs(over: Partial<ScanInputs> = {}): ScanInputs {
   return {
     apps: NONE, folders: FOLDERS, folder: idleFolder, musicVideos: idleMv, arr: idleArr,
-    now: Date.parse("2026-10-11T12:00:00Z"), ...over,
+    podcastRefresh: idlePodcasts, now: Date.parse("2026-10-11T12:00:00Z"), ...over,
   };
 }
 
@@ -35,14 +39,20 @@ function row(rows: ScanRow[], id: string): ScanRow {
 }
 
 // -- order and which rows exist ----------------------------------------------
-test("row order is Movies, TV, Music, Music videos, *arr sync", () => {
+test("row order is Movies, TV, Music, Music videos, Podcasts, Podcast feeds, *arr sync", () => {
   const rows = buildScanRows(inputs({ apps: { radarr: true, sonarr: true, lidarr: true } }));
-  assert.deepEqual(rows.map((r) => r.id), ["movies", "tv", "music", "music_videos", "arr"]);
-  assert.deepEqual(rows.map((r) => r.label), ["Movies", "TV", "Music", "Music videos", "*arr sync"]);
+  assert.deepEqual(rows.map((r) => r.id), [
+    "movies", "tv", "music", "music_videos", "podcasts", "podcast_feeds", "arr",
+  ]);
+  assert.deepEqual(rows.map((r) => r.label), [
+    "Movies", "TV", "Music", "Music videos", "Podcasts", "Podcast feeds", "*arr sync",
+  ]);
 });
 
 test("the *arr sync row appears only when an app is set", () => {
-  assert.deepEqual(buildScanRows(inputs()).map((r) => r.id), ["movies", "tv", "music", "music_videos"]);
+  assert.deepEqual(buildScanRows(inputs()).map((r) => r.id), [
+    "movies", "tv", "music", "music_videos", "podcasts", "podcast_feeds",
+  ]);
   for (const app of ["radarr", "sonarr", "lidarr"] as const) {
     const rows = buildScanRows(inputs({ apps: { ...NONE, [app]: true } }));
     assert.equal(rows.at(-1)?.id, "arr", `${app} alone shows the *arr sync row`);
@@ -248,7 +258,11 @@ test("Scan all covers exactly the rows that can start", () => {
   assert.deepEqual(plan.libraries, ["movies", "music"]);
   assert.deepEqual(plan.arrApps, []);
   assert.equal(plan.musicVideos, false);
-  assert.deepEqual(plan.rowIds, rows.filter((r) => r.canStart).map((r) => r.id));
+  assert.deepEqual(
+    plan.rowIds,
+    rows.filter((r) => r.canStart && r.id !== "podcast_feeds").map((r) => r.id),
+    "every startable row except Refresh feeds, which has its own button",
+  );
 });
 
 test("Scan all skips rows that are already running", () => {
@@ -264,8 +278,8 @@ test("Scan all skips rows that are already running", () => {
 test("Scan all with Lidarr set starts the Lidarr sync for Music, not the folder scan", () => {
   const rows = buildScanRows(inputs({ apps: { ...NONE, lidarr: true } }));
   const plan = scanAllPlan(rows);
-  assert.deepEqual(plan.rowIds, ["movies", "tv", "music", "music_videos", "arr"]);
-  assert.deepEqual(plan.libraries, ["movies", "tv"], "music is not in the folder scan");
+  assert.deepEqual(plan.rowIds, ["movies", "tv", "music", "music_videos", "podcasts", "arr"]);
+  assert.deepEqual(plan.libraries, ["movies", "tv", "podcasts"], "music is not in the folder scan");
   assert.deepEqual(plan.arrApps, ["lidarr"], "one sync request, no duplicate app");
   assert.equal(plan.musicVideos, true);
 });
@@ -273,7 +287,7 @@ test("Scan all with Lidarr set starts the Lidarr sync for Music, not the folder 
 test("Scan all with every app set starts one sync and the music videos scan only", () => {
   const rows = buildScanRows(inputs({ apps: { radarr: true, sonarr: true, lidarr: true } }));
   const plan = scanAllPlan(rows);
-  assert.deepEqual(plan.libraries, []);
+  assert.deepEqual(plan.libraries, ["podcasts"], "only the podcasts folder scan is left");
   assert.deepEqual(plan.arrApps, ["radarr", "sonarr", "lidarr"]);
   assert.equal(plan.musicVideos, true);
 });
@@ -284,7 +298,7 @@ test("Scan all skips a running *arr sync but still starts the folder rows", () =
     apps: { lidarr: { state: "running", synced: 0, errors: 0 } }, last_error: null,
   };
   const plan = scanAllPlan(buildScanRows(inputs({ apps: { ...NONE, lidarr: true }, arr })));
-  assert.deepEqual(plan.rowIds, ["movies", "tv", "music_videos"]);
+  assert.deepEqual(plan.rowIds, ["movies", "tv", "music_videos", "podcasts"]);
   assert.deepEqual(plan.arrApps, []);
 });
 
@@ -324,3 +338,79 @@ test("errors: each status's last error once, blanks dropped", () => {
   ]);
   assert.deepEqual(scanErrors(inputs()), []);
 });
+
+// -- podcasts ----------------------------------------------------------------------
+test("the Podcasts row is a folder scan of the podcasts library, never an *arr sync", () => {
+  const podcasts = row(buildScanRows(inputs({ apps: { radarr: true, sonarr: true, lidarr: true } })), "podcasts");
+  assert.equal(podcasts.source, "folder scan");
+  assert.deepEqual(podcasts.action, { kind: "folder", library: "podcasts" });
+  assert.equal(podcasts.canStart, true);
+});
+
+test("the Podcasts row is off, with a reason, when there is no podcasts folder", () => {
+  const rows = buildScanRows(inputs({ folders: { movies: 1, tv: 1, music: 1, music_videos: 1, podcasts: 0 } }));
+  const podcasts = row(rows, "podcasts");
+  assert.equal(podcasts.canStart, false);
+  assert.equal(podcasts.disabledReason, "Add a Podcasts folder under Library folders first.");
+});
+
+test("the Podcasts row follows the folder scan: running, counts, errors", () => {
+  const running: FolderScanLike = {
+    state: "running", finished_at: null, scope: ["podcasts"],
+    libraries: { podcasts: { state: "running", total: 40, seen: 10 } }, last_error: null,
+  };
+  const r = row(buildScanRows(inputs({ folder: running })), "podcasts");
+  assert.equal(r.state, "running");
+  assert.equal(r.result, "10 of 40 files");
+  assert.deepEqual(r.progress, { done: 10, total: 40, percent: 25 });
+
+  const done: FolderScanLike = {
+    state: "idle", finished_at: "2026-10-11T11:55:00Z", scope: null,
+    libraries: { podcasts: { state: "done", seen: 12, added: 12 } }, last_error: null,
+  };
+  assert.equal(row(buildScanRows(inputs({ folder: done })), "podcasts").result, "12 files seen, 12 added");
+});
+
+test("the Podcast feeds row refreshes feeds with its own button and says what it found", () => {
+  const never = row(buildScanRows(inputs()), "podcast_feeds");
+  assert.equal(never.source, "feed refresh");
+  assert.deepEqual(never.action, { kind: "podcast_refresh" });
+  assert.equal(never.state, "never");
+  assert.equal(never.result, "Not refreshed yet");
+  assert.equal(never.canStart, true);
+
+  const running = row(buildScanRows(inputs({
+    podcastRefresh: { ...idlePodcasts, state: "running", total: 8, count: 2 },
+  })), "podcast_feeds");
+  assert.equal(running.state, "running");
+  assert.equal(running.result, "2 of 8 shows");
+  assert.deepEqual(running.progress, { done: 2, total: 8, percent: 25 });
+  assert.equal(running.canStart, false);
+  assert.equal(running.disabledReason, "Refreshing now.");
+
+  const done = row(buildScanRows(inputs({
+    podcastRefresh: { ...idlePodcasts, finished_at: "2026-10-11T11:00:00Z", total: 8, count: 8, added: 5, errors: 1 },
+  })), "podcast_feeds");
+  assert.equal(done.state, "error");
+  assert.equal(done.result, "5 new episodes, 1 error");
+  assert.equal(done.when, "Finished 1 hour ago");
+  const one = row(buildScanRows(inputs({
+    podcastRefresh: { ...idlePodcasts, finished_at: "2026-10-11T11:00:00Z", added: 1 },
+  })), "podcast_feeds");
+  assert.equal(one.state, "idle");
+  assert.equal(one.result, "1 new episode");
+});
+
+test("Scan all does not refresh podcast feeds; that has its own button", () => {
+  const plan = scanAllPlan(buildScanRows(inputs()));
+  assert.ok(!plan.rowIds.includes("podcast_feeds" as never));
+  assert.ok(plan.rowIds.includes("podcasts"));
+  assert.ok(plan.libraries.includes("podcasts"));
+});
+
+test("a podcast refresh error shows under the list", () => {
+  assert.deepEqual(scanErrors(inputs({
+    podcastRefresh: { ...idlePodcasts, last_error: "The last scan was interrupted" },
+  })), ["The last scan was interrupted"]);
+});
+

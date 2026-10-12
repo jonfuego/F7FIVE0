@@ -1,5 +1,5 @@
 // Admin > Library folders. Each library (Movies, TV shows, Music, Music
-// videos) can use several source folders. Paths are typed (the browser
+// videos, Podcasts) can use several source folders. Paths are typed (the browser
 // can't browse the server's drives); after saving, the server reports which
 // folders it can open, as the account its services run under, and starts a
 // folder scan. Watching and starting scans lives in Admin > Scans.
@@ -18,6 +18,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { apiGet, apiPut, apiDelete, ApiError } from "@/lib/client-api";
+import { storageSummary, storageWarning, type PodcastStorage } from "@/lib/podcast-storage";
 import type {
   LibraryFolder,
   LibraryFolderKind,
@@ -33,6 +34,7 @@ const HINT: Record<LibraryFolderKind, string> = {
   tv: "Shows merge across folders: seasons on two drives make one show.",
   music: "Artists and albums merge across folders.",
   music_videos: "Artists merge across folders.",
+  podcasts: "One folder per show, one audio file per episode. Downloads go to the first folder that opens.",
 };
 
 // Plain text for each reason the server reports when it can't open a folder.
@@ -61,7 +63,7 @@ function serverOf(path: string): string {
 }
 
 function toDraft(data: LibraryFolders): Draft {
-  const d = { movies: [], tv: [], music: [], music_videos: [] } as Draft;
+  const d = { movies: [], tv: [], music: [], music_videos: [], podcasts: [] } as Draft;
   for (const lib of data.libraries) d[lib.kind] = lib.folders.map((f) => f.path);
   return d;
 }
@@ -376,7 +378,13 @@ export function LibraryFoldersSection({ onSaved }: { onSaved?: () => void }) {
                 <input
                   value={adding[kind] ?? ""}
                   onChange={(e) => setAdding({ ...adding, [kind]: e.target.value })}
-                  placeholder={kind === "movies" ? "D:\\Movies or \\\\nas\\media\\Movies" : "Add a folder"}
+                  placeholder={
+                    kind === "movies"
+                      ? "D:\\Movies or \\\\nas\\media\\Movies"
+                      : kind === "podcasts"
+                        ? "D:\\Podcasts or \\\\nas\\media\\Podcasts"
+                        : "Add a folder"
+                  }
                   className={inputCls}
                   aria-label={`Add a ${lib.label} folder`}
                 />
@@ -384,6 +392,7 @@ export function LibraryFoldersSection({ onSaved }: { onSaved?: () => void }) {
                   Add
                 </button>
               </form>
+              {kind === "podcasts" && saved.podcasts.length > 0 ? <PodcastStorageNote /> : null}
             </div>
           );
         })}
@@ -402,6 +411,36 @@ export function LibraryFoldersSection({ onSaved }: { onSaved?: () => void }) {
         {status ? <span className="text-xs text-neutral-400">{status}</span> : null}
         {nasNotice ? <span className="text-xs text-neutral-400">{nasNotice}</span> : null}
       </div>
+    </div>
+  );
+}
+
+// What podcast downloads use and the room left on each podcasts folder's drive.
+// There is no cap: a warning shows when free space drops below the server's
+// PODCAST_FREE_SPACE_WARN_GB.
+function PodcastStorageNote() {
+  const [storage, setStorage] = useState<PodcastStorage | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    apiGet<PodcastStorage>("/api/admin/podcasts/storage")
+      .then((s) => {
+        if (!cancelled) setStorage(s);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  if (!storage) return null;
+  const warning = storageWarning(storage);
+  return (
+    <div className="mt-2 space-y-1" data-testid="podcast-storage">
+      <p className="text-xs text-neutral-400">{storageSummary(storage)}</p>
+      {warning ? (
+        <p className="text-xs text-amber-400" role="alert">
+          {warning}
+        </p>
+      ) : null}
     </div>
   );
 }
