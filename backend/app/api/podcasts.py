@@ -26,8 +26,8 @@ from app import scheduler
 from app.api.deps import current_user, get_db
 from app.api.schemas import (
     PodcastDetailOut, PodcastEpisodeOut, PodcastHomeOut, PodcastOpmlResultOut, PodcastOut,
-    PodcastSearchOut, PodcastSearchResultOut, PodcastSubscribeIn, PodcastSubscriptionOut,
-    PodcastSubscriptionPatchIn,
+    PodcastProgressIn, PodcastProgressOut, PodcastSearchOut, PodcastSearchResultOut,
+    PodcastSubscribeIn, PodcastSubscriptionOut, PodcastSubscriptionPatchIn,
 )
 from app.models.art import ENTITY_PODCAST, ROLE_COVER
 from app.models.media_file import MediaFile, ScanState
@@ -134,6 +134,13 @@ def _episodes_out(db: Session, user: User, episodes: list[PodcastEpisode]) -> li
             state=_episode_state(progress.get(e.id)),
         ))
     return out
+
+
+def _get_episode(db: Session, episode_id: uuid.UUID) -> PodcastEpisode:
+    ep = db.get(PodcastEpisode, episode_id)
+    if ep is None:
+        raise HTTPException(status_code=404, detail="episode_not_found")
+    return ep
 
 
 def _get_show(db: Session, show_id: uuid.UUID) -> Podcast:
@@ -344,6 +351,79 @@ def import_opml(
     if new_ids:
         scheduler.trigger_podcast_refresh_now(new_ids)
     return PodcastOpmlResultOut(added=added, already=already, failed=failed)
+
+
+# ---------------------------------------------------------------------------
+# Progress and played (per user)
+# ---------------------------------------------------------------------------
+def _progress_out(row: PodcastEpisodeProgress) -> PodcastProgressOut:
+    return PodcastProgressOut(
+        episode_id=row.episode_id, position_sec=row.position_sec,
+        duration_sec=row.duration_sec, state=_episode_state(row),
+    )
+
+
+def _progress_row(db: Session, user: User, ep: PodcastEpisode) -> PodcastEpisodeProgress:
+    row = db.get(PodcastEpisodeProgress, (user.id, ep.id))
+    if row is None:
+        row = PodcastEpisodeProgress(user_id=user.id, episode_id=ep.id, position_sec=0, duration_sec=ep.duration_sec)
+        db.add(row)
+    return row
+
+
+@router.put("/episodes/{id}/progress", response_model=PodcastProgressOut)
+def put_progress(
+    id: uuid.UUID,
+    body: PodcastProgressIn,
+    user: Annotated[User, Depends(current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> PodcastProgressOut:
+    """Save the caller's position. The episode counts as played once the
+    position is within 30 s of the end or past 95 percent, whichever comes
+    first; listening again from earlier makes it in progress again."""
+    ep = _get_episode(db, id)
+    row = _progress_row(db, user, ep)
+    duration = body.duration_sec or ep.duration_sec or row.duration_sec
+    row.position_sec = body.position_sec
+    row.duration_sec = duration
+    if longform.is_played(body.position_sec, duration):
+        row.played_at = row.played_at or _now()
+    else:
+        row.played_at = None
+    row.updated_at = _now()
+    db.commit()
+    return _progress_out(row)
+
+
+@router.post("/episodes/{id}/played", response_model=PodcastProgressOut)
+def mark_played(
+    id: uuid.UUID,
+    user: Annotated[User, Depends(current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> PodcastProgressOut:
+    """Mark the episode played by hand."""
+    ep = _get_episode(db, id)
+    row = _progress_row(db, user, ep)
+    row.played_at = _now()
+    row.updated_at = _now()
+    db.commit()
+    return _progress_out(row)
+
+
+@router.delete("/episodes/{id}/played", response_model=PodcastProgressOut)
+def mark_unplayed(
+    id: uuid.UUID,
+    user: Annotated[User, Depends(current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> PodcastProgressOut:
+    """Mark the episode unplayed by hand: it is new again, from the start."""
+    ep = _get_episode(db, id)
+    row = _progress_row(db, user, ep)
+    row.played_at = None
+    row.position_sec = 0
+    row.updated_at = _now()
+    db.commit()
+    return _progress_out(row)
 
 
 # ---------------------------------------------------------------------------

@@ -1355,3 +1355,17 @@ class PodcastOpmlResultOut(BaseModel):
     added: int
     already: int
     failed: int
+
+
+class PodcastProgressIn(BaseModel):
+    position_sec: int = Field(ge=0, le=7 * 86400)
+    duration_sec: Optional[int] = Field(default=None, ge=0, le=7 * 86400)
+
+
+class PodcastProgressOut(BaseModel):
+    episode_id: uuid.UUID
+    position_sec: int
+    duration_sec: Optional[int] = None
+    # {"kind": "new"} | {"kind": "in_progress", "position_sec": n} | {"kind": "played"}
+    state: dict
+
