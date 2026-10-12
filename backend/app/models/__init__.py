@@ -40,6 +40,11 @@ from app.models.audio_analysis import (  # noqa: F401
     TrackAudioAnalysis, TrackSimilarity,
 )
 
+# Podcasts: shows, episodes, per-user subscriptions and progress
+from app.models.podcast import (  # noqa: F401
+    Podcast, PodcastEpisode, PodcastEpisodeProgress, PodcastSubscription,
+)
+
 # Small Admin-page settings (TMDB key, reminder state)
 from app.models.app_setting import AppSetting  # noqa: F401
 

@@ -29,6 +29,7 @@ ENTITY_MOVIE = "movie"
 ENTITY_SERIES = "series"
 ENTITY_MUSIC_VIDEO = "music_video"
 ENTITY_MIX = "mix"
+ENTITY_PODCAST = "podcast"
 
 # role values.
 ROLE_THUMB = "thumb"

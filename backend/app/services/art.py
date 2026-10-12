@@ -29,7 +29,7 @@ from app.config import PROJECT_URL, settings
 from app.services import net_guard
 from app.models.art import (
     ArtOverride, ENTITY_ALBUM, ENTITY_ARTIST, ENTITY_MIX, ENTITY_MOVIE, ENTITY_MUSIC_VIDEO,
-    ENTITY_SERIES, ROLE_BACKDROP, ROLE_COVER, ROLE_POSTER, ROLE_THUMB,
+    ENTITY_PODCAST, ENTITY_SERIES, ROLE_BACKDROP, ROLE_COVER, ROLE_POSTER, ROLE_THUMB,
     SOURCE_ARTIST_AUTO,
 )
 
@@ -103,6 +103,7 @@ _VALID_ROLES: dict[str, set[str]] = {
     ENTITY_MOVIE: {ROLE_POSTER, ROLE_BACKDROP},
     ENTITY_SERIES: {ROLE_POSTER, ROLE_BACKDROP},
     ENTITY_MIX: {ROLE_COVER},
+    ENTITY_PODCAST: {ROLE_COVER},
 }
 
 # Mixes have no database row, so their art id is derived: uuid5 of the mix key

@@ -15,6 +15,7 @@ class LibraryKind(str, enum.Enum):
     tv = "tv"
     music = "music"
     music_videos = "music_videos"
+    podcasts = "podcasts"
 
 
 class Library(UUIDPKMixin, TimestampMixin, Base):
