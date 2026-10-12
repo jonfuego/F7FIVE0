@@ -4,6 +4,11 @@ import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
 
 import { chooseServer, parseStamp } from "@/lib/serverStamp";
+import { isPrivateHost, isPublicCleartext, normalizeServerUrl } from "@/lib/serverUrl";
+
+// The address rules are pure and live in lib/serverUrl.ts (jest covers them);
+// the sign-in screen and this module share them.
+export { isPrivateHost, isPublicCleartext, normalizeServerUrl };
 
 interface Extra {
   apiBase?: string;
@@ -28,23 +33,6 @@ let filledFromStamp = false;
  * time; it changes when the user picks a different server. */
 export function getApiBase(): string {
   return apiBase;
-}
-
-/** "192.168.1.20:3001" -> "http://192.168.1.20:3001"; "media.example.com" ->
- * "https://media.example.com". Trailing slashes are dropped. */
-export function normalizeServerUrl(input: string): string {
-  let s = (input ?? "").trim();
-  if (!s) return "";
-  if (!/^https?:\/\//i.test(s)) {
-    const host = s.split("/")[0].split(":")[0];
-    const local =
-      host === "localhost" ||
-      /^\d{1,3}(\.\d{1,3}){3}$/.test(host) ||
-      host.endsWith(".local") ||
-      !host.includes(".");
-    s = `${local ? "http" : "https"}://${s}`;
-  }
-  return s.replace(/\/+$/, "");
 }
 
 /** Load the saved server (app launch). Falls back to the baked-in default. */

@@ -2,6 +2,7 @@ import { Eye, EyeOff } from "lucide-react-native";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -14,6 +15,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { loginMessage } from "@/api/loginMessage";
+import { cleartextWarning, isPublicCleartext } from "@/lib/serverUrl";
 import { passkeysAvailable, serverHasPasskeys } from "@/auth/passkey";
 import { useAuth } from "@/state/auth";
 import { getApiBase, normalizeServerUrl, saveServerUrl, serverFilledFromStamp } from "@/state/config";
@@ -23,6 +25,26 @@ import { HiveWordmark } from "@/ui/HiveWordmark";
 import { IconButton } from "@/ui/IconButton";
 
 const messageFor = loginMessage;
+
+/** An explicit http:// address to a public host sends the password across the
+ * internet in the clear. Ask first; resolves true only if the person goes ahead.
+ * Anything else (https, or http on the local network) needs no question. */
+function confirmCleartext(address: string): Promise<boolean> {
+  const base = normalizeServerUrl(address);
+  if (!isPublicCleartext(base)) return Promise.resolve(true);
+  const warning = cleartextWarning(base);
+  return new Promise((resolve) => {
+    Alert.alert(
+      warning.title,
+      warning.message,
+      [
+        { text: "Cancel", style: "cancel", onPress: () => resolve(false) },
+        { text: warning.confirm, style: "destructive", onPress: () => resolve(true) },
+      ],
+      { cancelable: true, onDismiss: () => resolve(false) },
+    );
+  });
+}
 
 export default function LoginScreen(): React.ReactElement {
   const { signIn, signInWithPasskey } = useAuth();
@@ -65,6 +87,7 @@ export default function LoginScreen(): React.ReactElement {
     setError(null);
     setPasskeyBusy(true);
     try {
+      if (!(await confirmCleartext(server))) return;
       setServer(await saveServerUrl(server));
       await signInWithPasskey();
     } catch (e) {
@@ -95,6 +118,11 @@ export default function LoginScreen(): React.ReactElement {
     }
     setBusy(true);
     try {
+      // Before the address is saved or a password leaves the phone.
+      if (!(await confirmCleartext(server))) {
+        setError("Not signed in. Use an https:// address, or confirm to use http.");
+        return;
+      }
       setServer(await saveServerUrl(server));
       await signIn(username.trim().toLowerCase(), password);
     } catch (e) {
