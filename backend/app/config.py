@@ -1,9 +1,10 @@
 """Central settings. Loaded from .env at process start."""
 import base64
 import re
+import warnings
 from pathlib import Path
 from urllib.parse import urlsplit
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Repo root = two levels up from this file (backend/app/config.py -> repo root).
@@ -30,12 +31,40 @@ OFFICIAL_ANDROID_CERT_SHA256 = (
 )
 
 
+# JWT_SECRET and STREAM_HMAC_SECRET sign every session and every media link, so
+# a placeholder or a short value makes them guessable. Production refuses to
+# start on one; development and tests only warn (their secrets are throwaway).
+MIN_SECRET_LENGTH = 32
+SECRET_GENERATE_COMMAND = 'python -c "import secrets; print(secrets.token_urlsafe(64))"'
+
+
+def secret_problems(jwt_secret: str, stream_hmac_secret: str) -> list[str]:
+    """What is wrong with the two signing secrets, as short plain sentences.
+    Never includes a secret's value."""
+    problems: list[str] = []
+    for name, value in (("JWT_SECRET", jwt_secret), ("STREAM_HMAC_SECRET", stream_hmac_secret)):
+        v = (value or "").strip()
+        if not v:
+            problems.append(f"{name} is empty")
+            continue
+        if "change_me" in v.lower():
+            problems.append(f"{name} still holds the CHANGE_ME placeholder")
+        if len(v) < MIN_SECRET_LENGTH:
+            problems.append(f"{name} is shorter than {MIN_SECRET_LENGTH} characters")
+    a, b = (jwt_secret or "").strip(), (stream_hmac_secret or "").strip()
+    if a and a == b:
+        problems.append("JWT_SECRET and STREAM_HMAC_SECRET are the same value")
+    return problems
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
+        # A rejected secret must not be echoed back in the error text.
+        hide_input_in_errors=True,
     )
 
     # Core
@@ -283,6 +312,26 @@ class Settings(BaseSettings):
     # Cloudflare
     cloudflare_tunnel_name: str = "f7five0"
     cloudflare_tunnel_uuid: str = ""
+
+    @model_validator(mode="after")
+    def _check_signing_secrets(self) -> "Settings":
+        problems = secret_problems(self.jwt_secret, self.stream_hmac_secret)
+        if not problems:
+            return self
+        if self.environment.strip().lower() == "production":
+            raise ValueError(
+                "Refusing to start in production with weak signing secrets: "
+                + "; ".join(problems)
+                + f". Set JWT_SECRET and STREAM_HMAC_SECRET in .env to two different "
+                f"random values of at least {MIN_SECRET_LENGTH} characters. Make each "
+                f"one with: {SECRET_GENERATE_COMMAND}"
+            )
+        warnings.warn(
+            "Weak signing secrets (" + "; ".join(problems) + "). Fine for development; "
+            "production refuses to start with them.",
+            stacklevel=2,
+        )
+        return self
 
     # ---- WebAuthn derived values -------------------------------------------
     @property

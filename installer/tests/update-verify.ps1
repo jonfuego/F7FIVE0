@@ -511,7 +511,55 @@ public static class Stub {
     Merge-EnvFile $arrNone $arrWant @{} $arrFill | Out-Null
     Check "arr token: an old .env without the key gets one" ((& $arrRead $arrNone)["ARR_WEBHOOK_SECRET"] -eq "generated-token")
     $installSrc = Get-Content -Raw -Path (Join-Path $installerDir "install.ps1")
-    Check "install.ps1 makes the token with New-Secret and merges it fill-when-blank" ($installSrc -match '"ARR_WEBHOOK_SECRET"\s*=\s*New-Secret 32' -and $installSrc -match 'Merge-EnvFile \$EnvFile \$want \$portKeys @\("ARR_WEBHOOK_SECRET"\)')
+    Check "install.ps1 makes the token with New-Secret and merges it fill-when-blank" ($installSrc -match '"ARR_WEBHOOK_SECRET"\s*=\s*New-Secret 32' -and $installSrc -match 'Merge-EnvFile \$EnvFile \$want \$portKeys @\("ARR_WEBHOOK_SECRET", "JWT_SECRET", "STREAM_HMAC_SECRET"\)')
+
+    # The signing secrets: a placeholder or blank value (a .env copied from
+    # .env.example before Setup) is replaced; a real one is never changed.
+    $sigWant = [ordered]@{ "JWT_SECRET" = "generated-jwt-secret"; "STREAM_HMAC_SECRET" = "generated-hmac-secret" }
+    $sigFill = @("ARR_WEBHOOK_SECRET", "JWT_SECRET", "STREAM_HMAC_SECRET")
+    $sigPlaceholder = Join-Path $work "sig-placeholder.env"
+    Set-Content -Path $sigPlaceholder -Encoding ASCII -Value @("WEB_PORT=3001", "JWT_SECRET=CHANGE_ME", "STREAM_HMAC_SECRET=CHANGE_ME_TOO", "CUSTOM_BY_HAND=yes")
+    $sigAdded = Merge-EnvFile $sigPlaceholder $sigWant @{} $sigFill
+    $sigBack = & $arrRead $sigPlaceholder
+    Check "signing secrets: CHANGE_ME placeholders are replaced, the rest kept" ($sigBack["JWT_SECRET"] -eq "generated-jwt-secret" -and $sigBack["STREAM_HMAC_SECRET"] -eq "generated-hmac-secret" -and $sigBack["CUSTOM_BY_HAND"] -eq "yes" -and $sigAdded -eq 2 -and @(Get-Content $sigPlaceholder).Count -eq 4)
+    $sigBlank = Join-Path $work "sig-blank.env"
+    Set-Content -Path $sigBlank -Encoding ASCII -Value @("JWT_SECRET=", "STREAM_HMAC_SECRET=" + [char]34 + [char]34)
+    Merge-EnvFile $sigBlank $sigWant @{} $sigFill | Out-Null
+    $sigBlankBack = & $arrRead $sigBlank
+    Check "signing secrets: blank and empty-quoted values are replaced" ($sigBlankBack["JWT_SECRET"] -eq "generated-jwt-secret" -and $sigBlankBack["STREAM_HMAC_SECRET"] -eq "generated-hmac-secret")
+    $sigLower = Join-Path $work "sig-lower.env"
+    Set-Content -Path $sigLower -Encoding ASCII -Value @("JWT_SECRET=change_me_please", "STREAM_HMAC_SECRET=xx-Change_Me-xx")
+    Merge-EnvFile $sigLower $sigWant @{} $sigFill | Out-Null
+    $sigLowerBack = & $arrRead $sigLower
+    Check "signing secrets: the placeholder match ignores case" ($sigLowerBack["JWT_SECRET"] -eq "generated-jwt-secret" -and $sigLowerBack["STREAM_HMAC_SECRET"] -eq "generated-hmac-secret")
+    $realJwt = "R3al-jwt-secret-that-is-long-enough-0123456789abcdef"
+    $realHmac = "R3al-hmac-secret-that-is-long-enough-0123456789abcd"
+    $sigReal = Join-Path $work "sig-real.env"
+    Set-Content -Path $sigReal -Encoding ASCII -Value @("JWT_SECRET=$realJwt", "STREAM_HMAC_SECRET=$realHmac")
+    $sigRealAdded = Merge-EnvFile $sigReal $sigWant @{} $sigFill
+    $sigRealBack = & $arrRead $sigReal
+    Check "signing secrets: real secrets are never changed on upgrade" ($sigRealBack["JWT_SECRET"] -eq $realJwt -and $sigRealBack["STREAM_HMAC_SECRET"] -eq $realHmac -and $sigRealAdded -eq 0)
+    $sigOne = Join-Path $work "sig-one.env"
+    Set-Content -Path $sigOne -Encoding ASCII -Value @("JWT_SECRET=$realJwt", "STREAM_HMAC_SECRET=CHANGE_ME_TOO")
+    Merge-EnvFile $sigOne $sigWant @{} $sigFill | Out-Null
+    $sigOneBack = & $arrRead $sigOne
+    Check "signing secrets: only the placeholder one is replaced" ($sigOneBack["JWT_SECRET"] -eq $realJwt -and $sigOneBack["STREAM_HMAC_SECRET"] -eq "generated-hmac-secret")
+    $sigMissing = Join-Path $work "sig-missing.env"
+    Set-Content -Path $sigMissing -Encoding ASCII -Value @("WEB_PORT=3001")
+    Merge-EnvFile $sigMissing $sigWant @{} $sigFill | Out-Null
+    $sigMissingBack = & $arrRead $sigMissing
+    Check "signing secrets: an .env without them gets both" ($sigMissingBack["JWT_SECRET"] -eq "generated-jwt-secret" -and $sigMissingBack["STREAM_HMAC_SECRET"] -eq "generated-hmac-secret")
+
+    # Get-EnvSecretProblems: what Setup warns about when a real secret is weak.
+    Check "secret check: strong distinct secrets pass" (@(Get-EnvSecretProblems $sigReal).Count -eq 0)
+    Check "secret check: a placeholder and a blank value are reported" (@(Get-EnvSecretProblems $sigPlaceholder).Count -ge 2 -and @(Get-EnvSecretProblems (Join-Path $work "sig-none.env")).Count -ge 2)
+    $sigShort = Join-Path $work "sig-short.env"
+    Set-Content -Path $sigShort -Encoding ASCII -Value @("JWT_SECRET=tooshort", "STREAM_HMAC_SECRET=$realHmac")
+    Check "secret check: a short secret is reported without printing it" ((@(Get-EnvSecretProblems $sigShort) -join ";") -match "JWT_SECRET is shorter than 32" -and (@(Get-EnvSecretProblems $sigShort) -join ";") -notmatch "tooshort")
+    $sigSame = Join-Path $work "sig-same.env"
+    Set-Content -Path $sigSame -Encoding ASCII -Value @("JWT_SECRET=$realJwt", "STREAM_HMAC_SECRET=$realJwt")
+    Check "secret check: identical secrets are reported" ((@(Get-EnvSecretProblems $sigSame) -join ";") -match "same value")
+    Check "install.ps1 warns when the signing secrets are weak" ($installSrc -match 'Get-EnvSecretProblems \$EnvFile')
 
     $iss = Get-Content -Raw -Path (Join-Path $installerDir "F7FIVE0.iss")
     $step = $iss.Substring($iss.IndexOf("procedure CurStepChanged"))

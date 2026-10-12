@@ -785,10 +785,16 @@ $want = [ordered]@{
 # Ports are the exception: the services are registered with the ports chosen
 # above, so .env must match them even when they changed on this run.
 $portKeys = @{ "API_PORT" = "$ApiPort"; "STREAM_PORT" = "$StreamPort"; "WEB_PORT" = "$WebPort" }
-$added = Merge-EnvFile $EnvFile $want $portKeys @("ARR_WEBHOOK_SECRET")
+# A blank or CHANGE_ME secret (a .env copied from .env.example before Setup) is
+# replaced; a real one is never changed, so sessions and signed links survive.
+$added = Merge-EnvFile $EnvFile $want $portKeys @("ARR_WEBHOOK_SECRET", "JWT_SECRET", "STREAM_HMAC_SECRET")
 # The services read .env, so their account (when not SYSTEM) gets read access.
 Set-PrivateAcl $EnvFile @($svcSid)
 Ok ("{0} ({1} new setting(s))" -f $EnvFile, $added)
+$secretProblems = @(Get-EnvSecretProblems $EnvFile)
+if ($secretProblems.Count -gt 0) {
+    Warn ("The signing secrets in .env are weak: " + ($secretProblems -join "; ") + ". The API refuses to start with them in production. Set JWT_SECRET and STREAM_HMAC_SECRET to two different random values of 32 or more characters, then restart the F7FIVE0 services.")
+}
 
 # ---------------------------------------------------------------------------
 Step "Backend packages"

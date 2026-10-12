@@ -357,10 +357,11 @@ function Compare-SemVer([string]$a, [string]$b) {
 # rewritten to the ports chosen for this run (the services are registered with
 # them, so .env must match). Returns how many keys were added.
 #
-# $FillWhenBlank names generated secrets (ARR_WEBHOOK_SECRET): when the key is
-# in .env but EMPTY (a blank line copied from .env.example), it gets the new
-# value too. A non-empty value is never touched, so a token already pasted into
-# Radarr/Sonarr/Lidarr keeps working across upgrades.
+# $FillWhenBlank names generated secrets (ARR_WEBHOOK_SECRET, JWT_SECRET,
+# STREAM_HMAC_SECRET): when the key is in .env but EMPTY (a blank line copied
+# from .env.example) or still holds a CHANGE_ME placeholder, it gets the new
+# value too. Any other value is never touched, so a token already pasted into
+# Radarr/Sonarr/Lidarr and a real signing secret keep working across upgrades.
 # ---------------------------------------------------------------------------
 function Merge-EnvFile([string]$Path, $Want, [hashtable]$PortKeys, [string[]]$FillWhenBlank = @()) {
     $existing = @{}
@@ -384,7 +385,9 @@ function Merge-EnvFile([string]$Path, $Want, [hashtable]$PortKeys, [string[]]$Fi
     }
     $added = 0
     foreach ($k in $FillWhenBlank) {
-        if (-not $existing.ContainsKey($k) -or "$($existing[$k])".Trim().Trim([char]34, [char]39) -ne "" -or -not $Want.Contains($k) -or -not $Want[$k]) { continue }
+        if (-not $existing.ContainsKey($k) -or -not $Want.Contains($k) -or -not $Want[$k]) { continue }
+        $current = "$($existing[$k])".Trim().Trim([char]34, [char]39)
+        if ($current -ne "" -and $current -notmatch 'CHANGE_ME') { continue }
         for ($i = 0; $i -lt $lines.Count; $i++) {
             if ($lines[$i] -match ('^\s*' + [regex]::Escape($k) + '\s*=')) { $lines[$i] = "$k=$($Want[$k])"; $added++; break }
         }
@@ -397,6 +400,32 @@ function Merge-EnvFile([string]$Path, $Want, [hashtable]$PortKeys, [string[]]$Fi
     }
     [IO.File]::WriteAllLines($Path, $lines, (New-Object Text.UTF8Encoding($false)))
     return $added
+}
+
+# ---------------------------------------------------------------------------
+# What is wrong with the signing secrets in an .env, as short sentences (empty
+# when both are fine). The backend refuses to start in production on any of
+# these (backend/app/config.py: secret_problems); Setup can only replace a blank
+# or CHANGE_ME value without touching a real one, so for a short or shared
+# secret it warns instead. Never returns a secret's value.
+# ---------------------------------------------------------------------------
+function Get-EnvSecretProblems([string]$Path) {
+    $v = @{}
+    if (Test-Path $Path) {
+        foreach ($line in Get-Content $Path) {
+            if ($line -match '^\s*(JWT_SECRET|STREAM_HMAC_SECRET)\s*=(.*)$') { $v[$matches[1]] = $matches[2].Trim().Trim([char]34, [char]39) }
+        }
+    }
+    $problems = @()
+    foreach ($k in @("JWT_SECRET", "STREAM_HMAC_SECRET")) {
+        if (-not $v.ContainsKey($k) -or $v[$k] -eq "") { $problems += "$k is empty"; continue }
+        if ($v[$k] -match 'CHANGE_ME') { $problems += "$k still holds the CHANGE_ME placeholder" }
+        if ($v[$k].Length -lt 32) { $problems += "$k is shorter than 32 characters" }
+    }
+    if ($v.ContainsKey("JWT_SECRET") -and $v["JWT_SECRET"] -ne "" -and $v["JWT_SECRET"] -eq $v["STREAM_HMAC_SECRET"]) {
+        $problems += "JWT_SECRET and STREAM_HMAC_SECRET are the same value"
+    }
+    return $problems
 }
 
 # ---------------------------------------------------------------------------
