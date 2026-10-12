@@ -1,0 +1,54 @@
+{
+  "_comment": "Reviewed npm audit exceptions for the phone app. scripts/npm_audit_gate.mjs fails CI on any high or critical advisory (npm audit --omit=dev) not listed here. Each entry: advisory (GHSA id) or package, reason, scope (runtime = ships in the app, build = tooling on the build machine), expires (YYYY-MM-DD, on or before 2027-01-06). Expo's build tools (Metro, the Expo CLI, Jest) sit in dependencies, so they appear in the audit. npm's own fix for all of them is an Expo downgrade to 44, which this app cannot take; they retire with the Expo SDK upgrade. Fixed in 1.0.12 instead of excepted: postcss (an override of @expo/metro-config's postcss to 8.5.30).",
+  "exceptions": [
+    {
+      "advisory": "GHSA-vfj7-8cjw-p6xm",
+      "package": "braces",
+      "reason": "No patched braces exists (3.0.3 is the latest and is inside the vulnerable range). Reached only through micromatch in Metro, Jest and Babel tooling on the build machine; nothing from it is bundled into the app.",
+      "scope": "build",
+      "expires": "2027-01-06"
+    },
+    {
+      "advisory": "GHSA-5p2g-fcmc-qvqq",
+      "package": "image-size",
+      "reason": "Metro 0.83.3 (Expo SDK 54) reads asset sizes with image-size 1.x. The patched releases start at 2.0.3, and forcing 2.0.4 with an npm override broke the Android bundle (TypeError in Metro asset handling, tried on 2026-10-12). Build machine only, reading the app's own PNG assets.",
+      "scope": "build",
+      "expires": "2027-01-06"
+    },
+    {
+      "advisory": "GHSA-w3rx-r6r6-pgpr",
+      "package": "image-size",
+      "reason": "Same package and cause as GHSA-5p2g-fcmc-qvqq: the fix needs image-size 2.x, which Metro 0.83.3 cannot use. Build machine only, reading the app's own PNG assets.",
+      "scope": "build",
+      "expires": "2027-01-06"
+    },
+    {
+      "advisory": "GHSA-86w9-cpqp-85rv",
+      "package": "node-forge",
+      "reason": "No patched node-forge exists (1.4.0 is the latest and is inside the vulnerable range). Used by @expo/cli and @expo/code-signing-certificates for development-time signing on the build machine; not shipped in the app.",
+      "scope": "build",
+      "expires": "2027-01-06"
+    },
+    {
+      "advisory": "GHSA-vcc3-ghjq-m6fr",
+      "package": "decode-uri-component",
+      "reason": "Moderate, and the one runtime chain: expo-router -> query-string 7.1.3 -> decode-uri-component 0.2.2 (denial of service from decoding a crafted URL query). The patched release (0.5.0) is ESM-only and query-string 7 loads it with require(), so an override would break expo-router's path building. Retires with the Expo SDK upgrade.",
+      "scope": "runtime",
+      "expires": "2027-01-06"
+    },
+    {
+      "advisory": "GHSA-hp3w-g68c-fv3c",
+      "package": "sprintf-js",
+      "reason": "Moderate. No patched sprintf-js exists (1.1.3 is the latest). Reached through argparse and js-yaml in Jest's coverage tooling; build machine only.",
+      "scope": "build",
+      "expires": "2027-01-06"
+    },
+    {
+      "advisory": "GHSA-w5hq-g745-h8pq",
+      "package": "uuid",
+      "reason": "Moderate. uuid 7.0.3 is used by xcode inside @expo/config-plugins during iOS prebuild, which this Android-only app never runs; build machine only.",
+      "scope": "build",
+      "expires": "2027-01-06"
+    }
+  ]
+}

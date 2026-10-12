@@ -1,0 +1,4 @@
+{
+  "_comment": "Reviewed npm audit exceptions for the web app. scripts/npm_audit_gate.mjs fails CI on any high or critical advisory (npm audit --omit=dev) not listed here. Each entry: advisory (GHSA id) or package, reason, scope (runtime or build), expires (YYYY-MM-DD, on or before 2027-01-06). The 1.0.12 audit found one advisory, source-map-js (GHSA-68fv-2mgg-jv7q), and the lockfile now carries the patched 1.2.2, so nothing is excepted.",
+  "exceptions": []
+}

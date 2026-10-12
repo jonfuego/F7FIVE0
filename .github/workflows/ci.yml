@@ -45,6 +45,13 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci --no-audit --no-fund
         working-directory: frontend
+      # Supply-chain gate: fail on any high or critical advisory in the runtime
+      # tree (npm audit --omit=dev) that is not listed, unexpired, in
+      # frontend/npm-audit-exceptions.json. The gate's own tests run first.
+      - name: npm audit gate (web)
+        run: |
+          node --test scripts/npm_audit_gate.test.mjs
+          node scripts/npm_audit_gate.mjs frontend
       - run: npm run build
         working-directory: frontend
         env:
@@ -65,5 +72,10 @@ jobs:
           cache-dependency-path: mobile/package-lock.json
       - run: npm ci --no-audit --no-fund
         working-directory: mobile
+      # Same gate for the phone app. Expo's build tools sit in dependencies, so
+      # their advisories are listed in mobile/npm-audit-exceptions.json as
+      # build exceptions with a reason and an expiry.
+      - name: npm audit gate (mobile)
+        run: node scripts/npm_audit_gate.mjs mobile
       - run: npm run verify
         working-directory: mobile
