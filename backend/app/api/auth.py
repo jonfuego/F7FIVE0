@@ -163,11 +163,14 @@ def login(
     client_ip = _client_ip(request)
 
     # Durable throttle: block before touching the password check if this
-    # account/IP is over any limit. A blocked attempt is itself recorded, so
-    # continued hammering escalates the Retry-After.
+    # account/IP is over any limit. The per-username lock makes check-and-record
+    # one step on PostgreSQL, so parallel attempts cannot all read the count
+    # before any of them records a failure. A blocked attempt is NOT recorded:
+    # Retry-After is the real time until the oldest failures leave the window,
+    # and hammering a locked account must not push it later.
+    login_throttle.lock_username(db, username)
     retry = login_throttle.retry_after_for(db, username=username, client_ip=client_ip)
     if retry is not None:
-        login_throttle.record_failure(db, username=username, client_ip=client_ip)
         db.commit()
         raise HTTPException(
             status_code=429, detail="too_many_attempts",

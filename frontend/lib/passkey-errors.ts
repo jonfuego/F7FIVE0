@@ -2,14 +2,22 @@
 // friendlyError so a passkey failure never reads "Username or password is
 // incorrect." and a server error does not use the generic wording.
 
-export function passkeyErrorMessage(status: number, payload: unknown): string {
+import { throttleMessage } from "./login-errors.ts";
+
+export function passkeyErrorMessage(
+  status: number,
+  payload: unknown,
+  retryAfterSeconds?: number | null,
+): string {
   const detail =
     payload && typeof payload === "object" && "detail" in payload
       ? String((payload as { detail?: unknown }).detail ?? "")
       : "";
 
   if (status === 429 || detail === "too_many_attempts") {
-    return "Too many passkey attempts. Wait a few minutes or use your password.";
+    return retryAfterSeconds
+      ? throttleMessage(retryAfterSeconds)
+      : "Too many passkey attempts. Wait a few minutes or use your password.";
   }
   if (status === 404 || detail === "passkeys_disabled") {
     return "Passkeys are not available on this server. Use your password.";

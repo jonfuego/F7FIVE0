@@ -9,6 +9,13 @@
 import { Suspense, useEffect, useState, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useFeatures } from "@/lib/features";
+import {
+  isThrottled,
+  loginErrorMessage,
+  parseRetryAfter,
+  remainingSeconds,
+  throttleMessage,
+} from "@/lib/login-errors";
 import { passkeyErrorMessage } from "@/lib/passkey-errors";
 import { getPasskeyAssertion, passkeysSupported } from "@/lib/webauthn";
 import { HiveWordmark } from "@/components/HiveWordmark";
@@ -44,6 +51,10 @@ function LoginPageInner() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // A 429 lockout: the moment sign-in would work again (from Retry-After), and
+  // a clock that ticks once a second so the message counts down.
+  const [lockedUntil, setLockedUntil] = useState<number | null>(null);
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const [submitting, setSubmitting] = useState(false);
   const [passkeyBusy, setPasskeyBusy] = useState(false);
   const [browserPasskeys, setBrowserPasskeys] = useState(false);
@@ -55,6 +66,41 @@ function LoginPageInner() {
   useEffect(() => {
     setBrowserPasskeys(passkeysSupported());
   }, []);
+
+  useEffect(() => {
+    if (lockedUntil === null) return;
+    const timer = setInterval(() => {
+      const now = Date.now();
+      setNowMs(now);
+      if (now >= lockedUntil) {
+        setLockedUntil(null);
+        setError(null);
+      }
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [lockedUntil]);
+
+  const lockedFor = lockedUntil === null ? 0 : remainingSeconds(lockedUntil, nowMs);
+  const shownError = lockedFor > 0 ? throttleMessage(lockedFor) : error;
+
+  // Show a failed sign-in. A lockout starts the countdown instead of a fixed
+  // message.
+  function showFailure(res: Response, payload: unknown, passkey: boolean) {
+    const wait = parseRetryAfter(res.headers.get("retry-after"));
+    if (isThrottled(res.status, payload) && wait !== null) {
+      const now = Date.now();
+      setNowMs(now);
+      setLockedUntil(now + wait * 1000);
+      setError(null);
+      return;
+    }
+    setLockedUntil(null);
+    setError(
+      passkey
+        ? passkeyErrorMessage(res.status, payload, wait)
+        : loginErrorMessage(res.status, payload, wait),
+    );
+  }
 
   async function onPasskey() {
     if (passkeyBusy || submitting) return;
@@ -76,7 +122,7 @@ function LoginPageInner() {
       });
       if (!res.ok) {
         const payload = await safeJson(res);
-        setError(passkeyErrorMessage(res.status, payload));
+        showFailure(res, payload, true);
         setPasskeyBusy(false);
         return;
       }
@@ -114,7 +160,7 @@ function LoginPageInner() {
       });
       if (!res.ok) {
         const payload = await safeJson(res);
-        setError(friendlyError(res.status, payload));
+        showFailure(res, payload, false);
         setSubmitting(false);
         return;
       }
@@ -187,15 +233,15 @@ function LoginPageInner() {
             />
           </div>
 
-          {error && (
+          {shownError && (
             <p role="alert" className="text-sm text-danger">
-              {error}
+              {shownError}
             </p>
           )}
 
           <button
             type="submit"
-            disabled={submitting}
+            disabled={submitting || lockedFor > 0}
             className="min-h-tap w-full rounded-1 bg-hive px-4 py-2 text-sm font-semibold text-on-hive transition hover:bg-hive-hover disabled:cursor-not-allowed disabled:opacity-60"
           >
             {submitting ? "Signing in..." : "Sign in"}
@@ -212,24 +258,6 @@ function sanitizeNext(raw: string | null): string {
   if (!raw) return "/";
   if (!raw.startsWith("/") || raw.startsWith("//")) return "/";
   return raw;
-}
-
-function friendlyError(status: number, payload: unknown): string {
-  const detail =
-    payload && typeof payload === "object" && "detail" in payload
-      ? String((payload as { detail?: unknown }).detail ?? "")
-      : "";
-
-  if (status === 401 || detail === "invalid_credentials") {
-    return "Username or password is incorrect.";
-  }
-  if (status === 400 || detail === "missing_credentials") {
-    return "Fill in both username and password.";
-  }
-  if (status >= 500) {
-    return "Server is having a bad time. Try again in a minute.";
-  }
-  return detail || "Something went wrong.";
 }
 
 async function safeJson(res: Response): Promise<unknown> {

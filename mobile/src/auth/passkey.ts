@@ -23,6 +23,7 @@
 import { Passkey } from "react-native-passkey";
 
 import type { ApiClient } from "@/api/client";
+import { LoginThrottledError, parseRetryAfter } from "@/api/throttle";
 import { APP_VERSION, IS_TV, clientPlatform, deviceName, getApiBase } from "@/state/config";
 
 interface TokenPair {
@@ -126,6 +127,9 @@ export async function passkeyLogin(): Promise<TokenPair> {
     }),
   });
   if (verifyRes.status === 401) throw new Error("invalid_passkey");
+  if (verifyRes.status === 429) {
+    throw new LoginThrottledError(parseRetryAfter(verifyRes.headers.get("retry-after")));
+  }
   if (!verifyRes.ok) throw new Error(`passkey_login_failed_${verifyRes.status}`);
   return (await verifyRes.json()) as TokenPair;
 }

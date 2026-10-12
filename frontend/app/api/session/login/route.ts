@@ -7,6 +7,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { backend } from "@/lib/api";
 import { setSessionCookies } from "@/lib/cookies";
+import { retryAfterHeader } from "@/lib/login-errors";
 
 type LoginBody = { username?: unknown; password?: unknown };
 
@@ -50,9 +51,15 @@ export async function POST(req: NextRequest) {
   const payload = await safeJson(backendRes);
   if (!backendRes.ok) {
     // Preserve the backend status (401 for bad creds, etc.) so the client
-    // can distinguish "wrong password" from "server is down".
+    // can distinguish "wrong password" from "server is down". A 429 lockout
+    // keeps its Retry-After (the real seconds until a sign-in would work) so
+    // the page can say how long to wait.
+    const headers: Record<string, string> = {};
+    const retryAfter = retryAfterHeader(backendRes.headers.get("retry-after"));
+    if (retryAfter) headers["retry-after"] = retryAfter;
     return NextResponse.json(payload ?? { detail: "login_failed" }, {
       status: backendRes.status,
+      headers,
     });
   }
 

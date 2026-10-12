@@ -16,6 +16,7 @@
  * module unit-tests in Node with no native modules.
  */
 import { decideRefresh, retryDelayMs, type RefreshOutcome } from "./refreshOutcome";
+import { LoginThrottledError, parseRetryAfter } from "./throttle";
 import type { TokenStore } from "./tokenStore";
 
 export class NetworkError extends Error {
@@ -138,6 +139,10 @@ export class ApiClient {
     }
     if (res.status === 401) {
       throw new ApiError(401, "invalid_credentials");
+    }
+    if (res.status === 429) {
+      // Locked out: the server says how long. The login screen shows it.
+      throw new LoginThrottledError(parseRetryAfter(res.headers?.get("retry-after")));
     }
     if (!res.ok) {
       throw new ApiError(res.status, `login_failed_${res.status}`);

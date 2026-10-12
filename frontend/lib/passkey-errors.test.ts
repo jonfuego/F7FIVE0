@@ -19,3 +19,9 @@ test("400 and 429 are distinct", () => {
   assert.match(passkeyErrorMessage(400, { detail: "invalid_credential" }), /could not read/);
   assert.match(passkeyErrorMessage(429, { detail: "too_many_attempts" }), /Too many/);
 });
+
+test("a passkey lockout with a wait says how long and never shows the raw code", () => {
+  const m = passkeyErrorMessage(429, { detail: "too_many_attempts" }, 540);
+  assert.equal(m, "Too many attempts. Try again in 9 minutes.");
+  assert.doesNotMatch(m, /too_many_attempts/);
+});

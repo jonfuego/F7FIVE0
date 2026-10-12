@@ -1,4 +1,5 @@
-"""Real concurrency checks for the single-use auth transitions, on PostgreSQL.
+"""Real concurrency checks for the single-use auth transitions and the login
+throttle, on PostgreSQL.
 
 SQLite cannot run two requests at once, so these are opt-in. Point
 F7FIVE0_PG_TEST_URL at a scratch database whose schema is at head, for example:
@@ -260,7 +261,9 @@ def test_concurrent_passkey_verify_exactly_one_session(pg_app, pg_engine, pg_use
         "id": cred_id, "rawId": cred_id, "type": "public-key",
         "response": {"clientDataJSON": client_data, "authenticatorData": "dummy", "signature": "dummy"},
     }
-    _hold_in_the_gap(monkeypatch, passkeys_module, THREADS)
+    # No barrier here: passkey sign-in takes the throttle's per-key lock first, so
+    # the requests run one after another and a barrier inside the handler could
+    # never fill. The conditional UPDATE is still what stops a replay.
     try:
         responses = _fire(pg_app, THREADS, lambda c: c.post(
             "/api/auth/passkey/login/verify", json={"credential": credential}))
@@ -278,3 +281,182 @@ def test_concurrent_passkey_verify_exactly_one_session(pg_app, pg_engine, pg_use
             s.query(WebAuthnChallenge).filter(WebAuthnChallenge.challenge == challenge).delete()
             s.query(WebAuthnCredential).filter(WebAuthnCredential.credential_id == cred_id).delete()
             s.commit()
+
+
+def test_concurrent_passkey_register_exactly_one_credential(pg_app, pg_engine, pg_user, monkeypatch):
+    """Registration has no throttle lock, so here every thread really is in the
+    read-to-claim gap at once: exactly one gets the challenge."""
+    import base64
+    import json
+
+    from webauthn.helpers import bytes_to_base64url
+
+    from app.api import passkeys as passkeys_module
+    from app.api.deps import current_user
+    from app.config import settings
+    from app.models.user import User
+    from app.models.webauthn import WebAuthnChallenge, WebAuthnCredential
+
+    monkeypatch.setattr(settings, "public_url", "https://media.example.com")
+    monkeypatch.setattr(settings, "webauthn_rp_id", "")
+    monkeypatch.setattr(settings, "webauthn_origins", "")
+
+    cred_bytes = b"conc-reg-" + uuid.uuid4().bytes
+    challenge = bytes_to_base64url(os.urandom(32))
+    now = datetime.now(timezone.utc)
+    with Session(pg_engine) as s:
+        s.add(WebAuthnChallenge(challenge=challenge, user_id=pg_user.id, kind="register",
+                                expires_at=now + timedelta(minutes=5), created_at=now))
+        s.commit()
+        owner = s.get(User, pg_user.id)
+        s.expunge(owner)
+
+    pg_app.dependency_overrides[current_user] = lambda: owner
+    monkeypatch.setattr(
+        passkeys_module, "verify_registration_response",
+        lambda **kw: types.SimpleNamespace(
+            credential_id=cred_bytes, credential_public_key=b"cose-public-key-bytes-here",
+            sign_count=0, aaguid="00000000-0000-0000-0000-000000000000"),
+    )
+    data = base64.urlsafe_b64encode(json.dumps({
+        "type": "webauthn.create", "challenge": challenge, "origin": "https://media.example.com",
+    }).encode()).decode().rstrip("=")
+    credential = {"id": bytes_to_base64url(cred_bytes), "rawId": bytes_to_base64url(cred_bytes),
+                  "type": "public-key",
+                  "response": {"clientDataJSON": data, "attestationObject": "d", "transports": ["internal"]}}
+    _hold_in_the_gap(monkeypatch, passkeys_module, THREADS)
+    try:
+        responses = _fire(pg_app, THREADS, lambda c: c.post(
+            "/api/auth/passkey/register/verify", json={"credential": credential, "name": "Pixel"}))
+        codes = sorted(r.status_code for r in responses)
+        assert codes.count(201) == 1, codes
+        assert codes.count(400) == THREADS - 1, codes
+        assert {r.json()["detail"] for r in responses if r.status_code == 400} == {"challenge_already_used"}
+        with Session(pg_engine) as s:
+            stored = s.scalar(select(func.count()).select_from(WebAuthnCredential).where(
+                WebAuthnCredential.user_id == pg_user.id))
+        assert stored == 1
+    finally:
+        pg_app.dependency_overrides.pop(current_user, None)
+        with Session(pg_engine) as s:
+            s.query(WebAuthnChallenge).filter(WebAuthnChallenge.challenge == challenge).delete()
+            s.query(WebAuthnCredential).filter(WebAuthnCredential.user_id == pg_user.id).delete()
+            s.commit()
+
+
+# ---------------------------------------------------------------------------
+# Login throttle: check-and-record per username
+# ---------------------------------------------------------------------------
+def _attempts(pg_engine, username):
+    from app.models.login_attempt import LoginAttempt
+
+    with Session(pg_engine) as s:
+        return s.scalar(select(func.count()).select_from(LoginAttempt).where(LoginAttempt.username == username))
+
+
+def _forget_attempts(pg_engine, username):
+    from app.models.login_attempt import LoginAttempt
+
+    with Session(pg_engine) as s:
+        s.query(LoginAttempt).filter(LoginAttempt.username == username).delete()
+        s.commit()
+
+
+def test_concurrent_wrong_passwords_cannot_overshoot_the_limit(pg_app, pg_engine, pg_user):
+    """Twelve parallel bad logins for one account: without the per-username
+    lock every one reads a count of 0 and records a failure. With it, exactly
+    MAX_PER_ACCOUNT_IP are checked and recorded, and the rest are refused with
+    a Retry-After without being recorded."""
+    from app.services import login_throttle
+
+    limit = login_throttle.MAX_PER_ACCOUNT_IP
+    n = limit + 7
+    try:
+        responses = _fire(pg_app, n, lambda c: c.post(
+            "/api/auth/login", json={"username": pg_user.username, "password": "wrong"}))
+        codes = sorted(r.status_code for r in responses)
+        assert codes.count(401) == limit, codes
+        assert codes.count(429) == n - limit, codes
+        assert _attempts(pg_engine, pg_user.username) == limit
+        waits = {int(r.headers["Retry-After"]) for r in responses if r.status_code == 429}
+        assert all(1 <= w <= login_throttle.WINDOW_SECONDS for w in waits)
+    finally:
+        _forget_attempts(pg_engine, pg_user.username)
+
+
+def test_concurrent_passkey_attempts_share_the_same_serialized_throttle(pg_app, pg_engine, pg_user, monkeypatch):
+    import base64
+    import itertools
+    import json
+
+    from webauthn.helpers import bytes_to_base64url
+
+    from app.api import passkeys as passkeys_module
+    from app.config import settings
+    from app.models.webauthn import WebAuthnChallenge
+    from app.services import login_throttle
+
+    monkeypatch.setattr(settings, "public_url", "https://media.example.com")
+    monkeypatch.setattr(settings, "webauthn_rp_id", "")
+    monkeypatch.setattr(settings, "webauthn_origins", "")
+
+    limit = login_throttle.MAX_PER_ACCOUNT_IP
+    n = limit + 7
+    now = datetime.now(timezone.utc)
+    challenges = [bytes_to_base64url(os.urandom(32)) for _ in range(n)]
+    with Session(pg_engine) as s:
+        for ch in challenges:
+            s.add(WebAuthnChallenge(challenge=ch, user_id=None, kind="login",
+                                    expires_at=now + timedelta(minutes=5), created_at=now))
+        s.commit()
+
+    unknown = bytes_to_base64url(b"no-such-credential-" + uuid.uuid4().bytes)
+    picker = itertools.count()
+    pick_lock = threading.Lock()
+
+    def attempt(c):
+        with pick_lock:
+            ch = challenges[next(picker)]
+        data = base64.urlsafe_b64encode(json.dumps({
+            "type": "webauthn.get", "challenge": ch, "origin": "https://media.example.com",
+        }).encode()).decode().rstrip("=")
+        cred = {"id": unknown, "rawId": unknown, "type": "public-key",
+                "response": {"clientDataJSON": data, "authenticatorData": "d", "signature": "d"}}
+        return c.post("/api/auth/passkey/login/verify", json={"credential": cred})
+
+    key = passkeys_module._PASSKEY_THROTTLE_USER
+    try:
+        responses = _fire(pg_app, n, attempt)
+        codes = sorted(r.status_code for r in responses)
+        assert codes.count(401) == limit, codes
+        assert codes.count(429) == n - limit, codes
+        assert _attempts(pg_engine, key) == limit
+    finally:
+        _forget_attempts(pg_engine, key)
+        with Session(pg_engine) as s:
+            s.query(WebAuthnChallenge).filter(WebAuthnChallenge.challenge.in_(challenges)).delete()
+            s.commit()
+
+
+def test_the_returned_retry_after_unblocks_on_postgres(pg_app, pg_engine, pg_user):
+    """On the real database, a correct password works once the returned wait has
+    passed (the recorded attempts are moved back in time to stand in for it)."""
+    from app.models.login_attempt import LoginAttempt
+    from app.services import login_throttle
+
+    try:
+        with _client(pg_app) as c:
+            for _ in range(login_throttle.MAX_PER_ACCOUNT_IP):
+                assert c.post("/api/auth/login", json={"username": pg_user.username,
+                                                       "password": "wrong"}).status_code == 401
+            blocked = c.post("/api/auth/login", json={"username": pg_user.username, "password": PASSWORD})
+            assert blocked.status_code == 429
+            wait = int(blocked.headers["Retry-After"])
+            with Session(pg_engine) as s:
+                for row in s.query(LoginAttempt).filter(LoginAttempt.username == pg_user.username):
+                    row.at = row.at - timedelta(seconds=wait)
+                s.commit()
+            ok = c.post("/api/auth/login", json={"username": pg_user.username, "password": PASSWORD})
+            assert ok.status_code == 200, ok.text
+    finally:
+        _forget_attempts(pg_engine, pg_user.username)

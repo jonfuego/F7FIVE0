@@ -10,12 +10,13 @@ import React, {
 
 import { ApiClient, ApiError, AuthError, NetworkError, createApiClient } from "@/api/client";
 import { secureTokenStore } from "@/api/tokenStore";
+import { LoginThrottledError } from "@/api/throttle";
 import { passkeyLogin } from "@/auth/passkey";
 import { APP_VERSION, clientPlatform, deviceName, getApiBase } from "./config";
 
 type AuthStatus = "loading" | "signedOut" | "signedIn";
 
-export type LoginError = "invalid_credentials" | "unreachable" | "unknown";
+export type LoginError = "invalid_credentials" | "too_many_attempts" | "unreachable" | "unknown";
 
 interface AuthContextValue {
   status: AuthStatus;
@@ -71,6 +72,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         await client.login(username, password);
         setStatus("signedIn");
       } catch (e) {
+        // A 429 lockout keeps its own error (code too_many_attempts plus the
+        // server's wait) so the login screen can say how long.
+        if (e instanceof LoginThrottledError) throw e;
         if (e instanceof ApiError && e.status === 401) {
           const err: LoginError = "invalid_credentials";
           throw new Error(err);
@@ -92,6 +96,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await client.adoptSession(pair);
       setStatus("signedIn");
     } catch (e) {
+      if (e instanceof LoginThrottledError) throw e;
       if (e instanceof Error && e.message === "invalid_passkey") {
         const err: LoginError = "invalid_credentials";
         throw new Error(err);
