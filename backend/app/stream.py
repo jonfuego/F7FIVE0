@@ -42,16 +42,15 @@ from app.db import SessionLocal
 from app.models.media_file import MediaFile, ScanState
 from app.models.podcast import PodcastEpisode
 from app.models.transcode import TranscodeSession
-from app.services import library_folders, nas_auth, net_guard, transcode_cache, transcoder
+from app.services import media_paths, nas_auth, net_guard, transcode_cache, transcoder
 from app.services.podcasts import media_types
-from app.services.path_map import translate as translate_path
 from app.services.playback import (
     VARIANT_LADDER,
     is_audio_only,
     pick_variants,
     single_rung_for_cpu,
 )
-from app.services.range_response import ensure_under_roots, serve_file_range
+from app.services.range_response import serve_file_range
 from app.services.security import verify_media_url_params, verify_stream_url_params
 from app.services.signed_urls import session_authorizes
 from app.services.trusted_proxy import real_client_ip
@@ -203,47 +202,10 @@ def get_db():
         db.close()
 
 
-def _allowed_roots(db: Session) -> list[Path]:
-    """Every directory a media file is allowed to live under.
-
-    Derived from the active library-folder configuration (the `libraries`
-    table once Admin saves folders, else the `LIBRARY_ROOT_*` env keys), plus
-    any explicit `STREAM_ALLOWED_ROOTS` entries. Each configured folder is
-    added in both its raw form and its path-rewritten form (drive letter ->
-    UNC) so a root matches whichever shape `media_files.path` was stored in.
-    Returns an empty list only when nothing is configured; callers fail closed
-    on that.
-    """
-    roots: list[Path] = []
-
-    def _add(p: str) -> None:
-        p = (p or "").strip()
-        if not p:
-            return
-        roots.append(Path(p))
-        translated = translate_path(p)
-        if translated and translated != p:
-            roots.append(Path(translated))
-
-    for paths in library_folders.all_folders(db).values():
-        for p in paths:
-            _add(p)
-    for p in (settings.stream_allowed_roots or "").split(";"):
-        _add(p)
-    return roots
-
-
-def _contain(db: Session, path: Path) -> Path:
-    """Enforce root containment, or bypass it only under the explicit,
-    off-by-default unsafe development flag. With the flag off and no roots
-    configured, every file is rejected (SEC-P0-4 fail closed)."""
-    if settings.stream_unsafe_allow_any_path:
-        log.warning(
-            "stream_unsafe_allow_any_path is ON: serving %s without root "
-            "containment. Never use this on a reachable install.", path,
-        )
-        return path.resolve(strict=False)
-    return ensure_under_roots(path, _allowed_roots(db))
+# One implementation for the gateway and the API (services/media_paths.py).
+# `_allowed_roots` stays importable under this name for the tests.
+_allowed_roots = media_paths.allowed_roots
+_contain = media_paths.contain
 
 
 def verified_media_file(

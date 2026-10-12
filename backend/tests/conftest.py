@@ -232,3 +232,14 @@ def _keyless_art_sources_off(monkeypatch):
     monkeypatch.setattr(settings, "deezer_enabled", False)
     monkeypatch.setattr(settings, "audiodb_api_key", "")
     yield
+
+
+@pytest.fixture(autouse=True)
+def _tmp_media_roots(monkeypatch, tmp_path_factory):
+    """Media paths must sit under a library root (services/media_paths.py), and
+    most tests write their fake media into `tmp_path`. Make pytest's base temp
+    dir the one allowed root so those tests read their own files. A test that
+    checks containment sets its own `stream_allowed_roots` (or clears it)."""
+    from app.config import settings
+    monkeypatch.setattr(settings, "stream_allowed_roots", str(tmp_path_factory.getbasetemp()))
+    yield

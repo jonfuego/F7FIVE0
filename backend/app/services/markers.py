@@ -29,6 +29,7 @@ from app.models.markers import (
     KIND_CREDITS, KIND_INTRO, SOURCE_AUTO, MediaMarker,
 )
 from app.models.media_file import MediaFile, MediaKind, ScanState
+from app.services import media_paths
 
 
 log = logging.getLogger("f7five0.markers")
@@ -94,6 +95,9 @@ def analyze_media_file(db: Session, mf: MediaFile, *, force: bool = False) -> in
     path = mf.path
     if not path or not os.path.exists(path):
         log.warning("marker analysis skipped, missing file: %s", path)
+        return 0
+    if not media_paths.is_contained(db, path):
+        log.warning("marker analysis skipped, outside the library folders: %s", path)
         return 0
     duration = mf.duration_sec or 0
     if duration < _MIN_FILE_SEC:

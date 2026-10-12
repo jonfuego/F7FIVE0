@@ -44,6 +44,7 @@ from app.services.credits import resolve_artist
 from app.services.arr import LidarrClient, RadarrClient, SonarrClient
 from app.services.arr._base import ArrClientError
 from app.services.art import download_art_on_sync
+from app.services import media_paths
 from app.services.path_map import translate as translate_path
 
 
@@ -72,6 +73,9 @@ class SyncStats:
     files_probed: int = 0
     files_missing: int = 0
     files_pruned: int = 0
+    # Paths an *arr app reported outside the library folders: never probed,
+    # never stored (services/media_paths.py).
+    files_refused: int = 0
     errors: int = 0
     # Rows to enrich once the caller has committed (see schedule_pending_enrichment).
     pending_movies: list = field(default_factory=list)
@@ -81,11 +85,11 @@ class SyncStats:
     def log_summary(self) -> None:
         log.info(
             "sync complete: movies=%d series=%d eps=%d artists=%d albums=%d tracks=%d "
-            "files=%d probed=%d missing=%d pruned=%d errors=%d",
+            "files=%d probed=%d missing=%d pruned=%d refused=%d errors=%d",
             self.movies_upserted, self.series_upserted, self.episodes_upserted,
             self.artists_upserted, self.albums_upserted, self.tracks_upserted,
             self.files_upserted, self.files_probed, self.files_missing,
-            self.files_pruned, self.errors,
+            self.files_pruned, self.files_refused, self.errors,
         )
 
 
@@ -671,12 +675,22 @@ def _upsert_media_file(
     path: str,
     arr_file: dict[str, Any],
     stats: SyncStats,
-) -> MediaFile:
+) -> Optional[MediaFile]:
     # Rewrite any user-session-only drive letters (e.g. `N:\\`) to the UNC
     # path before the UNIQUE lookup. Keeps stored paths canonical and makes
     # every downstream read (ffprobe, os.path.exists, HLS) resolve under
     # whatever account the service is running as.
     path = translate_path(path) or path
+    # The path comes from a remote service. Hold it to the library folders
+    # before anything stats, probes or stores it, so a hostile or mistaken
+    # *arr cannot get an outside file parsed or marked ready.
+    if not media_paths.is_contained(db, path):
+        stats.files_refused += 1
+        log.warning(
+            "refused *arr path outside the library folders (kind=%s ref_id=%s): %s",
+            kind.value, ref_id, path,
+        )
+        return None
     existing = db.scalar(select(MediaFile).where(MediaFile.path == path))
     if existing is None:
         mf = MediaFile(kind=kind, ref_id=ref_id, path=path)
