@@ -1,0 +1,9 @@
+{
+  "version": "1.2.0",
+  "chapters": [
+    {"startTime": 0, "title": "Intro"},
+    {"startTime": 125.5, "title": "Main <b>topic</b>", "img": "https://fixture.example/c2.jpg", "url": "https://fixture.example/c2"},
+    {"startTime": 900, "title": "Sponsor", "toc": false},
+    {"startTime": 1500, "title": "Evil link", "url": "javascript:alert(1)", "img": "data:text/html,boo"}
+  ]
+}

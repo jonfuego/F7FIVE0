@@ -1369,3 +1369,11 @@ class PodcastProgressOut(BaseModel):
     # {"kind": "new"} | {"kind": "in_progress", "position_sec": n} | {"kind": "played"}
     state: dict
 
+
+class PodcastChapterOut(BaseModel):
+    start_sec: float
+    title: str
+    # http(s) addresses only; absent when the publisher gave none (or a bad one).
+    img: Optional[str] = None
+    url: Optional[str] = None
+

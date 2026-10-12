@@ -133,3 +133,38 @@ def _int_or_none(value) -> Optional[int]:
         return int(value)
     except (ValueError, TypeError):
         return None
+
+
+def probe_chapters(path: str, timeout: float = 30.0) -> list[dict]:
+    """The chapters inside an audio file, as `[{start_sec, title}]` sorted by
+    start. [] when there are none, the file is missing, or ffprobe fails."""
+    if not os.path.exists(path):
+        return []
+    cmd = [
+        settings.ffprobe_bin, "-v", "error", "-hide_banner",
+        "-print_format", "json", "-show_chapters", path,
+    ]
+    try:
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=timeout, check=False,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return []
+    if proc.returncode != 0 or not proc.stdout:
+        return []
+    try:
+        data = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        return []
+    out: list[dict] = []
+    for i, chapter in enumerate(data.get("chapters") or []):
+        try:
+            start = float(chapter.get("start_time"))
+        except (TypeError, ValueError):
+            continue
+        title = str((chapter.get("tags") or {}).get("title") or "").strip() or f"Chapter {i + 1}"
+        out.append({"start_sec": start, "title": title})
+    out.sort(key=lambda c: c["start_sec"])
+    return out
+

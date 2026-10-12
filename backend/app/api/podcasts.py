@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session
 from app import scheduler
 from app.api.deps import current_user, get_db
 from app.api.schemas import (
-    PodcastDetailOut, PodcastEpisodeOut, PodcastHomeOut, PodcastOpmlResultOut, PodcastOut,
+    PodcastChapterOut, PodcastDetailOut, PodcastEpisodeOut, PodcastHomeOut, PodcastOpmlResultOut, PodcastOut,
     PodcastProgressIn, PodcastProgressOut, PodcastSearchOut, PodcastSearchResultOut,
     PodcastSubscribeIn, PodcastSubscriptionOut, PodcastSubscriptionPatchIn,
 )
@@ -37,6 +37,7 @@ from app.models.podcast import (
 from app.models.user import User
 from app.services import longform, net_guard
 from app.services.art import resolve_art_batch
+from app.services.podcasts import chapters as chapters_service
 from app.services.podcasts import media_types, opml
 from app.services.podcasts import refresh as refresh_service
 from app.services.podcasts import search as podcast_search
@@ -424,6 +425,26 @@ def mark_unplayed(
     row.updated_at = _now()
     db.commit()
     return _progress_out(row)
+
+
+# ---------------------------------------------------------------------------
+# Chapters
+# ---------------------------------------------------------------------------
+@router.get(
+    "/episodes/{id}/chapters", response_model=list[PodcastChapterOut], response_model_exclude_none=True,
+)
+def episode_chapters(
+    id: uuid.UUID,
+    _user: Annotated[User, Depends(current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> list[PodcastChapterOut]:
+    """`[{start_sec, title, img?, url?}]`: the feed's chapters JSON (fetched
+    through the guard, cached), else the chapters inside the server file, else
+    an empty list."""
+    ep = _get_episode(db, id)
+    chapters = chapters_service.get_chapters(db, ep)
+    db.commit()
+    return [PodcastChapterOut(**c) for c in chapters]
 
 
 # ---------------------------------------------------------------------------
