@@ -100,7 +100,8 @@ def web(monkeypatch, tmp_path, db_session):
     monkeypatch.setattr(settings, "audiodb_api_key", "")
     monkeypatch.setattr(settings, "artist_art_autofill_enabled", True)
     # The SSRF guard does a real DNS lookup; the mocked hosts are fixed.
-    monkeypatch.setattr(art_service, "_assert_public_host", lambda url: None)
+    from tests.podcast_helpers import install_dns
+    install_dns(monkeypatch)
     return fake
 
 
