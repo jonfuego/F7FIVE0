@@ -237,7 +237,7 @@ const panelStyle: CSSProperties = {
   width: "min(480px, 100%)",
   maxHeight: "80vh",
   overflowY: "auto",
-  background: "var(--bg-2)",
+  background: "var(--surface-2, #181818)",
   border: "1px solid var(--line)",
   borderRadius: 6,
   padding: 20,

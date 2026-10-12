@@ -136,7 +136,7 @@ function SongsPageInner() {
             fontFamily: "var(--grotesk)",
             fontSize: 14,
             color: "var(--ink-1)",
-            background: "var(--bg-2)",
+            background: "var(--surface-2, #181818)",
             border: "1px solid var(--line)",
             borderRadius: 4,
             outline: "none",
