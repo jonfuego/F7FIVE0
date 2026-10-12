@@ -7,9 +7,13 @@
 // `media_file_id` holds the episode id, so the queue keeps one key per item.
 
 import { SKIP_BACK_SEC, SKIP_FORWARD_SEC, chapterAt, type Chapter } from "./longform.ts";
+import type { PodcastStreamStart, StreamStart } from "./types.ts";
 
 /** How often progress is saved while an episode plays. */
 export const PROGRESS_SAVE_MS = 15_000;
+
+/** A saved position under this many seconds is not worth resuming from. */
+export const RESUME_MIN_SEC = 5;
 
 export function isPodcastItem(item: { kind?: string | null } | null | undefined): boolean {
   return item?.kind === "podcast";
@@ -57,4 +61,32 @@ export type SaveEvent = "tick" | "pause" | "ended";
 export function shouldSaveProgress(event: SaveEvent, lastSavedAtMs: number, nowMs: number): boolean {
   if (event !== "tick") return true;
   return nowMs - lastSavedAtMs >= PROGRESS_SAVE_MS;
+}
+
+/** Where to start an episode: the saved position, unless it is only a few
+ *  seconds in (then from the top). */
+export function resumePosition(savedSec: number | null | undefined): number {
+  return savedSec != null && savedSec >= RESUME_MIN_SEC ? Math.floor(savedSec) : 0;
+}
+
+/** The dock plays everything through one StreamStart shape. An episode is always
+ *  a direct stream: the gateway serves the server copy or relays the publisher. */
+export function streamFromPodcast(data: PodcastStreamStart): StreamStart {
+  return {
+    media_file_id: data.episode_id,
+    mode: "direct",
+    url: data.url,
+    expires_at: data.expires_at,
+    variant: null,
+    title: data.title,
+    duration_sec: data.duration_sec,
+    container: data.container,
+    video_codec: null,
+    audio_codec: null,
+    width: null,
+    height: null,
+    cover_path: data.cover_path,
+    artist_name: data.podcast_title,
+    album_title: null,
+  };
 }

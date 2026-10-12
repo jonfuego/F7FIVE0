@@ -9,6 +9,14 @@
 // All stream-start, resume-threshold, heartbeat, and track-plays POST
 // behavior is preserved verbatim from Phase 5 — only the JSX/CSS
 // changed.
+//
+// Podcast mode: a queue item with kind "podcast" is an episode. It streams
+// through POST /api/library/podcasts/episodes/{id}/stream (a signed
+// /stream/podcast URL), is never prefetched or gaplessly swapped, shows -15 and
+// +30 in place of previous and next, a speed menu (saved per user as the view
+// pref podcast_speed), a chapter list, and mark played, and saves its place
+// every 15 s while playing and on pause and end. The rules live in
+// lib/longform.ts and lib/podcast-player.ts.
 
 "use client";
 
@@ -18,10 +26,14 @@ import { usePathname } from "next/navigation";
 import type { CSSProperties } from "react";
 import type HlsType from "hls.js";
 import {
+  Check,
+  List,
   ListMusic,
   Pause,
   Play,
   Repeat,
+  RotateCcw,
+  RotateCw,
   Shuffle,
   SkipBack,
   SkipForward,
@@ -51,11 +63,22 @@ import { PlayerTrackMenu } from "./PlayerTrackMenu";
 import { videoElementController } from "@/lib/playerController";
 import type { PlayerController } from "@/lib/playerController";
 import type {
+  PodcastProgress,
+  PodcastStreamStart,
   Progress,
   StreamStart,
   StreamStartRequest,
 } from "@/lib/types";
 import { artSized } from "@/lib/art-url";
+import {
+  SPEEDS, clampSpeed, formatSpeed, skipBack, skipForward, type Chapter,
+} from "@/lib/longform";
+import {
+  PROGRESS_SAVE_MS, currentChapterTitle, dockControls, isPodcastItem, resumePosition,
+  streamFromPodcast,
+} from "@/lib/podcast-player";
+import { podcastShowHref } from "@/lib/podcast-queue";
+import { useViewPref } from "@/lib/use-view-pref";
 
 const HEARTBEAT_MS = 10_000;
 const RESUME_MIN_SEC = 15;
@@ -82,11 +105,15 @@ function predictNextItem(
   if (repeat === "one") return null;
   if (shuffle) return null;
   const nextIdx = currentIndex + 1;
+  let candidate: QueueItem | null = null;
   if (nextIdx >= items.length) {
-    if (repeat === "all" && items.length > 0) return items[0] ?? null;
-    return null;
+    if (repeat === "all" && items.length > 0) candidate = items[0] ?? null;
+  } else {
+    candidate = items[nextIdx] ?? null;
   }
-  return items[nextIdx] ?? null;
+  // An episode streams through its own endpoint, so it is never prefetched or
+  // swapped in gaplessly.
+  return candidate && !isPodcastItem(candidate) ? candidate : null;
 }
 
 export function MiniPlayer() {
@@ -137,6 +164,12 @@ export function MiniPlayer() {
   // Drives the conditional id={...} so React reassigns id="mh-dock-audio" to
   // whichever element is active after a swap. Mirrors activeRef for render.
   const [activeKey, setActiveKey] = useState<"A" | "B">("A");
+  // Podcast mode: the saved playback speed, the current episode chapters, which
+  // pop-up menu is open, and whether the episode was just marked played.
+  const [speed, setSpeed] = useViewPref("podcast_speed");
+  const [chapters, setChapters] = useState<Chapter[]>([]);
+  const [menu, setMenu] = useState<"speed" | "chapters" | null>(null);
+  const [marked, setMarked] = useState(false);
 
   // Resolve the active / idle physical element from the current pointer.
   const getActive = useCallback(
@@ -214,6 +247,11 @@ export function MiniPlayer() {
   const onWatchRoute = pathname?.startsWith("/watch") ?? false;
   const onLoginRoute = pathname?.startsWith("/login") ?? false;
   const queueEmpty = currentIndex === null || items.length === 0;
+  const isPodcast = isPodcastItem(currentItem);
+  const isPodcastRef = useRef(isPodcast);
+  isPodcastRef.current = isPodcast;
+  const speedRef = useRef(speed);
+  speedRef.current = speed;
 
   const initialResumeRef = useRef<number>(0);
   // Mirror the latest `repeat` value into a ref so the audio `ended`
@@ -272,6 +310,8 @@ export function MiniPlayer() {
 
   const maybePrefetchNext = useCallback(
     (audio: HTMLAudioElement) => {
+      const cur = currentIndexRef.current !== null ? itemsRef.current[currentIndexRef.current] : null;
+      if (isPodcastItem(cur)) return;
       const dur = audio.duration;
       if (isNaN(dur) || dur <= 0) return;
       const remaining = dur - audio.currentTime;
@@ -371,6 +411,19 @@ export function MiniPlayer() {
     prev();
   }, [prev]);
 
+  // Skip in an episode: -1 goes back 15 s, +1 forward 30 s (never past the ends).
+  const jump = useCallback(
+    (dir: -1 | 1) => {
+      const a = audioRef.current;
+      if (!a || isNaN(a.currentTime)) return;
+      const dur = !isNaN(a.duration) && a.duration > 0 ? a.duration : null;
+      const target = dir < 0 ? skipBack(a.currentTime) : skipForward(a.currentTime, dur);
+      audioController.seek(target);
+      setNow(target);
+    },
+    [audioController],
+  );
+
   // Gates auto-play on the very first stream load after a page load.
   // null = not yet decided. On the first stream: honor the persisted
   // queuePlaying value. On every subsequent stream (user-driven skip /
@@ -391,6 +444,32 @@ export function MiniPlayer() {
     if (!currentItem) return;
 
     const mediaFileId = currentItem.media_file_id;
+
+    // An episode: a signed /stream/podcast URL for this person, resuming where
+    // they left off. No prefetch, no progress lookup through the media file API.
+    if (isPodcastItem(currentItem)) {
+      let cancelledEpisode = false;
+      (async () => {
+        try {
+          const data = await apiPost<PodcastStreamStart>(
+            `/api/library/podcasts/episodes/${mediaFileId}/stream`, {},
+          );
+          if (cancelledEpisode) return;
+          initialResumeRef.current = resumePosition(data.position_sec);
+          setStream(streamFromPodcast(data));
+        } catch (err) {
+          if (cancelledEpisode) return;
+          setStreamError(
+            err instanceof Error && /video_not_supported/.test(err.message)
+              ? "Video podcasts aren't supported yet."
+              : err instanceof Error ? err.message : "Failed to start the episode",
+          );
+        }
+      })();
+      return () => {
+        cancelledEpisode = true;
+      };
+    }
 
     // Background-advance fast path. If we prefetched this item's stream
     // while the previous track was still playing, use it directly so no
@@ -492,6 +571,8 @@ export function MiniPlayer() {
 
     const trackId = currentItem?.track_id;
     const trackDurationSec = currentItem?.duration_sec ?? null;
+    const podcastEpisodeId =
+      currentItem && isPodcastItem(currentItem) ? currentItem.media_file_id : null;
 
     const logPlay = (msPlayed: number, completed: boolean) => {
       if (!trackId) return;
@@ -531,9 +612,20 @@ export function MiniPlayer() {
     const onPause = () => {
       setIsPlaying(false);
       setPlaying(false);
+      // An episode saves its place on every pause (and every 15 s while playing).
+      if (podcastEpisodeId && !audio.ended && !isNaN(audio.currentTime) && audio.currentTime > 0) {
+        send(audio.currentTime);
+      }
     };
     const onEnded = () => {
       setIsPlaying(false);
+      if (podcastEpisodeId) {
+        // Save the end so the episode reads as played, then move on. No repeat,
+        // no gapless swap for an episode.
+        send(!isNaN(audio.duration) && audio.duration > 0 ? audio.duration : audio.currentTime);
+        next();
+        return;
+      }
       const ms = !isNaN(audio.currentTime) ? audio.currentTime * 1000 : 0;
       const durationMs = (trackDurationSec ?? Math.floor(audio.duration || 0)) * 1000;
       const completed =
@@ -699,6 +791,15 @@ export function MiniPlayer() {
         !isNaN(audio.duration) && audio.duration > 0
           ? Math.floor(audio.duration)
           : (stream.duration_sec ?? null);
+      if (podcastEpisodeId) {
+        void apiPut<PodcastProgress>(
+          `/api/library/podcasts/episodes/${podcastEpisodeId}/progress`,
+          { position_sec: Math.floor(position), duration_sec: dur },
+        ).catch(() => {
+          // best-effort; the next save or pause tries again
+        });
+        return;
+      }
       void apiPut<Progress>(
         `/api/library/progress/${stream.media_file_id}`,
         {
@@ -716,7 +817,7 @@ export function MiniPlayer() {
       send(audio.currentTime);
     };
 
-    const heartbeat = window.setInterval(tick, HEARTBEAT_MS);
+    const heartbeat = window.setInterval(tick, podcastEpisodeId ? PROGRESS_SAVE_MS : HEARTBEAT_MS);
 
     return () => {
       disposed = true;
@@ -758,7 +859,37 @@ export function MiniPlayer() {
         // ignore
       }
     };
-  }, [stream, next, setPlaying, currentItem?.track_id, currentItem?.duration_sec, currentItem?.media_file_id, maybePrefetchNext, getActive, getIdle, swapActive, detachHls]);
+  }, [stream, next, setPlaying, currentItem?.track_id, currentItem?.duration_sec, currentItem?.media_file_id, currentItem?.kind, maybePrefetchNext, getActive, getIdle, swapActive, detachHls]);
+
+  // Playback speed for an episode (a song always plays at 1x). Set both the live
+  // rate and the default rate: loading a new source resets the rate to the default.
+  useEffect(() => {
+    const rate = isPodcast ? clampSpeed(speed) : 1;
+    for (const a of [audioARef.current, audioBRef.current]) {
+      if (!a) continue;
+      a.defaultPlaybackRate = rate;
+      a.playbackRate = rate;
+    }
+  }, [speed, isPodcast, stream, activeKey]);
+
+  // Chapters of the current episode (the feed JSON, or the ones in the server file).
+  useEffect(() => {
+    setChapters([]);
+    setMenu(null);
+    setMarked(false);
+    if (!currentItem || !isPodcastItem(currentItem)) return;
+    let cancelled = false;
+    void apiGet<Chapter[]>(`/api/library/podcasts/episodes/${currentItem.media_file_id}/chapters`)
+      .then((list) => {
+        if (!cancelled && Array.isArray(list)) setChapters(list);
+      })
+      .catch(() => {
+        // no chapters is fine
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentItem?.media_file_id, currentItem?.kind]);
 
   // Media Session metadata. Drives lock-screen, OS media widgets, and
   // Bluetooth AVRCP on car head units (title, artist, album, artwork).
@@ -837,16 +968,28 @@ export function MiniPlayer() {
       const a = audioRef.current;
       if (a) a.pause();
     });
-    setHandler("previoustrack", () => {
-      // eslint-disable-next-line no-console
-      console.log("[mediaSession] previoustrack");
-      smartPrev();
-    });
-    setHandler("nexttrack", () => {
-      // eslint-disable-next-line no-console
-      console.log("[mediaSession] nexttrack");
-      next();
-    });
+    if (isPodcast) {
+      // An episode has no previous or next track: the OS gets back 15 s and
+      // forward 30 s instead (this is the podcast-only context the note below
+      // asks for).
+      setHandler("previoustrack", null);
+      setHandler("nexttrack", null);
+      setHandler("seekbackward", () => jump(-1));
+      setHandler("seekforward", () => jump(1));
+    } else {
+      setHandler("previoustrack", () => {
+        // eslint-disable-next-line no-console
+        console.log("[mediaSession] previoustrack");
+        smartPrev();
+      });
+      setHandler("nexttrack", () => {
+        // eslint-disable-next-line no-console
+        console.log("[mediaSession] nexttrack");
+        next();
+      });
+      setHandler("seekbackward", null);
+      setHandler("seekforward", null);
+    }
     setHandler("seekto", (details) => {
       const a = audioRef.current;
       if (!a || details?.seekTime == null) return;
@@ -859,11 +1002,8 @@ export function MiniPlayer() {
       } catch { /* ignore */ }
     });
 
-    // Explicitly null out the actions we used to register so a stale
-    // browser-cached handler from the prior bundle doesn't keep
-    // outranking prev/next on the lock screen.
-    setHandler("seekbackward", null);
-    setHandler("seekforward", null);
+    // Explicitly null out the stop action so a stale browser-cached handler
+    // from the prior bundle doesn't outrank the transport on the lock screen.
     setHandler("stop", null);
 
     return () => {
@@ -871,9 +1011,11 @@ export function MiniPlayer() {
       setHandler("pause", null);
       setHandler("previoustrack", null);
       setHandler("nexttrack", null);
+      setHandler("seekbackward", null);
+      setHandler("seekforward", null);
       setHandler("seekto", null);
     };
-  }, [next, smartPrev]);
+  }, [next, smartPrev, isPodcast, jump]);
 
   // Push position state to the OS so the lock-screen scrubber and car
   // progress display reflect reality. The Math.floor on `now` throttles
@@ -932,7 +1074,8 @@ export function MiniPlayer() {
   useEffect(() => {
     const unsubscribe = subscribeToNotificationActions((action) => {
       if (action === "prev") {
-        smartPrev();
+        if (isPodcastRef.current) jump(-1);
+        else smartPrev();
         return;
       }
       if (action === "play") {
@@ -947,11 +1090,12 @@ export function MiniPlayer() {
         return;
       }
       if (action === "next") {
-        next();
+        if (isPodcastRef.current) jump(1);
+        else next();
       }
     });
     return unsubscribe;
-  }, [next, smartPrev]);
+  }, [next, smartPrev, jump]);
 
   // One-shot notification permission prompt. The first non-null
   // currentItem is downstream of an explicit user click (Play, or a
@@ -1122,7 +1266,14 @@ export function MiniPlayer() {
     ["--pg" as never]: colorForTitle(currentItem?.title ?? ""),
     ["--ph" as never]: String(hueFromString(currentItem?.title ?? "")),
   };
-  const expandHref = currentItem ? `/watch/${currentItem.media_file_id}` : "/";
+  const controls = dockControls(currentItem, chapters.length);
+  const chapterTitle = isPodcast ? currentChapterTitle(chapters, now) : null;
+  // An episode links to its show; a song or video opens the player page.
+  const expandHref = currentItem
+    ? isPodcast
+      ? podcastShowHref(currentItem) ?? "/podcasts"
+      : `/watch/${currentItem.media_file_id}`
+    : "/";
   const pct = duration > 0 ? Math.min(100, (now / duration) * 100) : 0;
 
   // Right before navigating to /watch we stash the current playhead so
@@ -1131,7 +1282,7 @@ export function MiniPlayer() {
   // (causing a brief gap), but the prompt+pause-then-restart user flow
   // is gone.
   const stashExpandHint = () => {
-    if (!currentItem) return;
+    if (!currentItem || isPodcast) return;
     try {
       const audio = audioRef.current;
       const pos = audio && !isNaN(audio.currentTime)
@@ -1150,7 +1301,17 @@ export function MiniPlayer() {
       // resume prompt fires as it does today.
     }
   };
-  const sourceBadge = stream
+  const markPlayed = () => {
+    if (!currentItem || !isPodcast) return;
+    void apiPost<PodcastProgress>(`/api/library/podcasts/episodes/${currentItem.media_file_id}/played`, {})
+      .then(() => setMarked(true))
+      .catch(() => {
+        // best-effort
+      });
+  };
+  const sourceBadge = isPodcast
+    ? "Podcast"
+    : stream
     ? stream.mode === "direct"
       ? "Direct"
       : "Transcode"
@@ -1201,6 +1362,12 @@ export function MiniPlayer() {
                     <span>{albumTitle}</span>
                   )
                 ) : null}
+                {chapterTitle ? (
+                  <>
+                    {" • "}
+                    <span data-testid="dock-chapter">{chapterTitle}</span>
+                  </>
+                ) : null}
               </div>
             ) : streamError ? (
               <div className="s" style={{ color: "var(--danger)" }}>
@@ -1234,27 +1401,41 @@ export function MiniPlayer() {
           <span className="source-badge" aria-label="Stream source">
             {sourceBadge}
           </span>
-          <button
-            type="button"
-            onClick={() => setShuffle(!shuffle)}
-            aria-label={shuffle ? "Shuffle on" : "Shuffle off"}
-            aria-pressed={shuffle}
-            className="icbtn"
-            style={{
-              color: shuffle ? "var(--warning)" : undefined,
-              opacity: shuffle ? 1 : 0.55,
-            }}
-          >
-            <ShuffleIcon />
-          </button>
-          <button
-            type="button"
-            onClick={smartPrev}
-            aria-label="Previous"
-            className="icbtn"
-          >
-            <PrevIcon />
-          </button>
+          {controls.showPrevNext ? (
+            <button
+              type="button"
+              onClick={() => setShuffle(!shuffle)}
+              aria-label={shuffle ? "Shuffle on" : "Shuffle off"}
+              aria-pressed={shuffle}
+              className="icbtn"
+              style={{
+                color: shuffle ? "var(--warning)" : undefined,
+                opacity: shuffle ? 1 : 0.55,
+              }}
+            >
+              <ShuffleIcon />
+            </button>
+          ) : null}
+          {controls.showPrevNext ? (
+            <button
+              type="button"
+              onClick={smartPrev}
+              aria-label="Previous"
+              className="icbtn"
+            >
+              <PrevIcon />
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => jump(-1)}
+              aria-label={`Back ${controls.skipBackSec} seconds`}
+              className="icbtn skip"
+            >
+              <Icon icon={RotateCcw} size={18} />
+              <span aria-hidden className="skip-n">{controls.skipBackSec}</span>
+            </button>
+          )}
           <button
             type="button"
             onClick={togglePlay}
@@ -1263,48 +1444,143 @@ export function MiniPlayer() {
           >
             {isPlaying ? <PauseIcon /> : <PlayIcon />}
           </button>
-          <button
-            type="button"
-            onClick={next}
-            aria-label="Next"
-            className="icbtn"
-          >
-            <NextIcon />
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              const order: RepeatMode[] = ["off", "all", "one"];
-              const i = order.indexOf(repeat);
-              setRepeat(order[(i + 1) % order.length]);
-            }}
-            aria-label={`Repeat: ${repeat}`}
-            aria-pressed={repeat !== "off"}
-            className="icbtn"
-            style={{
-              color: repeat !== "off" ? "var(--warning)" : undefined,
-              opacity: repeat !== "off" ? 1 : 0.55,
-              position: "relative",
-            }}
-          >
-            <RepeatIcon />
-            {repeat === "one" ? (
-              <span
-                aria-hidden
-                style={{
-                  position: "absolute",
-                  right: 2,
-                  top: 1,
-                  fontSize: 8,
-                  fontFamily: "var(--mono)",
-                  lineHeight: 1,
-                  fontWeight: 700,
-                }}
+          {controls.showPrevNext ? (
+            <button
+              type="button"
+              onClick={next}
+              aria-label="Next"
+              className="icbtn"
+            >
+              <NextIcon />
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => jump(1)}
+              aria-label={`Forward ${controls.skipForwardSec} seconds`}
+              className="icbtn skip"
+            >
+              <Icon icon={RotateCw} size={18} />
+              <span aria-hidden className="skip-n">{controls.skipForwardSec}</span>
+            </button>
+          )}
+          {controls.showSpeed ? (
+            <div className="pod-menu">
+              <button
+                type="button"
+                onClick={() => setMenu(menu === "speed" ? null : "speed")}
+                aria-label={`Playback speed ${formatSpeed(speed)}`}
+                aria-haspopup="menu"
+                aria-expanded={menu === "speed"}
+                className="icbtn speed-btn"
               >
-                1
-              </span>
-            ) : null}
-          </button>
+                {formatSpeed(speed)}
+              </button>
+              {menu === "speed" ? (
+                <ul className="pod-pop" role="menu" aria-label="Playback speed">
+                  {SPEEDS.map((v) => (
+                    <li key={v} role="none">
+                      <button
+                        type="button"
+                        role="menuitemradio"
+                        aria-checked={v === speed}
+                        className={v === speed ? "on" : ""}
+                        onClick={() => {
+                          setSpeed(v);
+                          setMenu(null);
+                        }}
+                      >
+                        {formatSpeed(v)}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          ) : null}
+          {controls.showChapters ? (
+            <div className="pod-menu">
+              <button
+                type="button"
+                onClick={() => setMenu(menu === "chapters" ? null : "chapters")}
+                aria-label="Chapters"
+                aria-haspopup="menu"
+                aria-expanded={menu === "chapters"}
+                className="icbtn"
+              >
+                <Icon icon={List} size={16} />
+              </button>
+              {menu === "chapters" ? (
+                <ul className="pod-pop chapters" role="menu" aria-label="Chapters">
+                  {chapters.map((c, i) => (
+                    <li key={`${c.start_sec}-${i}`} role="none">
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className={c.title === chapterTitle ? "on" : ""}
+                        onClick={() => {
+                          audioController.seek(c.start_sec);
+                          setNow(c.start_sec);
+                          setMenu(null);
+                        }}
+                      >
+                        <span className="when">{formatDuration(c.start_sec)}</span>
+                        <span className="what">{c.title}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          ) : null}
+          {controls.showMarkPlayed ? (
+            <button
+              type="button"
+              onClick={markPlayed}
+              aria-label={marked ? "Marked played" : "Mark played"}
+              aria-pressed={marked}
+              className="icbtn"
+              style={{ color: marked ? "var(--hive-text)" : undefined }}
+            >
+              <Icon icon={Check} size={16} />
+            </button>
+          ) : null}
+          {controls.showPrevNext ? (
+            <button
+              type="button"
+              onClick={() => {
+                const order: RepeatMode[] = ["off", "all", "one"];
+                const i = order.indexOf(repeat);
+                setRepeat(order[(i + 1) % order.length]);
+              }}
+              aria-label={`Repeat: ${repeat}`}
+              aria-pressed={repeat !== "off"}
+              className="icbtn"
+              style={{
+                color: repeat !== "off" ? "var(--warning)" : undefined,
+                opacity: repeat !== "off" ? 1 : 0.55,
+                position: "relative",
+              }}
+            >
+              <RepeatIcon />
+              {repeat === "one" ? (
+                <span
+                  aria-hidden
+                  style={{
+                    position: "absolute",
+                    right: 2,
+                    top: 1,
+                    fontSize: 8,
+                    fontFamily: "var(--mono)",
+                    lineHeight: 1,
+                    fontWeight: 700,
+                  }}
+                >
+                  1
+                </span>
+              ) : null}
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={toggleMute}
@@ -1324,13 +1600,15 @@ export function MiniPlayer() {
             aria-label="Volume"
             className="vol-slider"
           />
-          <PlayerTrackMenu
-            albumId={currentAlbumId}
-            artistId={currentArtistId}
-            placement="up"
-            buttonClassName="icbtn"
-            iconSize={16}
-          />
+          {isPodcast ? null : (
+            <PlayerTrackMenu
+              albumId={currentAlbumId}
+              artistId={currentArtistId}
+              placement="up"
+              buttonClassName="icbtn"
+              iconSize={16}
+            />
+          )}
           <button
             type="button"
             onClick={() => setPanelOpen(true)}

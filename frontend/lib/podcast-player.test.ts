@@ -6,7 +6,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  PROGRESS_SAVE_MS, currentChapterTitle, dockControls, isPodcastItem, shouldSaveProgress,
+  PROGRESS_SAVE_MS, currentChapterTitle, dockControls, isPodcastItem, resumePosition,
+  shouldSaveProgress, streamFromPodcast,
 } from "./podcast-player.ts";
 
 const podcast = { kind: "podcast", media_file_id: "ep-1" };
@@ -53,3 +54,27 @@ test("progress is saved every 15 s while playing, and always on pause and end", 
   assert.equal(shouldSaveProgress("pause", 1_000, 2_000), true);
   assert.equal(shouldSaveProgress("ended", 1_000, 1_001), true);
 });
+
+test("an episode resumes from its saved place, unless that is only a few seconds in", () => {
+  assert.equal(resumePosition(321.9), 321);
+  assert.equal(resumePosition(5), 5);
+  assert.equal(resumePosition(4), 0);
+  assert.equal(resumePosition(0), 0);
+  assert.equal(resumePosition(null), 0);
+  assert.equal(resumePosition(undefined), 0);
+});
+
+test("the dock plays an episode as a direct stream of its signed URL", () => {
+  const stream = streamFromPodcast({
+    episode_id: "ep-1", url: "/stream/podcast/ep-1?sig=x", expires_at: "2026-10-11T12:00:00Z",
+    title: "Episode Three", podcast_title: "The Fixture Show", duration_sec: 3723, container: "mp3",
+    source: "publisher", cover_path: "/api/art/podcast/s/cover?v=1", art_url: null, position_sec: 300,
+  });
+  assert.equal(stream.mode, "direct");
+  assert.equal(stream.url, "/stream/podcast/ep-1?sig=x");
+  assert.equal(stream.media_file_id, "ep-1");
+  assert.equal(stream.artist_name, "The Fixture Show");
+  assert.equal(stream.duration_sec, 3723);
+  assert.equal(stream.cover_path, "/api/art/podcast/s/cover?v=1");
+});
+
