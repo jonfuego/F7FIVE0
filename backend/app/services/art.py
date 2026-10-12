@@ -18,7 +18,6 @@ import tempfile
 import uuid
 from pathlib import Path
 from typing import Iterable, Optional, Tuple
-from urllib.parse import urljoin, urlsplit
 
 import httpx
 from PIL import Image, UnidentifiedImageError
@@ -75,24 +74,6 @@ _MAX_BYTES = 10 * 1024 * 1024
 
 # Hard timeout for URL fetches.
 _URL_TIMEOUT = 10.0
-
-# Max redirect hops on an admin art URL fetch. Generous enough for normal
-# CDN chains, bounded so a redirect loop can't spin forever and so each hop
-# stays inside the SSRF check below.
-_MAX_REDIRECTS = net_guard.MAX_REDIRECTS
-
-
-def _assert_public_host(url: str) -> None:
-    """Reject a URL whose host resolves to a non-public address.
-
-    The SSRF check itself lives in `services/net_guard.py` (one guard for art
-    and the podcast fetches); this keeps art's own error type and status codes.
-    Called on the original URL and again on every redirect target.
-    """
-    try:
-        net_guard.assert_public_host(url)
-    except net_guard.NetGuardError as exc:
-        raise ArtValidationError(str(exc), status_code=exc.status_code) from exc
 
 # Valid (entity_kind, role) combinations. Reject anything else at the
 # service layer so garbage can never land in the table.
@@ -316,15 +297,13 @@ def fetch_url_bytes(url: str) -> bytes:
     """Download an image over HTTP(S) and return the raw bytes (not yet
     validated as an image; `save_upload_bytes` does that).
 
-    The body is streamed and aborted the moment it crosses the 10 MB cap, so
-    a hostile or fat URL (or a lying Content-Length) can't pull unbounded
-    bytes into memory. Redirects are followed manually, at most
-    `_MAX_REDIRECTS` hops, with an SSRF check on every hop so the fetch can
-    never be steered at a LAN or localhost service.
+    The fetch goes through `net_guard.open_stream`, the one guarded open: the
+    host is resolved once per hop, every address must be public, and the
+    connection is pinned to the checked address, on the first request and on
+    every redirect hop. The body is streamed and aborted the moment it crosses
+    the 10 MB cap, so a hostile or fat URL (or a lying Content-Length) can't
+    pull unbounded bytes into memory.
     """
-    if not url or not url.lower().startswith(("http://", "https://")):
-        raise ArtValidationError("url must be absolute http(s)", status_code=400)
-
     # Wikimedia + several image CDNs reject default httpx UA. Send a real
     # identifier. Accept nudges servers that content-negotiate on it.
     headers = {
@@ -333,56 +312,23 @@ def fetch_url_bytes(url: str) -> bytes:
         ),
         "accept": "image/jpeg,image/png,image/webp,image/*;q=0.8,*/*;q=0.5",
     }
-    body = bytearray()
-    cap_exceeded = ArtValidationError(
-        f"image exceeds {_MAX_BYTES // (1024 * 1024)} MB cap", status_code=413,
-    )
     try:
-        with httpx.Client(
-            timeout=_URL_TIMEOUT,
-            follow_redirects=False,
-            headers=headers,
-            transport=net_guard.client_transport(),
-        ) as client:
-            current = url
-            for _hop in range(_MAX_REDIRECTS + 1):
-                _assert_public_host(current)
-                with client.stream("GET", current) as resp:
-                    if resp.is_redirect:
-                        loc = resp.headers.get("location")
-                        if not loc:
-                            raise ArtValidationError(
-                                "redirect without a location header",
-                                status_code=502,
-                            )
-                        current = urljoin(current, loc)
-                        if not current.lower().startswith(("http://", "https://")):
-                            raise ArtValidationError(
-                                "redirect to a non-http(s) target",
-                                status_code=400,
-                            )
-                        continue
-                    if resp.status_code >= 400:
-                        raise ArtValidationError(
-                            f"upstream returned HTTP {resp.status_code} for {url}",
-                            status_code=502,
-                        )
-                    for chunk in resp.iter_bytes():
-                        body.extend(chunk)
-                        if len(body) > _MAX_BYTES:
-                            raise cap_exceeded
-                    break
-            else:
-                raise ArtValidationError("too many redirects", status_code=502)
-    except httpx.HTTPError as exc:
-        # Surface the exception class + message so the admin sees something
-        # actionable in the modal rather than a flat "fetch failed".
-        raise ArtValidationError(
-            f"fetch failed ({type(exc).__name__}): {exc}",
-            status_code=502,
-        )
-
-    return bytes(body)
+        with net_guard.open_stream(
+            url, headers=headers, timeout=httpx.Timeout(_URL_TIMEOUT),
+        ) as stream:
+            resp = stream.response
+            if resp.status_code >= 400:
+                raise ArtValidationError(
+                    f"upstream returned HTTP {resp.status_code} for {url}",
+                    status_code=502,
+                )
+            return net_guard.read_limited(resp, _MAX_BYTES)
+    except net_guard.NetGuardError as exc:
+        if exc.status_code == 413:
+            raise ArtValidationError(
+                f"image exceeds {_MAX_BYTES // (1024 * 1024)} MB cap", status_code=413,
+            ) from exc
+        raise ArtValidationError(str(exc), status_code=exc.status_code) from exc
 
 
 def fetch_and_save_url(
