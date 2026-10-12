@@ -5,7 +5,7 @@
 <h1 align="center">F7FIVE0</h1>
 
 <p align="center">
-  <b>Your movies, TV, music, and music videos. Your server. Every screen.</b><br>
+  <b>Your movies, TV, music, music videos, and podcasts. Your server. Every screen.</b><br>
   A free, self-hosted media server for Windows.
 </p>
 
@@ -48,6 +48,7 @@ Want to watch away from home? See [Remote access](#remote-access).
 | 🎬 **Movies and TV** | Continue Watching, On Deck, next episode, skip intro and credits |
 | 🎵 **Music** | Gapless playback, loudness leveling, lyrics, artist radio, mixes, a queue that follows you between devices |
 | 📺 **Music videos** | Organized by artist and release |
+| 🎙️ **Podcasts** | Search and follow shows (or import an OPML list), stream, download to the server or your phone, chapters, speed, skip back 15 and forward 30 seconds, and pick up where you left off on any device |
 | ▶️ **Plays anywhere** | Streams files as-is when your device can play them, converts them on the fly when it can't (uses an NVIDIA GPU if you have one) |
 | 🌐 **Web app** | Installs like an app on phones and desktops, with Chromecast |
 | 📱 **Android app** | Phone, Android TV, and Android Auto, with downloads for offline play |
@@ -65,6 +66,7 @@ Movies\The Matrix (1999)\The Matrix (1999).mkv
 TV\Some Show (2020)\Season 01\Some Show - S01E01 - Pilot.mkv
 Music\Artist\Album (2001)\01 - Song.flac
 Music Videos\Artist\Release\01 - Video.mp4
+Podcasts\Show name\2025-01-05 Episode title.mp3
 ```
 
 Artwork next to your files (`poster.jpg`, `fanart.jpg`, `cover.jpg`) is

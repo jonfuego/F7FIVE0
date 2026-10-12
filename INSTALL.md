@@ -151,8 +151,8 @@ cd C:\F7FIVE0
 
 ## Library folders
 
-Each library (Movies, TV shows, Music, Music videos) can use one folder or
-several, for example movies split across two drives plus a NAS share. Change
+Each library (Movies, TV shows, Music, Music videos, Podcasts) can use one
+folder or several, for example movies split across two drives plus a NAS share. Change
 them any time in **Admin > Library folders**: add or remove folders, see
 which ones the server can open, and save. A scan starts right away.
 
@@ -170,6 +170,38 @@ Setup writes the folders to `LIBRARY_ROOT_MOVIES`, `LIBRARY_ROOT_TV`,
 `LIBRARY_ROOT_MUSIC`, and `LIBRARY_ROOT_MUSIC_VIDEOS` in `.env`, separated by
 `;`. Once you save from the Admin page, the server uses the saved list and
 ignores those keys.
+
+## Podcasts
+
+Podcasts work with no setup: open **Podcasts** in the web app (or the phone app),
+search for a show or paste its feed address, and follow it. Episodes stream
+through your server, so the browser never talks to the publisher. Feeds are
+checked every hour for the shows somebody follows.
+
+- **A podcasts folder (optional).** In **Admin > Library folders** add a folder
+  under **Podcasts**, for example `D:\Podcasts` or `\\nas\media\Podcasts`. It
+  is needed for **Download to server** and for the auto-download switch on a
+  show. Each show gets its own subfolder and each episode is an audio file
+  (`Podcasts\Show name\2025-01-05 Episode title.mp3`). Audio you put there
+  yourself is found by the next scan and shows up under **On this server**,
+  where anyone can follow it. Downloads are never capped: Admin shows how much
+  they use and the free space on that drive, and a reminder appears when free
+  space drops below 10 GB (`PODCAST_FREE_SPACE_WARN_GB`). Admin can remove a file
+  F7FIVE0 downloaded from the show page; files you added yourself are never
+  touched.
+- **A Podcast Index key (optional).** Search uses Apple's iTunes directory,
+  which needs no key. For the Podcast Index directory instead, make a free
+  account at https://api.podcastindex.org/signup (it emails an API key and a
+  secret), then paste both in **Admin > Metadata**. Setup tests them with one
+  search before saving, and they take effect without a restart. A pair saved
+  there wins over `PODCASTINDEX_API_KEY` and `PODCASTINDEX_API_SECRET` in `.env`.
+  The secret is never shown again.
+- **Your list moves with you.** **Import OPML** on the Podcasts page adds every
+  feed in a list exported by another app (up to 1 MB); **Export OPML** gives you
+  your own.
+- **Each person has their own** subscriptions, positions and played marks, and
+  playback speed follows you from device to device. Video podcasts are listed but
+  not played yet.
 
 ## Media on a NAS or network drive
 
@@ -262,6 +294,9 @@ Restart-Service F7FIVE0-API, F7FIVE0-Stream, F7FIVE0-Web
   Easier: paste it in **Admin > Metadata**, which tests it with TMDB and
   needs no restart (a key saved there wins over `.env`). Admins see a
   reminder banner until a key is set.
+- **Podcast Index** (`PODCASTINDEX_API_KEY`, `PODCASTINDEX_API_SECRET`): optional
+  directory for podcast search. See [Podcasts](#podcasts). Without it, search
+  uses Apple's iTunes directory.
 - **MusicBrainz** (`MUSICBRAINZ_USER_AGENT_EMAIL`): your email, sent with
   music lookups as MusicBrainz asks.
 - **Radarr / Sonarr / Lidarr**: set up in **Admin > Radarr, Sonarr and
