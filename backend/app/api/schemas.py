@@ -1415,3 +1415,19 @@ class PodcastStreamOut(BaseModel):
     # Where to resume for the caller: 0 for a new or played episode.
     position_sec: int = 0
 
+
+class PodcastStorageFolderOut(BaseModel):
+    path: str
+    reachable: bool
+    free_bytes: Optional[int] = None
+    total_bytes: Optional[int] = None
+
+
+class PodcastStorageOut(BaseModel):
+    # The sum of the sizes of the files F7FIVE0 downloaded.
+    used_bytes: int
+    # Free space below this many GB on any podcasts folder drive raises the warning.
+    warn_gb: int
+    low_space: bool
+    folders: list[PodcastStorageFolderOut]
+

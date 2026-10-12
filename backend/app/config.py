@@ -191,6 +191,10 @@ class Settings(BaseSettings):
     # Podcasts. How often the feeds of the shows people follow are checked for
     # new episodes (minutes; the scheduler never goes below 5).
     podcast_refresh_minutes: int = 60
+    # There is no cap on podcast downloads. Admin shows what they use, and a
+    # reminder appears when free space on a podcasts folder drive drops below
+    # this many GB.
+    podcast_free_space_warn_gb: int = 10
 
     # Podcast Index (podcastindex.org) key and secret for podcast search. Optional:
     # with none, search uses Apple's iTunes Search API. A pair saved in Admin >

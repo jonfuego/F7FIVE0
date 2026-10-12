@@ -31,7 +31,7 @@ from app.api.schemas import (
     LibraryFolderOut, LibraryFoldersIn, LibraryFoldersLibraryOut, LibraryFoldersOut,
     MergeArtistIn, MergePreviewOut, MergeResultOut, UndoMergeResultOut,
     MetadataSettingsOut, NasCredentialIn, NasCredentialOut, NasSaveOut,
-    PodcastIndexKeyIn, PodcastIndexStatusOut,
+    PodcastIndexKeyIn, PodcastIndexStatusOut, PodcastStorageOut,
     ReminderOut, ReminderSnoozeIn, TmdbKeyCheckOut, TmdbKeyIn,
     TmdbKeyStatusOut, UpdateBadgeOut, UpdateRunOut, UpdatesOut,
     ActiveTranscodeOut, AdminSessionOut, AuthEventOut, MatchApply,
@@ -62,6 +62,7 @@ from app.services import (
 )
 from app.services.podcasts import download as podcast_download
 from app.services.podcasts import search as podcast_search
+from app.services.podcasts import storage as podcast_storage
 from app.services import art as art_service
 from app.services import artist_merge, auth_events
 from app.services.metadata._base import ProviderError
@@ -1965,9 +1966,9 @@ def delete_podcastindex_key(
 # ---------------------------------------------------------------------------
 # Podcasts: remove a server download
 # ---------------------------------------------------------------------------
-@router.delete("/podcasts/episodes/{episode_id}/download", status_code=204)
+@router.delete("/podcasts/episodes/{id}/download", status_code=204)
 def delete_podcast_download(
-    episode_id: uuid.UUID,
+    id: uuid.UUID,
     _admin: Annotated[User, Depends(require_admin)],
     db: Annotated[Session, Depends(get_db)],
 ) -> Response:
@@ -1976,7 +1977,7 @@ def delete_podcast_download(
     itself, and only under the podcasts library folders: anything else answers
     409 and nothing is touched."""
     from app.models.podcast import PodcastEpisode
-    ep = db.get(PodcastEpisode, episode_id)
+    ep = db.get(PodcastEpisode, id)
     if ep is None:
         raise HTTPException(status_code=404, detail="episode_not_found")
     try:
@@ -1985,6 +1986,46 @@ def delete_podcast_download(
         raise HTTPException(status_code=409, detail=exc.code) from None
     db.commit()
     return Response(status_code=204)
+
+
+@router.get("/podcasts/storage", response_model=PodcastStorageOut)
+def get_podcast_storage(
+    _admin: Annotated[User, Depends(require_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> PodcastStorageOut:
+    """What the downloaded episodes use, and the free space on the drive of each
+    podcasts folder. There is no cap; `low_space` drives the warning."""
+    return PodcastStorageOut(**podcast_storage.usage(db))
+
+
+@router.get("/podcasts/refresh")
+def get_podcast_refresh(
+    _admin: Annotated[User, Depends(require_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """The feed refresh status (`podcast_refresh_status`): idle or running, how
+    many shows are done, new episodes found, errors, the last error."""
+    return scan_status.pr_read(db)
+
+
+@router.post("/podcasts/refresh", status_code=202)
+def start_podcast_refresh(
+    _admin: Annotated[User, Depends(require_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Refresh the feeds of every followed show now. 409 while one is running.
+    The refresh runs on the scheduler; poll GET /podcasts/refresh to watch it."""
+    if not scan_status.pr_begin(db):
+        raise HTTPException(status_code=409, detail="refresh_running")
+    db.commit()
+    try:
+        scheduler.trigger_podcast_refresh_now()
+    except Exception as exc:
+        log.exception("could not queue the podcast refresh")
+        scan_status.pr_finish(db, "The refresh could not be started.")
+        db.commit()
+        raise HTTPException(status_code=500, detail="refresh_not_started") from exc
+    return scan_status.pr_read(db)
 
 
 # ---------------------------------------------------------------------------
