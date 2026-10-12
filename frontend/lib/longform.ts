@@ -51,7 +51,7 @@ export function isPlayed(positionSec: number, durationSec?: number | null): bool
 
 /** Index of the chapter playing at `positionSec`, or -1 when there are none or
  *  the position is before the first. */
-export function chapterAt(chapters: readonly { start_sec: number }[], positionSec: number): number {
+export function chapterAt<T extends { start_sec: number }>(chapters: readonly T[], positionSec: number): number {
   const at = Math.max(0, positionSec);
   let found = -1;
   for (let i = 0; i < chapters.length; i++) {

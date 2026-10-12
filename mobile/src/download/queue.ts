@@ -12,7 +12,7 @@ export type DownloadStatus = "queued" | "downloading" | "done" | "error" | "canc
 
 /** What a download is, so the Downloads screen and offline mode can play it
  * without the network (no catalogue lookups offline). */
-export type DownloadKind = "track" | "movie" | "episode" | "music_video";
+export type DownloadKind = "track" | "movie" | "episode" | "music_video" | "podcast";
 
 export interface DownloadMeta {
   trackId?: string | null;
@@ -25,6 +25,9 @@ export interface DownloadMeta {
   container?: string | null;
   /** Grouping label for bulk downloads (album title, mix name, show). */
   group?: string | null;
+  /** A podcast episode download: the episode and its show. */
+  episodeId?: string | null;
+  podcastId?: string | null;
 }
 
 export interface DownloadItem {

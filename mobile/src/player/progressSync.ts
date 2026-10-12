@@ -7,7 +7,10 @@
  */
 
 export interface ProgressSnapshot {
+  /** The media file id of a track, or the episode id of a podcast episode. */
   trackId: string;
+  /** "podcast" when trackId is an episode id (reported to the podcast API). */
+  kind?: "podcast";
   positionSec: number;
   durationSec?: number;
   playing: boolean;

@@ -26,6 +26,7 @@ import {
   startStream,
 } from "@/api/media";
 import { useCast } from "@/cast";
+import { reportPodcastProgress, setEpisodePlayed, startPodcastStream } from "@/api/podcasts";
 import { buildTrackArtwork } from "./artwork";
 import { clampCrossfade, fadeInVolume, fadeOutVolume, shouldStartFade } from "./crossfade";
 import { resolveVolume } from "./loudness";
@@ -44,8 +45,10 @@ import type { SongRow } from "@/api/types";
 import { getApiBase } from "@/state/config";
 import { getSetting, setSetting, SETTINGS } from "@/state/settings";
 import { useApi } from "@/state/auth";
+import { useViewPref } from "@/state/viewPrefs";
+import { clampSpeed, isSpeed, skipBack, skipForward } from "./longform";
 import { ProgressSyncer } from "./progressSync";
-import { setupPlayer } from "./setup";
+import { setPlayerMode, setupPlayer } from "./setup";
 
 interface QueueMeta {
   mediaFileId: string;
@@ -57,6 +60,22 @@ interface QueueMeta {
   artistId?: string | null;
   artPath?: string | null;
   durationSec?: number | null;
+  /** A podcast episode: mediaFileId holds the episode id too. */
+  kind?: "podcast";
+  episodeId?: string;
+  podcastId?: string | null;
+}
+
+/** What playEpisode needs to start an episode. */
+export interface PlayableEpisode {
+  id: string;
+  podcastId?: string | null;
+  title: string;
+  showTitle: string;
+  coverPath?: string | null;
+  durationSec?: number | null;
+  /** Where to start; when omitted the server (or the offline buffer) is asked. */
+  resumeSec?: number | null;
 }
 
 export type RepeatSetting = "off" | "all" | "one";
@@ -69,6 +88,9 @@ interface NowPlaying {
   trackId?: string | null;
   albumId?: string | null;
   artistId?: string | null;
+  kind?: "podcast";
+  episodeId?: string;
+  podcastId?: string | null;
 }
 
 /** Tracks queued before and after the tapped one (see playSongs). */
@@ -78,6 +100,17 @@ const QUEUE_AHEAD = 50;
 interface PlayerContextValue {
   ready: boolean;
   playSongs: (songs: SongRow[], startIndex: number) => Promise<void>;
+  /** Play a podcast episode: a signed /stream/podcast URL (or the local file when
+   * it is downloaded), resumed where the person left off, in podcast mode (jump
+   * back 15 s / forward 30 s in the app and the media notification). */
+  playEpisode: (ep: PlayableEpisode) => Promise<boolean>;
+  podcastMode: boolean;
+  podcastSpeed: number;
+  setPodcastSpeed: (v: number) => void;
+  /** -1 skips back 15 s, 1 skips forward 30 s. */
+  skipBy: (dir: -1 | 1) => Promise<void>;
+  /** Mark the episode that is playing as played. */
+  markEpisodePlayed: () => Promise<void>;
   playNext: (songs: SongRow[]) => Promise<void>;
   addToQueue: (songs: SongRow[]) => Promise<void>;
   crossfadeSec: number;
@@ -135,6 +168,15 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const [crossfadeSec, setCrossfadeState] = useState(0);
   const [playbackRate, setPlaybackRateState] = useState(1);
   const [sleep, setSleepState] = useState<SleepState>(cleared());
+  // Podcast mode: one episode in the queue, jump buttons instead of previous and
+  // next, progress through the podcast API, and the saved podcast speed.
+  const [podcastMode, setPodcastModeState] = useState(false);
+  const podcastModeRef = useRef(false);
+  const [podcastSpeed, setPodcastSpeedPref] = useViewPref<number>("podcast_speed", 1, isSpeed);
+  const podcastSpeedRef = useRef(podcastSpeed);
+  podcastSpeedRef.current = podcastSpeed;
+  const rateRef = useRef(1);
+  rateRef.current = playbackRate;
   const queueMeta = useRef<QueueMeta[]>([]);
   const recovering = useRef(false);
   const lastPlayReported = useRef<string | null>(null);
@@ -187,13 +229,38 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         const meta = idx >= 0 ? queueMeta.current[idx] : undefined;
         if (!meta) return null;
         return {
-          trackId: meta.mediaFileId,
+          trackId: meta.kind === "podcast" ? (meta.episodeId ?? meta.mediaFileId) : meta.mediaFileId,
+          kind: meta.kind,
           positionSec: progressRef.current.position,
           durationSec: progressRef.current.duration || undefined,
           playing: playingRef.current,
         };
       },
       report: async (snap) => {
+        // An episode reports through the podcast API every 15 s while playing, and
+        // is kept in the offline buffer when the server cannot be reached.
+        if (snap.kind === "podcast") {
+          if (!downloadsRef.current.online) {
+            downloadsRef.current.bufferOffline({
+              kind: "podcast_progress",
+              episodeId: snap.trackId,
+              positionSec: snap.positionSec,
+              durationSec: snap.durationSec,
+              at: Date.now(),
+            });
+            return;
+          }
+          await reportPodcastProgress(api, snap.trackId, snap.positionSec, snap.durationSec).catch(() => {
+            downloadsRef.current.bufferOffline({
+              kind: "podcast_progress",
+              episodeId: snap.trackId,
+              positionSec: snap.positionSec,
+              durationSec: snap.durationSec,
+              at: Date.now(),
+            });
+          });
+          return;
+        }
         if (!downloadsRef.current.online) {
           downloadsRef.current.bufferOffline({
             kind: "progress",
@@ -226,6 +293,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   shuffleRef.current = shuffleOn;
 
   const pushQueue = useCallback(async () => {
+    // An episode is not a song: another device that loaded it from the shared
+    // queue would try to stream it as a media file. Progress is how an episode
+    // follows the person (it resumes at the same spot everywhere).
+    if (queueMeta.current.some((m) => m.kind === "podcast")) return;
     const items = buildServerQueueItems(queueMeta.current as QueueSnapshotItem[]);
     const idx = activeIndexRef.current;
     await saveServerQueue(
@@ -380,6 +451,36 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     return () => sub.remove();
   }, [api, pushQueue, applyLoudness]);
 
+  // Save an episode's place when it stops (pause, notification pause, headset),
+  // and its end, so it reads as played. Playing saves every 15 s (the syncer).
+  useEffect(() => {
+    if (!isPlaying && podcastModeRef.current) syncer.current?.flush();
+  }, [isPlaying]);
+
+  useEffect(() => {
+    const sub = TrackPlayer.addEventListener(Event.PlaybackQueueEnded, async () => {
+      if (!podcastModeRef.current) return;
+      const idx = activeIndexRef.current;
+      const meta = idx >= 0 ? queueMeta.current[idx] : undefined;
+      if (!meta || meta.kind !== "podcast") return;
+      const id = meta.episodeId ?? meta.mediaFileId;
+      const dur = progressRef.current.duration || meta.durationSec || 0;
+      const pos = dur > 0 ? dur : progressRef.current.position;
+      if (!downloadsRef.current.online) {
+        downloadsRef.current.bufferOffline({
+          kind: "podcast_progress", episodeId: id, positionSec: pos, durationSec: dur || undefined, at: Date.now(),
+        });
+        return;
+      }
+      await reportPodcastProgress(api, id, pos, dur || undefined).catch(() => {
+        downloadsRef.current.bufferOffline({
+          kind: "podcast_progress", episodeId: id, positionSec: pos, durationSec: dur || undefined, at: Date.now(),
+        });
+      });
+    });
+    return () => sub.remove();
+  }, [api]);
+
   // Expired-URL recovery: on a playback error, re-sign the active track's URL
   // and reload it once.
   useEffect(() => {
@@ -391,7 +492,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         const meta = idx >= 0 ? queueMeta.current[idx] : undefined;
         if (!meta) return;
         const at = progressRef.current.position;
-        const fresh = await startStream(api, meta.mediaFileId, Math.floor(at));
+        const fresh =
+          meta.kind === "podcast"
+            ? await startPodcastStream(api, meta.episodeId ?? meta.mediaFileId)
+            : await startStream(api, meta.mediaFileId, Math.floor(at));
         const current = await TrackPlayer.getActiveTrack();
         if (current) {
           await TrackPlayer.load({ ...current, url: fresh.url });
@@ -406,6 +510,16 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     });
     return () => sub.remove();
   }, [api]);
+
+  /** Back to music: previous and next on the notification, the music playback
+   * rate, no podcast bookkeeping. */
+  const leavePodcastMode = useCallback(async () => {
+    if (!podcastModeRef.current) return;
+    podcastModeRef.current = false;
+    setPodcastModeState(false);
+    await setPlayerMode("music").catch(() => {});
+    await TrackPlayer.setRate(rateRef.current).catch(() => {});
+  }, []);
 
   const playSongs = useCallback(
     async (songs: SongRow[], startIndex: number) => {
@@ -464,6 +578,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         });
       });
       if (tracks.length === 0) return;
+      await leavePodcastMode();
       queueMeta.current = metas;
       await TrackPlayer.reset();
       await TrackPlayer.add(tracks);
@@ -478,8 +593,102 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       setQueueVersion((v) => v + 1);
       void pushQueue();
     },
-    [api, pushQueue, applyLoudness],
+    [api, pushQueue, applyLoudness, leavePodcastMode],
   );
+
+  const playEpisode = useCallback(
+    async (ep: PlayableEpisode): Promise<boolean> => {
+      let url: string;
+      let resume = ep.resumeSec ?? null;
+      let artUrl: string | null | undefined;
+      let coverPath: string | null | undefined = ep.coverPath;
+      const local = downloadsRef.current.localPathFor(ep.id);
+      if (local) {
+        // Downloaded: play the file on the device, no network. Resume from what
+        // was kept while offline (it is newer than the server until it syncs),
+        // else from the server when it can be asked.
+        url = local;
+        if (resume == null) {
+          const kept = downloadsRef.current.podcastPositionFor(ep.id);
+          if (kept != null) resume = kept;
+          else if (downloadsRef.current.online) {
+            resume = (await startPodcastStream(api, ep.id).catch(() => null))?.position_sec ?? null;
+          }
+        }
+      } else {
+        if (!downloadsRef.current.online) return false;
+        try {
+          const s = await startPodcastStream(api, ep.id);
+          url = s.url;
+          artUrl = s.art_url;
+          coverPath = s.cover_path ?? coverPath;
+          if (resume == null) resume = s.position_sec;
+        } catch {
+          return false;
+        }
+      }
+      const startAt = resume != null && resume >= 5 ? Math.floor(resume) : 0;
+      await setPlayerMode("podcast");
+      podcastModeRef.current = true;
+      setPodcastModeState(true);
+      const track: Track = {
+        id: ep.id,
+        url,
+        title: ep.title,
+        artist: ep.showTitle,
+        album: ep.showTitle,
+        duration: ep.durationSec ?? undefined,
+        artwork: buildTrackArtwork({ base: getApiBase(), artUrl, coverPath }),
+      };
+      queueMeta.current = [{
+        mediaFileId: ep.id,
+        kind: "podcast",
+        episodeId: ep.id,
+        podcastId: ep.podcastId ?? null,
+        title: ep.title,
+        artist: ep.showTitle,
+        album: ep.showTitle,
+        artPath: coverPath,
+        durationSec: ep.durationSec,
+      }];
+      await TrackPlayer.reset();
+      await TrackPlayer.add([track]);
+      activeIndexRef.current = 0;
+      await TrackPlayer.setRepeatMode(RepeatMode.Off).catch(() => {});
+      await TrackPlayer.setVolume(1).catch(() => {});
+      await TrackPlayer.setRate(clampSpeed(podcastSpeedRef.current)).catch(() => {});
+      if (startAt > 0) await TrackPlayer.seekTo(startAt).catch(() => {});
+      setHasQueue(true);
+      lastPlayReported.current = null;
+      await TrackPlayer.play();
+      syncer.current?.flush();
+      setQueueVersion((v) => v + 1);
+      return true;
+    },
+    [api],
+  );
+
+  const setPodcastSpeed = useCallback(
+    (v: number) => {
+      const speed = clampSpeed(v);
+      setPodcastSpeedPref(speed);
+      if (podcastModeRef.current) void TrackPlayer.setRate(speed).catch(() => {});
+    },
+    [setPodcastSpeedPref],
+  );
+
+  const skipBy = useCallback(async (dir: -1 | 1) => {
+    const p = await TrackPlayer.getProgress().catch(() => null);
+    if (!p) return;
+    await TrackPlayer.seekTo(dir < 0 ? skipBack(p.position) : skipForward(p.position, p.duration)).catch(() => {});
+  }, []);
+
+  const markEpisodePlayed = useCallback(async () => {
+    const idx = activeIndexRef.current;
+    const meta = idx >= 0 ? queueMeta.current[idx] : undefined;
+    if (!meta || meta.kind !== "podcast") return;
+    await setEpisodePlayed(api, meta.episodeId ?? meta.mediaFileId, true).catch(() => {});
+  }, [api]);
 
   /** Sign a window of songs into track-player tracks + parallel metas. */
   const signSongs = useCallback(
@@ -657,7 +866,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
   const castCurrentQueue = useCallback(async (): Promise<boolean> => {
     const metas = queueMeta.current;
-    if (metas.length === 0) return false;
+    if (metas.length === 0 || metas.some((m) => m.kind === "podcast")) return false;
     const startIndex = Math.max(0, activeIndexRef.current);
     const startPositionSec = Math.floor(progressRef.current.position || 0);
     const activeMediaId = metas[startIndex]?.mediaFileId;
@@ -726,6 +935,9 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       trackId: meta?.trackId ?? null,
       albumId: meta?.albumId ?? null,
       artistId: meta?.artistId ?? null,
+      kind: meta?.kind,
+      episodeId: meta?.episodeId,
+      podcastId: meta?.podcastId ?? null,
     };
   }, [activeTrack]);
 
@@ -789,6 +1001,12 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     () => ({
       ready,
       playSongs,
+      playEpisode,
+      podcastMode,
+      podcastSpeed,
+      setPodcastSpeed,
+      skipBy,
+      markEpisodePlayed,
       playNext,
       addToQueue,
       crossfadeSec,
@@ -827,6 +1045,12 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     [
       ready,
       playSongs,
+      playEpisode,
+      podcastMode,
+      podcastSpeed,
+      setPodcastSpeed,
+      skipBy,
+      markEpisodePlayed,
       playNext,
       addToQueue,
       crossfadeSec,

@@ -1,5 +1,5 @@
 import { useRouter } from "expo-router";
-import { Pause, Play, SkipForward } from "lucide-react-native";
+import { Pause, Play, RotateCw, SkipForward } from "lucide-react-native";
 import React from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
@@ -12,7 +12,7 @@ import { PlayerTrackMenu } from "./PlayerTrackMenu";
 /** Persistent mini-player shown above the tab bar whenever something is queued.
  * Tap opens the full now-playing screen. */
 export function MiniPlayer(): React.ReactElement | null {
-  const { nowPlaying, isPlaying, togglePlay, next, hasQueue } = usePlayer();
+  const { nowPlaying, isPlaying, togglePlay, next, hasQueue, skipBy } = usePlayer();
   const router = useRouter();
 
   if (!hasQueue || !nowPlaying) return null;
@@ -45,12 +45,19 @@ export function MiniPlayer(): React.ReactElement | null {
         outlined
         fill
       />
-      <IconButton icon={SkipForward} onPress={next} accessibilityLabel="Next track" fill />
-      <PlayerTrackMenu
-        albumId={nowPlaying.albumId ?? null}
-        artistId={nowPlaying.artistId ?? null}
-        size={22}
-      />
+      {nowPlaying.kind === "podcast" ? (
+        // An episode has no next track: the button jumps forward 30 s.
+        <IconButton icon={RotateCw} onPress={() => void skipBy(1)} accessibilityLabel="Forward 30 seconds" />
+      ) : (
+        <>
+          <IconButton icon={SkipForward} onPress={next} accessibilityLabel="Next track" fill />
+          <PlayerTrackMenu
+            albumId={nowPlaying.albumId ?? null}
+            artistId={nowPlaying.artistId ?? null}
+            size={22}
+          />
+        </>
+      )}
     </Pressable>
   );
 }

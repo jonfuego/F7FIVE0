@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
 import {
+  Check,
   ChevronDown,
   FileText,
   List,
@@ -10,6 +11,8 @@ import {
   Plus,
   Radio,
   Repeat,
+  RotateCcw,
+  RotateCw,
   Shuffle,
   SkipBack,
   SkipForward,
@@ -20,6 +23,8 @@ import { Modal, Pressable, ScrollView, StyleSheet, Switch, Text, View } from "re
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { CastButton, useCast } from "@/cast";
+import { usePodcastChapters } from "@/api/podcasts";
+import { SKIP_BACK_SEC, SKIP_FORWARD_SEC, SPEEDS, chapterAt, formatSpeed } from "@/player/longform";
 import { usePlayer } from "@/player/PlayerProvider";
 import { colors, MIN_TOUCH, radius, spacing, typography } from "@/state/theme";
 import { Artwork } from "@/ui/Artwork";
@@ -70,6 +75,10 @@ export default function NowPlayingScreen(): React.ReactElement {
     sleep,
     setSleepTimer,
     castCurrentQueue,
+    podcastSpeed,
+    setPodcastSpeed,
+    skipBy,
+    markEpisodePlayed,
   } = usePlayer();
   const router = useRouter();
   const api = useApi();
@@ -97,6 +106,15 @@ export default function NowPlayingScreen(): React.ReactElement {
   const [queueOpen, setQueueOpen] = useState(false);
   const [optionsOpen, setOptionsOpen] = useState(false);
   const [lyricsOpen, setLyricsOpen] = useState(false);
+  // Podcast mode: an episode has jump back / forward instead of previous and next,
+  // a speed menu, chapters and mark played. Music keeps everything below as it was.
+  const podcast = nowPlaying?.kind === "podcast";
+  const [chaptersOpen, setChaptersOpen] = useState(false);
+  const [marked, setMarked] = useState(false);
+  const chaptersQuery = usePodcastChapters(nowPlaying?.episodeId, podcast);
+  const chapters = chaptersQuery.data ?? [];
+  const chapterIdx = podcast ? chapterAt(chapters, position) : -1;
+  const chapterTitle = chapterIdx >= 0 ? chapters[chapterIdx].title : null;
   const RATES = [0.5, 0.75, 1, 1.25, 1.5, 2];
   const SLEEPS: { label: string; mode: "off" | "minutes" | "track"; min?: number }[] = [
     { label: "Off", mode: "off" },
@@ -113,6 +131,29 @@ export default function NowPlayingScreen(): React.ReactElement {
         <IconButton icon={ChevronDown} onPress={() => router.back()} accessibilityLabel="Close now playing" />
         <Text style={styles.header}>Now Playing</Text>
         <View style={styles.topRight}>
+          {podcast ? (
+            <>
+              {chapters.length > 0 ? (
+                <Pressable
+                  onPress={() => setChaptersOpen(true)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Open chapters"
+                  style={styles.queueBtn}
+                >
+                  <Icon icon={List} size={24} color={colors.text} />
+                </Pressable>
+              ) : null}
+              <Pressable
+                onPress={() => setOptionsOpen(true)}
+                accessibilityRole="button"
+                accessibilityLabel="Player options"
+                style={styles.queueBtn}
+              >
+                <Icon icon={SlidersHorizontal} size={24} color={colors.text} />
+              </Pressable>
+            </>
+          ) : (
+            <>
           <View style={styles.queueBtn}>
             <CastButton />
           </View>
@@ -146,6 +187,8 @@ export default function NowPlayingScreen(): React.ReactElement {
             beforeNavigate={() => router.back()}
             size={24}
           />
+            </>
+          )}
         </View>
       </View>
 
@@ -160,6 +203,11 @@ export default function NowPlayingScreen(): React.ReactElement {
         <Text style={styles.artist} numberOfLines={1}>
           {nowPlaying?.artist ?? ""}
         </Text>
+        {chapterTitle ? (
+          <Text style={styles.chapter} numberOfLines={1} accessibilityLabel={`Chapter ${chapterTitle}`}>
+            {chapterTitle}
+          </Text>
+        ) : null}
       </View>
 
       <WaveformScrubber
@@ -173,6 +221,42 @@ export default function NowPlayingScreen(): React.ReactElement {
         <Text style={styles.time}>{fmt(duration)}</Text>
       </View>
 
+      {podcast ? (
+        <View style={styles.transport}>
+          <IconButton
+            icon={RotateCcw}
+            onPress={() => {
+              tick();
+              void skipBy(-1);
+            }}
+            accessibilityLabel={`Back ${SKIP_BACK_SEC} seconds`}
+            size={32}
+          />
+          <IconButton
+            icon={isPlaying ? Pause : Play}
+            onPress={() => {
+              tick();
+              void togglePlay();
+            }}
+            accessibilityLabel={isPlaying ? "Pause" : "Play"}
+            size={28}
+            diameter={56}
+            square
+            outlined
+            fill
+            color={colors.text}
+          />
+          <IconButton
+            icon={RotateCw}
+            onPress={() => {
+              tick();
+              void skipBy(1);
+            }}
+            accessibilityLabel={`Forward ${SKIP_FORWARD_SEC} seconds`}
+            size={32}
+          />
+        </View>
+      ) : (
       <View style={styles.transport}>
         <IconButton
           icon={Shuffle}
@@ -232,6 +316,7 @@ export default function NowPlayingScreen(): React.ReactElement {
           {repeatMode === "one" ? <Text style={styles.repeatOne}>1</Text> : null}
         </View>
       </View>
+      )}
 
       <QueuePanel visible={queueOpen} onClose={() => setQueueOpen(false)} />
       <LyricsView visible={lyricsOpen} onClose={() => setLyricsOpen(false)} />
@@ -246,6 +331,52 @@ export default function NowPlayingScreen(): React.ReactElement {
               </Pressable>
             </View>
             <ScrollView>
+              {podcast ? (
+                <>
+                  <Text style={styles.optLabel}>Speed</Text>
+                  <View style={styles.chipRow}>
+                    {SPEEDS.map((r) => (
+                      <Pressable
+                        key={r}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Speed ${formatSpeed(r)}`}
+                        onPress={() => setPodcastSpeed(r)}
+                        style={[styles.chip, podcastSpeed === r && styles.chipOn]}
+                      >
+                        <Text style={[styles.chipTxt, podcastSpeed === r && styles.chipTxtOn]}>{formatSpeed(r)}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                  <Text style={styles.optLabel}>Sleep timer</Text>
+                  <View style={styles.chipRow}>
+                    {SLEEPS.filter((x) => x.mode !== "track").map((x) => (
+                      <Pressable
+                        key={x.label}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Sleep ${x.label}`}
+                        onPress={() => setSleepTimer(x.mode, x.min)}
+                        style={[styles.chip, sleep.mode === x.mode && styles.chipOn]}
+                      >
+                        <Text style={[styles.chipTxt, sleep.mode === x.mode && styles.chipTxtOn]}>{x.label}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Mark this episode played"
+                    onPress={() => {
+                      void markEpisodePlayed();
+                      setMarked(true);
+                    }}
+                    style={[styles.radioBtn, { marginTop: spacing.lg }]}
+                  >
+                    <Icon icon={Check} size={20} color={colors.background} />
+                    <Text style={styles.radioBtnTxt}>{marked ? "Marked played" : "Mark played"}</Text>
+                  </Pressable>
+                </>
+              ) : null}
+              {podcast ? null : (
+              <>
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="Start track radio"
@@ -348,6 +479,40 @@ export default function NowPlayingScreen(): React.ReactElement {
                   thumbColor={colors.text}
                 />
               </View>
+              </>
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={chaptersOpen} transparent animationType="slide" onRequestClose={() => setChaptersOpen(false)}>
+        <View style={styles.sheetBackdrop}>
+          <View style={styles.sheet}>
+            <View style={styles.sheetHead}>
+              <Text style={styles.sheetTitle}>Chapters</Text>
+              <Pressable onPress={() => setChaptersOpen(false)} accessibilityLabel="Close chapters" style={styles.queueBtn}>
+                <Icon icon={ChevronDown} size={22} color={colors.text} />
+              </Pressable>
+            </View>
+            <ScrollView>
+              {chapters.map((c, i) => (
+                <Pressable
+                  key={`${c.start_sec}-${i}`}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Jump to ${c.title}`}
+                  onPress={() => {
+                    void seekTo(c.start_sec);
+                    setChaptersOpen(false);
+                  }}
+                  style={styles.chapterRow}
+                >
+                  <Text style={[styles.chapterTime, i === chapterIdx && styles.chapterOn]}>{fmt(c.start_sec)}</Text>
+                  <Text style={[styles.chapterName, i === chapterIdx && styles.chapterOn]} numberOfLines={2}>
+                    {c.title}
+                  </Text>
+                </Pressable>
+              ))}
             </ScrollView>
           </View>
         </View>
@@ -364,6 +529,11 @@ const styles = StyleSheet.create({
   meta: { alignItems: "center", marginTop: spacing.xl, gap: spacing.xs },
   title: { ...typography.title, textAlign: "center" },
   artist: { ...typography.body, color: colors.textMuted },
+  chapter: { ...typography.caption, color: colors.accent, textAlign: "center" },
+  chapterRow: { flexDirection: "row", gap: spacing.md, minHeight: MIN_TOUCH, alignItems: "center" },
+  chapterTime: { ...typography.caption, minWidth: 56 },
+  chapterName: { ...typography.body, flex: 1 },
+  chapterOn: { color: colors.accent, fontWeight: "700" },
   times: { flexDirection: "row", justifyContent: "space-between", marginTop: spacing.xs },
   time: { ...typography.caption },
   transport: {

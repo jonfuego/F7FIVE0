@@ -5,6 +5,7 @@ import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-nati
 
 import { useDownloads } from "@/download/DownloadProvider";
 import { downloadToSong } from "@/download/entries";
+import { downloadToEpisode } from "@/download/podcastEntries";
 import { doneItems, type DownloadItem } from "@/download/queue";
 import { usePlayer } from "@/player/PlayerProvider";
 import { formatBytes, limitFraction } from "@/download/format";
@@ -23,7 +24,7 @@ const LIMIT_OPTIONS = [0, 1024, 5120, 10240, 20480]; // MB (0 = unlimited)
  * here. Nothing here stores a URL. */
 export default function DownloadsScreen(): React.ReactElement {
   const router = useRouter();
-  const { playSongs } = usePlayer();
+  const { playSongs, playEpisode } = usePlayer();
   const { state, usedBytes, online, cancel, retry, remove, setLimitMb } = useDownloads();
 
   const play = (it: DownloadItem) => {
@@ -32,6 +33,18 @@ export default function DownloadsScreen(): React.ReactElement {
       const tracks = doneItems(state, "track");
       const idx = Math.max(0, tracks.findIndex((t) => t.id === it.id));
       void playSongs(tracks.map(downloadToSong), idx);
+    } else if (kind === "podcast") {
+      // An episode downloaded to the phone plays with no connection and resumes
+      // from what was kept while offline.
+      const ep = downloadToEpisode(it);
+      void playEpisode({
+        id: ep.id,
+        podcastId: ep.podcastId,
+        title: ep.title,
+        showTitle: ep.showTitle,
+        coverPath: ep.coverPath,
+        durationSec: ep.durationSec,
+      });
     } else {
       router.push(`/watch/${it.id}`);
     }
