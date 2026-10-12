@@ -29,7 +29,7 @@ from app.models.music import Track
 from app.models.user import User
 from app.services import auto_playlist as auto_playlist_svc
 from app.services import lyrics as lyrics_svc
-from app.services import path_map
+from app.services import media_paths
 
 
 router = APIRouter()
@@ -102,10 +102,11 @@ def get_lyrics(
     mf = _track_media_file(db, track_id)
     if mf is None:
         return {"synced": False, "lines": None, "text": None, "source": None}
-    # Paths are stored canonically; translate defensively in case a legacy row
-    # still carries a mapped drive letter.
-    resolved = path_map.translate(mf.path) or mf.path
-    result = lyrics_svc.resolve_lyrics(resolved)
+    # Paths are stored canonically; the helper also translates a legacy row that
+    # still carries a mapped drive letter, and refuses one outside the library
+    # roots before the file or its .lrc sidecar is read.
+    resolved = media_paths.resolve_contained_media_path(db, mf)
+    result = lyrics_svc.resolve_lyrics(str(resolved))
     return {
         "synced": result.synced,
         "lines": result.lines,

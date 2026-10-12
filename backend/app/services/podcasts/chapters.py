@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 
 from app.models.media_file import MediaFile
 from app.models.podcast import PodcastEpisode
-from app.services import ffprobe, net_guard
+from app.services import ffprobe, media_paths, net_guard
 from app.services.podcasts import feed as feed_service
 
 log = logging.getLogger("f7five0.podcasts.chapters")
@@ -104,6 +104,6 @@ def get_chapters(db: Session, episode: PodcastEpisode) -> list[dict]:
 
     if episode.media_file_id:
         mf = db.get(MediaFile, episode.media_file_id)
-        if mf is not None and mf.path:
+        if mf is not None and mf.path and media_paths.is_contained(db, mf.path):
             return normalize(ffprobe.probe_chapters(mf.path))
     return []

@@ -26,7 +26,7 @@ from app.models.movie import Movie
 from app.models.music import Album, Artist, MusicVideo, Track
 from app.models.tv import Episode
 from app.models.user import User
-from app.services import media_streams, playback
+from app.services import media_paths, media_streams, playback
 from app.services.art import resolve_art
 from app.services.security import build_signed_art_url, sign_stream_url_params
 from app.services.track_opts import resolve_track_opts
@@ -205,6 +205,9 @@ def stream_start(
         raise HTTPException(status_code=409, detail="file_unplayable")
     if mf.scan_state != ScanState.ready:
         raise HTTPException(status_code=409, detail="file_not_ready")
+    # The gateway would refuse this file anyway; say so now (403) instead of
+    # minting a URL for it, and before anything probes the path.
+    source_path = media_paths.resolve_contained_media_path(db, mf)
 
     # Cast loads are logged so the passkey/cast smoke check can count them by
     # media kind (track -> music, everything else -> video). The literal
@@ -245,7 +248,10 @@ def stream_start(
         needs_probe = body.audio_track_index is not None or (
             body.subtitle is not None and body.subtitle != "off"
         )
-        streams = media_streams.probe_streams(mf.path) if needs_probe else None
+        streams = (
+            media_streams.probe_streams(str(source_path))
+            if needs_probe else None
+        )
         opts = resolve_track_opts(
             audio_track_index=body.audio_track_index,
             subtitle=body.subtitle,

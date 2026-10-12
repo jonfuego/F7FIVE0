@@ -214,14 +214,14 @@ def test_login_throttle_ignores_spoofed_ip(api):
     assert blocked.status_code == 429
 
 
-def test_spoofed_forwarded_host_not_in_signed_url(api):
+def test_spoofed_forwarded_host_not_in_signed_url(api, tmp_path):
     client, db = api
     user = _make_user(db)
 
     mf = MediaFile(
         kind=MediaKind.movie,
         ref_id=uuid.uuid4(),
-        path=r"C:\Media\Movies\a.mp4",
+        path=str(tmp_path / "a.mp4"),
         container="mp4",
         video_codec="h264",
         audio_codec="aac",

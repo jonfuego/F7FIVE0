@@ -376,7 +376,9 @@ def analyze_track(db, track_id, *, target_lufs: float = TARGET_LUFS,
 
     from app.models.audio_analysis import ANALYSIS_VERSION, TrackAudioAnalysis
     from app.models.media_file import MediaFile, MediaKind, ScanState
-    from app.services import path_map
+    from fastapi import HTTPException
+
+    from app.services import media_paths
 
     row = db.scalar(
         select(TrackAudioAnalysis).where(TrackAudioAnalysis.track_id == track_id)
@@ -397,7 +399,11 @@ def analyze_track(db, track_id, *, target_lufs: float = TARGET_LUFS,
     if mf is None:
         return STATUS_NO_FILE
 
-    path = path_map.translate(mf.path) or mf.path
+    try:
+        path = str(media_paths.resolve_contained_media_path(db, mf))
+    except HTTPException:
+        log.warning("audio analysis skipped %s: path outside library roots", mf.id)
+        return STATUS_NO_FILE
     lufs = measure_loudness(path)
     peaks = compute_waveform(path)
     if lufs is None and peaks is None:

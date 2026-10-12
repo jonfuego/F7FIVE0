@@ -44,7 +44,7 @@ from app.api.deps import current_session_id, current_user, get_bearer_token, get
 from app.config import settings
 from app.models.media_file import MediaFile, ScanState
 from app.models.user import User
-from app.services import media_streams, path_map, playback
+from app.services import media_paths, media_streams, playback
 from app.services import security as security_service
 from app.services.range_response import serve_file_range
 from app.services.signed_urls import session_authorizes
@@ -85,8 +85,10 @@ def _require_ready_media_file(db: Session, media_file_id: uuid.UUID) -> MediaFil
     return mf
 
 
-def _resolved_path(mf: MediaFile) -> str:
-    return path_map.translate(mf.path) or mf.path
+def _resolved_path(db: Session, mf: MediaFile) -> Path:
+    """The file to read for `mf`, translated and held under the library roots.
+    403 `path_outside_library_roots` for a row that points anywhere else."""
+    return media_paths.resolve_contained_media_path(db, mf)
 
 
 # ---------------------------------------------------------------------------
@@ -101,7 +103,7 @@ def get_streams(
     db: Annotated[Session, Depends(get_db)],
 ) -> dict:
     mf = _require_ready_media_file(db, media_file_id)
-    result = media_streams.probe_streams(_resolved_path(mf))
+    result = media_streams.probe_streams(str(_resolved_path(db, mf)))
     if result is None:
         raise HTTPException(status_code=409, detail="probe_failed")
     # Enrich each TEXT subtitle with a signed absolute vtt_url so a header-less
@@ -219,7 +221,7 @@ def get_subtitle_vtt(
             raise HTTPException(status_code=403, detail="session_revoked")
 
     mf = _require_ready_media_file(db, media_file_id)
-    path = _resolved_path(mf)
+    path = str(_resolved_path(db, mf))
 
     # Identify the target stream so we can reject image subs before spending an
     # ffmpeg extract pass on something that can't become text.
@@ -292,7 +294,7 @@ def download(
             raise HTTPException(status_code=403, detail="session_revoked")
 
     mf = _require_ready_media_file(db, media_file_id)
-    path = Path(_resolved_path(mf))
+    path = _resolved_path(db, mf)
 
     ok_direct, _reason = playback.can_direct_play(mf)
     is_audio = playback.is_audio_only(mf)
