@@ -15,6 +15,7 @@ test("nothing stored gives every default", () => {
     "musicvideos.sort": "name",
     "mixes.inputs": {},
     "admin.collapsed": [...ADMIN_SECTION_IDS],
+    podcast_speed: 1,
   });
   assert.equal(mergeViewPrefs(null)["music.browse"], "artists");
 });
@@ -69,3 +70,15 @@ test("keys the web doesn't know are ignored", () => {
 test("path goes through the library BFF", () => {
   assert.equal(viewPrefPath("music.browse"), "/api/library/view-prefs/music.browse");
 });
+
+test("podcast speed is a number from 0.5 to 3 and anything else falls back to 1", () => {
+  assert.equal(resolveViewPref("podcast_speed", 1.5), 1.5);
+  assert.equal(resolveViewPref("podcast_speed", 0.5), 0.5);
+  assert.equal(resolveViewPref("podcast_speed", 3), 3);
+  assert.equal(resolveViewPref("podcast_speed", 0.4), 1);
+  assert.equal(resolveViewPref("podcast_speed", 3.5), 1);
+  assert.equal(resolveViewPref("podcast_speed", "fast"), 1);
+  assert.equal(resolveViewPref("podcast_speed", undefined), 1);
+  assert.equal(viewPrefPath("podcast_speed"), "/api/library/view-prefs/podcast_speed");
+});
+
