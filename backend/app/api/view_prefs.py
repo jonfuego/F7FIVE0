@@ -27,11 +27,15 @@ from sqlalchemy.orm import Session
 from app.api.deps import current_user, get_db
 from app.models.user import User
 from app.models.view_pref import UserViewPref
+from app.services import longform
 
 
 router = APIRouter(prefix="/view-prefs", tags=["library", "view-prefs"])
 
 KEY_RE = re.compile(r"^[a-z0-9][a-z0-9._:-]{0,63}$")
+# Podcast playback speed follows the person across devices. It is a number from
+# longform.MIN_SPEED to longform.MAX_SPEED, separate from the music rate.
+PODCAST_SPEED_KEY = "podcast_speed"
 MAX_VALUE_BYTES = 2048
 MAX_KEYS_PER_USER = 200
 
@@ -70,6 +74,12 @@ def put_view_pref(
         raise HTTPException(status_code=422, detail="bad_view_key")
     if body.value is None:
         raise HTTPException(status_code=422, detail="view_value_required")
+    if key == PODCAST_SPEED_KEY and (
+        isinstance(body.value, bool)
+        or not isinstance(body.value, (int, float))
+        or not longform.MIN_SPEED <= body.value <= longform.MAX_SPEED
+    ):
+        raise HTTPException(status_code=422, detail="bad_speed")
     size = len(json.dumps(body.value, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
     if size > MAX_VALUE_BYTES:
         raise HTTPException(status_code=413, detail="view_value_too_large")

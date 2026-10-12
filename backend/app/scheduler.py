@@ -36,6 +36,8 @@ JOB_ART_COPIES = "art_copies_backfill"
 JOB_MOVIE_GENRES = "movie_genres_backfill"
 JOB_ARTIST_ART = "artist_art_autofill"
 JOB_ARTIST_BIOS = "artist_bios_backfill"
+JOB_PODCAST_REFRESH = "podcast_refresh"
+JOB_PODCAST_DOWNLOAD = "podcast_download"
 
 # Once a day, give or take an hour, so a fleet of servers doesn't hit GitHub
 # at the same second. Checking never installs anything.
@@ -63,6 +65,14 @@ _arr_sync_lock = threading.Lock()
 # One artist art auto-fill run at a time, even if a queued run starts while
 # the previous one is still walking artists.
 _artist_art_lock = threading.Lock()
+
+# One podcast feed refresh at a time in this process: the hourly job, Admin's
+# "Refresh feeds" and an OPML import can all be queued together.
+_podcast_refresh_lock = threading.Lock()
+
+# At most two episode downloads at once, however many are queued (auto-download
+# can queue a whole back catalogue's worth of new episodes on a busy day).
+_podcast_download_slots = threading.BoundedSemaphore(2)
 
 
 def _arr_status(fn, *args, **kwargs) -> None:
@@ -360,6 +370,81 @@ def trigger_artist_art_autofill(delay_sec: int = 0) -> None:
     )
 
 
+def _run_podcast_refresh(ids: Optional[list] = None) -> None:
+    """Refresh the feeds of the shows people follow (or just `ids`, the shows an
+    OPML import added). Owns its own session and writes `podcast_refresh_status`
+    as it goes; never raises. Skips quietly if a refresh is already running."""
+    if not _podcast_refresh_lock.acquire(blocking=False):
+        log.info("a podcast refresh is already running; skipping this one")
+        return
+    try:
+        from app.services.podcasts import refresh
+        db = SessionLocal()
+        try:
+            stats = refresh.refresh_all(db, only_ids=ids, queue_download=queue_podcast_download)
+            log.info("podcast refresh: %d shows, %d new episodes, %d errors",
+                     stats.shows, stats.new_episodes, stats.errors)
+        finally:
+            db.close()
+    except Exception:
+        log.exception("podcast refresh raised")
+    finally:
+        _podcast_refresh_lock.release()
+
+
+def _run_podcast_download(episode_id: uuid.UUID) -> None:
+    """Download one episode into the podcasts library. Owns its own session;
+    never raises. A failure is logged and left for the person to retry."""
+    with _podcast_download_slots:
+        db = SessionLocal()
+        try:
+            from app.models.podcast import PodcastEpisode
+            from app.services.podcasts import download
+            ep = db.get(PodcastEpisode, episode_id)
+            if ep is None:
+                return
+            nas_auth.ensure_all(db)
+            download.download_episode(db, ep)
+            db.commit()
+        except Exception as exc:
+            db.rollback()
+            # DownloadError messages are safe to show; anything else is logged in full.
+            from app.services.podcasts.download import DownloadError
+            if isinstance(exc, DownloadError):
+                log.warning("podcast download of %s failed: %s", episode_id, exc)
+            else:
+                log.exception("podcast download of %s raised", episode_id)
+        finally:
+            db.close()
+
+
+def queue_podcast_download(episode_id: uuid.UUID) -> bool:
+    """Queue a server download of one episode. One job id per episode, so asking
+    twice never downloads it twice at once. False when the scheduler is not
+    running (CLI)."""
+    if _scheduler is None:
+        log.warning("queue_podcast_download called but scheduler not started")
+        return False
+    _scheduler.add_job(
+        _run_podcast_download, args=[episode_id],
+        id=f"{JOB_PODCAST_DOWNLOAD}_{episode_id}", replace_existing=True,
+    )
+    return True
+
+
+def trigger_podcast_refresh_now(ids: Optional[list] = None) -> None:
+    """Refresh podcast feeds now (Admin > Scans > Refresh feeds, or the shows an
+    OPML import added). `ids` limits it to those shows; none means every followed
+    show. No-op when the scheduler is not running (CLI)."""
+    if _scheduler is None:
+        log.warning("trigger_podcast_refresh_now called but scheduler not started")
+        return
+    _scheduler.add_job(
+        _run_podcast_refresh, args=[list(ids)] if ids else None,
+        id=f"{JOB_PODCAST_REFRESH}_adhoc", replace_existing=True,
+    )
+
+
 def _run_audio_analysis_step() -> None:
     """Analyze ONE un-analyzed track, then reschedule the next step.
 
@@ -516,6 +601,18 @@ def start() -> BackgroundScheduler:
         coalesce=True,
         replace_existing=True,
         next_run_time=datetime.now(timezone.utc) + timedelta(seconds=150),
+    )
+    # Podcast feeds: every PODCAST_REFRESH_MINUTES (60 by default, never under 5),
+    # first pass a couple of minutes after boot. Only shows somebody follows.
+    sched.add_job(
+        _run_podcast_refresh,
+        trigger=IntervalTrigger(minutes=max(5, settings.podcast_refresh_minutes)),
+        id=JOB_PODCAST_REFRESH,
+        name="refresh podcast feeds",
+        max_instances=1,
+        coalesce=True,
+        replace_existing=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=180),
     )
     sched.start()
     _scheduler = sched

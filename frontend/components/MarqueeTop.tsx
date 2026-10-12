@@ -29,6 +29,7 @@ const NAV: NavLink[] = [
   { label: "Music", href: "/music" },
   { label: "Videos", href: "/music-videos" },
   { label: "Mixes", href: "/mixes" },
+  { label: "Podcasts", href: "/podcasts" },
 ];
 
 export function MarqueeTop() {

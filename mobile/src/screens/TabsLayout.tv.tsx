@@ -7,10 +7,12 @@ import { View } from "react-native";
 import { colors } from "@/state/theme";
 import { Icon } from "@/ui/Icon";
 import { MiniPlayer } from "@/ui/MiniPlayer";
+import { isTabVisible } from "./tabs";
 
 /** Android TV navigation (spec F): Home (10-foot browse rails), Music, Movies &
- * Shows and Search, all D-pad focusable. The Account tab (requests, sessions,
- * downloads) is hidden on TV: no requests or admin surfaces on the big screen. */
+ * Shows and Search, all D-pad focusable. Only the tabs in TV_TABS (./tabs) show:
+ * every other route is hidden, so the Account tab (requests, sessions, downloads)
+ * and any tab added for the phone stay off the big screen. */
 export default function TvTabsLayout(): React.ReactElement {
   return (
     <Tabs
@@ -20,7 +22,7 @@ export default function TvTabsLayout(): React.ReactElement {
           <BottomTabBar {...props} />
         </View>
       )}
-      screenOptions={{
+      screenOptions={({ route }) => ({
         headerShown: false,
         sceneStyle: { backgroundColor: colors.background },
         tabBarActiveTintColor: colors.accent,
@@ -31,7 +33,9 @@ export default function TvTabsLayout(): React.ReactElement {
           backgroundColor: colors.surface,
           borderTopColor: colors.border,
         },
-      }}
+        // Not in TV_TABS: no button, so nothing on the big screen links to it.
+        ...(isTabVisible(route.name, true) ? {} : { tabBarButton: () => null }),
+      })}
     >
       <Tabs.Screen
         name="index"
@@ -61,8 +65,6 @@ export default function TvTabsLayout(): React.ReactElement {
           tabBarIcon: ({ color }) => <Icon icon={Search} color={color} size={26} />,
         }}
       />
-      {/* Not reachable on TV. */}
-      <Tabs.Screen name="account" options={{ href: null }} />
     </Tabs>
   );
 }

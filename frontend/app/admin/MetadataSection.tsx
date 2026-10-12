@@ -1,4 +1,4 @@
-// Admin > Metadata: the TMDB API key. TMDB supplies posters, backdrops, and
+// Admin > Metadata: the TMDB API key, and the Podcast Index key and secret. TMDB supplies posters, backdrops, and
 // descriptions for movies and shows found in the library folders. The key
 // is checked with TMDB before it is saved, takes effect without a restart,
 // and saving it starts a library refresh. Stored in the database, so it
@@ -8,10 +8,11 @@
 
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { apiDelete, apiGet, apiPost, apiPut, ApiError } from "@/lib/client-api";
-import type { MetadataSettings, TmdbKeyCheck } from "@/lib/types";
+import type { MetadataSettings, PodcastIndexStatus, TmdbKeyCheck } from "@/lib/types";
 
 // Sign-up works signed out; Settings > API 401s until you have a TMDB account.
 const TMDB_API_PAGE = "https://www.themoviedb.org/signup";
+const PODCASTINDEX_SIGNUP = "https://api.podcastindex.org/signup";
 
 export function MetadataSection() {
   const [data, setData] = useState<MetadataSettings | null>(null);
@@ -184,8 +185,198 @@ export function MetadataSection() {
           {result ? (
             <p className={`text-xs ${result.ok ? "text-emerald-400" : "text-red-400"}`}>{result.message}</p>
           ) : null}
+
+          {data.podcastindex ? (
+            <PodcastIndexBlock status={data.podcastindex} onChange={(podcastindex) => setData({ ...data, podcastindex })} />
+          ) : null}
         </div>
       )}
+    </div>
+  );
+}
+
+// Podcast Index: the directory behind podcast search. Optional; with no key,
+// search uses Apple's iTunes directory. The key and secret are checked with one
+// search before they are saved, a saved pair wins over .env, and the secret is
+// write-only: the server tells us only whether one is set.
+function PodcastIndexBlock({
+  status,
+  onChange,
+}: {
+  status: PodcastIndexStatus;
+  onChange: (next: PodcastIndexStatus) => void;
+}) {
+  const [key, setKey] = useState("");
+  const [secret, setSecret] = useState("");
+  const [editing, setEditing] = useState(false);
+  const [busy, setBusy] = useState<"test" | "save" | "remove" | null>(null);
+  const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const showForm = !status.configured || editing;
+  const filled = key.trim() !== "" && secret.trim() !== "";
+
+  async function test() {
+    if (busy) return;
+    // Blank fields test the pair that is in use now.
+    if (!filled && (key.trim() || secret.trim())) {
+      setResult({ ok: false, message: "Enter both the key and the secret." });
+      return;
+    }
+    setBusy("test");
+    setResult(null);
+    try {
+      setResult(
+        await apiPost<TmdbKeyCheck>("/api/admin/metadata/podcastindex/test", {
+          key: key.trim(),
+          secret: secret.trim(),
+        }),
+      );
+    } catch (err) {
+      setResult({ ok: false, message: err instanceof Error ? err.message : "Check failed." });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function save(e: FormEvent) {
+    e.preventDefault();
+    if (!filled || busy) return;
+    setBusy("save");
+    setResult(null);
+    try {
+      const res = await apiPut<MetadataSettings>("/api/admin/metadata/podcastindex", {
+        key: key.trim(),
+        secret: secret.trim(),
+      });
+      onChange(res.podcastindex);
+      setKey("");
+      setSecret("");
+      setEditing(false);
+      setResult({ ok: true, message: "Saved. Podcast search uses Podcast Index now." });
+    } catch (err) {
+      const msg = err instanceof ApiError && err.detail ? err.detail : err instanceof Error ? err.message : "Could not save.";
+      setResult({ ok: false, message: msg });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function remove() {
+    if (busy) return;
+    if (!window.confirm("Remove the Podcast Index key? Podcast search goes back to Apple's iTunes directory.")) return;
+    setBusy("remove");
+    setResult(null);
+    try {
+      const res = await apiDelete<MetadataSettings>("/api/admin/metadata/podcastindex");
+      onChange(res.podcastindex);
+      setResult({
+        ok: true,
+        message: res.podcastindex.configured
+          ? "Removed. The key from Setup is used again."
+          : "Removed. Search uses Apple's iTunes directory.",
+      });
+    } catch (err) {
+      setResult({ ok: false, message: err instanceof Error ? err.message : "Could not remove." });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div className="space-y-3 border-t border-neutral-800 pt-4" data-testid="podcastindex-block">
+      <p className="text-xs text-neutral-500">
+        Podcast Index is the directory behind podcast search. It is free and optional: with no key,
+        search uses Apple&apos;s iTunes directory.
+      </p>
+      <div className="flex flex-wrap items-center gap-3 text-sm">
+        <span className="text-neutral-400">Podcast Index key:</span>
+        {status.configured ? (
+          <>
+            <span className="font-mono text-neutral-100">{status.key_masked}</span>
+            <span className="text-xs text-neutral-500">
+              {status.source === "env" ? "(from Setup)" : "(saved here)"}
+              {status.secret_set ? ", secret set" : ""}
+            </span>
+            {!editing ? (
+              <button type="button" className={smallButtonCls} onClick={() => setEditing(true)}>
+                Change
+              </button>
+            ) : null}
+            {status.source === "admin" ? (
+              <button type="button" className={smallButtonCls} onClick={remove} disabled={busy !== null}>
+                {busy === "remove" ? "Removing..." : "Remove"}
+              </button>
+            ) : null}
+            <button type="button" className={smallButtonCls} onClick={test} disabled={busy !== null}>
+              {busy === "test" ? "Testing..." : "Test"}
+            </button>
+          </>
+        ) : (
+          <span className="text-amber-400">not set (using iTunes)</span>
+        )}
+      </div>
+
+      {showForm ? (
+        <>
+          <p className="text-xs text-neutral-400">
+            Make a free account at{" "}
+            <a href={PODCASTINDEX_SIGNUP} target="_blank" rel="noreferrer" className="underline hover:text-white">
+              api.podcastindex.org
+            </a>
+            . It emails you an API key and a secret; paste both here.
+          </p>
+          <form onSubmit={save} className="flex flex-wrap gap-2">
+            <input
+              value={key}
+              onChange={(e) => {
+                setKey(e.target.value);
+                setResult(null);
+              }}
+              placeholder="API key"
+              autoComplete="off"
+              spellCheck={false}
+              className={`${inputCls} min-w-[12rem] flex-1 font-mono`}
+              aria-label="Podcast Index API key"
+            />
+            <input
+              value={secret}
+              onChange={(e) => {
+                setSecret(e.target.value);
+                setResult(null);
+              }}
+              type="password"
+              placeholder="API secret"
+              autoComplete="off"
+              spellCheck={false}
+              className={`${inputCls} min-w-[12rem] flex-1 font-mono`}
+              aria-label="Podcast Index API secret"
+            />
+            <button type="button" onClick={test} disabled={!filled || busy !== null} className={smallButtonCls}>
+              {busy === "test" ? "Testing..." : "Test"}
+            </button>
+            <button type="submit" disabled={!filled || busy !== null} className={primaryButtonCls}>
+              {busy === "save" ? "Saving..." : "Save"}
+            </button>
+            {editing ? (
+              <button
+                type="button"
+                className={smallButtonCls}
+                onClick={() => {
+                  setEditing(false);
+                  setKey("");
+                  setSecret("");
+                  setResult(null);
+                }}
+              >
+                Cancel
+              </button>
+            ) : null}
+          </form>
+        </>
+      ) : null}
+
+      {result ? (
+        <p className={`text-xs ${result.ok ? "text-emerald-400" : "text-red-400"}`}>{result.message}</p>
+      ) : null}
     </div>
   );
 }

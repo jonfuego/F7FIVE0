@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<opml version="2.0">
+  <head><title>My shows</title></head>
+  <body>
+    <outline text="Tech">
+      <outline type="rss" text="Alpha" xmlUrl="https://alpha.example/feed.xml"/>
+      <outline type="rss" text="Beta" xmlUrl="https://beta.example/rss"/>
+    </outline>
+    <outline type="rss" text="Gamma" xmlUrl="https://gamma.example/feed"/>
+    <outline type="rss" text="Alpha again" xmlUrl="https://alpha.example/feed.xml"/>
+    <outline type="rss" text="Bad scheme" xmlUrl="ftp://bad.example/feed"/>
+    <outline type="rss" text="No url"/>
+  </body>
+</opml>

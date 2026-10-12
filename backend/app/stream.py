@@ -31,7 +31,8 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from fastapi import Depends, FastAPI, HTTPException, Path as PathParam, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
+from starlette.background import BackgroundTask
 from sqlalchemy import update
 from sqlalchemy.orm import Session
 
@@ -39,8 +40,10 @@ from app import log_redact
 from app.config import settings
 from app.db import SessionLocal
 from app.models.media_file import MediaFile, ScanState
+from app.models.podcast import PodcastEpisode
 from app.models.transcode import TranscodeSession
-from app.services import library_folders, nas_auth, transcode_cache, transcoder
+from app.services import library_folders, nas_auth, net_guard, transcode_cache, transcoder
+from app.services.podcasts import media_types
 from app.services.path_map import translate as translate_path
 from app.services.playback import (
     VARIANT_LADDER,
@@ -49,7 +52,7 @@ from app.services.playback import (
     single_rung_for_cpu,
 )
 from app.services.range_response import ensure_under_roots, serve_file_range
-from app.services.security import verify_stream_url_params
+from app.services.security import verify_media_url_params, verify_stream_url_params
 from app.services.signed_urls import session_authorizes
 from app.services.trusted_proxy import real_client_ip
 from app.services.track_opts import TrackOptsError, parse_token
@@ -384,6 +387,117 @@ def direct_play(
         mf.path,
     )
     return serve_file_range(path, range_header, content_type)
+
+
+# ---------------------------------------------------------------------------
+# Podcasts: a file on the server, or a relay of the publisher enclosure
+# ---------------------------------------------------------------------------
+_RANGE_RE = re.compile(r"^bytes=(\d+-\d*|-\d+)$")
+_RELAY_CHUNK = 64 * 1024
+
+
+def verified_podcast_episode(
+    episode_id: Annotated[uuid.UUID, PathParam()],
+    db: Annotated[Session, Depends(get_db)],
+    uid: Annotated[str, Query()],
+    exp: Annotated[int, Query()],
+    sig: Annotated[str, Query()],
+    sid: Annotated[str, Query()] = "",
+) -> PodcastEpisode:
+    """Validate the signed URL and return the episode. Same order as every other
+    signed path: the HMAC first (no DB), then the issuing session, then the row.
+    The URL names only an episode id; the publisher address comes from the
+    database, never from the request."""
+    if not verify_media_url_params(episode_id, "podcast", "", uid, sid, exp, sig):
+        raise HTTPException(status_code=401, detail="bad_stream_signature")
+    if not session_authorizes(db, sid):
+        raise HTTPException(status_code=403, detail="session_revoked")
+    ep = db.get(PodcastEpisode, episode_id)
+    if ep is None:
+        raise HTTPException(status_code=404, detail="episode_not_found")
+    return ep
+
+
+def _single_range(header: Optional[str]) -> Optional[str]:
+    """The Range header to pass to the publisher: one byte range, or nothing."""
+    value = (header or "").strip()
+    return value if _RANGE_RE.match(value) else None
+
+
+def _relay_episode(ep: PodcastEpisode, request: Request) -> StreamingResponse:
+    """Stream the publisher enclosure to the player with nothing written to
+    disk. Range goes through, every redirect hop is checked by the guard, and
+    only audio is passed on."""
+    headers = {"Accept": "audio/*, */*;q=0.5", "Accept-Encoding": "identity"}
+    wanted = _single_range(request.headers.get("range"))
+    if wanted:
+        headers["Range"] = wanted
+    try:
+        stream = net_guard.open_stream(ep.enclosure_url or "", headers=headers)
+    except net_guard.NetGuardError as exc:
+        if exc.status_code == 400:
+            raise HTTPException(status_code=400, detail="enclosure_blocked") from None
+        log.info("podcast relay: episode %s unreachable (%s)", ep.id, exc)
+        raise HTTPException(status_code=502, detail="upstream_unreachable") from None
+
+    resp = stream.response
+    status = resp.status_code
+    if status not in (200, 206, 416):
+        stream.close()
+        raise HTTPException(status_code=502, detail="upstream_error")
+    ctype = resp.headers.get("content-type")
+    if not (media_types.is_audio_response(ctype, stream.url)
+            or media_types.is_audio_response(ctype, ep.enclosure_url)):
+        stream.close()
+        raise HTTPException(status_code=415, detail="not_audio")
+
+    main = media_types.main_type(ctype)
+    if not main.startswith("audio/"):
+        main = media_types.content_type_for_ext(
+            media_types.url_ext(stream.url) or media_types.url_ext(ep.enclosure_url))
+    out_headers = {"Cache-Control": "private, max-age=0, no-transform"}
+    for name in ("content-length", "content-range"):
+        if resp.headers.get(name):
+            out_headers[name] = resp.headers[name]
+    if status == 206 or (resp.headers.get("accept-ranges") or "").lower() == "bytes":
+        out_headers["accept-ranges"] = "bytes"
+    log.info("podcast_relay episode=%s status=%s range=%s", ep.id, status, wanted or "-")
+
+    def body():
+        try:
+            for chunk in resp.iter_bytes(_RELAY_CHUNK):
+                yield chunk
+        finally:
+            stream.close()
+
+    return StreamingResponse(
+        body(), status_code=status, media_type=main, headers=out_headers,
+        background=BackgroundTask(stream.close),
+    )
+
+
+@app.get("/stream/podcast/{episode_id}")
+def podcast_stream(
+    ep: Annotated[PodcastEpisode, Depends(verified_podcast_episode)],
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+) -> object:
+    """Play a podcast episode. If the server has the file, serve it under the
+    stream roots with Range support; otherwise relay the publisher enclosure."""
+    mf = db.get(MediaFile, ep.media_file_id) if ep.media_file_id else None
+    if mf is not None and mf.scan_state == ScanState.ready:
+        path = _contain(db, Path(mf.path))
+        if nas_auth.is_unc_path(str(path)):
+            try:
+                os.stat(path)
+            except OSError:
+                nas_auth.ensure_all(db)
+        return serve_file_range(
+            path, request.headers.get("range"), media_types.content_type_for_ext(mf.container),
+        )
+    if not ep.enclosure_url:
+        raise HTTPException(status_code=404, detail="nothing_to_play")
+    return _relay_episode(ep, request)
 
 
 # ---------------------------------------------------------------------------

@@ -16,7 +16,7 @@
 // verbatim so that flow works.
 //
 // Methods: GET (reads), POST (admin sync), PUT (progress upsert),
-// DELETE (progress clear).
+// PATCH (a podcast subscription), DELETE (progress clear).
 
 import { NextRequest, NextResponse } from "next/server";
 import { backend } from "@/lib/api";
@@ -28,7 +28,7 @@ type RouteContext = { params: Promise<{ path: string[] }> };
 async function forward(
   req: NextRequest,
   ctx: RouteContext,
-  method: "GET" | "POST" | "PUT" | "DELETE",
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
 ): Promise<NextResponse> {
   const suffix = (await ctx.params).path.join("/");
   // Preserve the query string — list endpoints use limit/offset/q.
@@ -38,9 +38,9 @@ async function forward(
   // the backend (GET /api/library/scan-state).
   const path = suffix === "scan-state" ? `/api/library/scan-state${search}` : `/api/${suffix}${search}`;
 
-  // GET / DELETE do not carry a JSON body. POST / PUT do.
+  // GET / DELETE do not carry a JSON body. POST / PUT / PATCH do.
   let body: unknown;
-  if (method === "POST" || method === "PUT") {
+  if (method === "POST" || method === "PUT" || method === "PATCH") {
     const text = await req.text();
     body = text.length > 0 ? JSON.parse(text) : undefined;
   }
@@ -73,6 +73,10 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
 
 export async function PUT(req: NextRequest, ctx: RouteContext): Promise<NextResponse> {
   return forward(req, ctx, "PUT");
+}
+
+export async function PATCH(req: NextRequest, ctx: RouteContext): Promise<NextResponse> {
+  return forward(req, ctx, "PATCH");
 }
 
 export async function DELETE(req: NextRequest, ctx: RouteContext): Promise<NextResponse> {

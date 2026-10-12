@@ -1,6 +1,6 @@
 import { BottomTabBar } from "@react-navigation/bottom-tabs";
 import { Tabs, useRootNavigationState, useRouter } from "expo-router";
-import { Film, Home, Music, Search, UserCircle } from "lucide-react-native";
+import { Film, Home, Music, Podcast, Search, UserCircle } from "lucide-react-native";
 import React, { useEffect, useRef } from "react";
 import { View } from "react-native";
 
@@ -13,7 +13,7 @@ import { MiniPlayer } from "@/ui/MiniPlayer";
  * the app opens to what can play). Only at launch, never mid-session. */
 const OFFLINE_LAUNCH_WINDOW_MS = 15_000;
 
-/** Bottom tabs for phone: Home, Music, Movies & Shows, Search, Account. The
+/** Bottom tabs for phone: Home, Music, Movies & Shows, Podcasts, Search, Account. The
  * persistent MiniPlayer is rendered directly above the tab bar on every tab. */
 export default function TabsLayout(): React.ReactElement {
   const router = useRouter();
@@ -71,6 +71,13 @@ export default function TabsLayout(): React.ReactElement {
         options={{
           title: "Movies & Shows",
           tabBarIcon: ({ color, size }) => <Icon icon={Film} color={color} size={size} />,
+        }}
+      />
+      <Tabs.Screen
+        name="podcasts"
+        options={{
+          title: "Podcasts",
+          tabBarIcon: ({ color, size }) => <Icon icon={Podcast} color={color} size={size} />,
         }}
       />
       <Tabs.Screen

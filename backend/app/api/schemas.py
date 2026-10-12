@@ -5,7 +5,7 @@ import uuid
 from datetime import date, datetime
 from typing import Annotated, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 # Usernames: lowercase alphanumerics plus . _ - , 3-64 chars. Enforced at
@@ -1185,8 +1185,25 @@ class TmdbKeyStatusOut(BaseModel):
     masked: Optional[str] = None
 
 
+class PodcastIndexStatusOut(BaseModel):
+    """The Podcast Index pair, for Admin. The secret is never sent, only
+    whether one is set."""
+    configured: bool
+    # "admin": saved from the Admin page; "env": PODCASTINDEX_API_KEY /
+    # PODCASTINDEX_API_SECRET in .env; None: not set.
+    source: Optional[str] = None
+    key_masked: Optional[str] = None
+    secret_set: bool = False
+
+
 class MetadataSettingsOut(BaseModel):
     tmdb: TmdbKeyStatusOut
+    podcastindex: PodcastIndexStatusOut
+
+
+class PodcastIndexKeyIn(BaseModel):
+    key: str = ""
+    secret: str = ""
 
 
 class TmdbKeyIn(BaseModel):
@@ -1235,3 +1252,182 @@ class ServerTimeOut(BaseModel):
 
     unix_ms: int
     unix_sec: float
+
+
+# ---- Podcasts -----------------------------------------------------------------
+class PodcastSearchResultOut(BaseModel):
+    title: str
+    author: str = ""
+    art_url: Optional[str] = None
+    feed_url: str
+    provider: str
+
+
+class PodcastSearchOut(BaseModel):
+    # "podcastindex" when a key is set, else "itunes".
+    provider: str
+    results: list[PodcastSearchResultOut]
+
+
+class PodcastOut(BaseModel):
+    id: uuid.UUID
+    title: str
+    author: Optional[str] = None
+    # Plain text. Render it as text, never as HTML.
+    description: Optional[str] = None
+    feed_url: Optional[str] = None
+    # "feed" (from an RSS feed) or "local" (found in a podcasts folder).
+    source: str
+    art_url: Optional[str] = None
+    subscribed: bool = False
+    auto_download: bool = False
+    episode_count: int = 0
+    # Episodes with a file on the server (what "On this server" is built from).
+    files_on_server: int = 0
+    last_checked_at: Optional[datetime] = None
+    last_error: Optional[str] = None
+
+
+class PodcastEpisodeOut(BaseModel):
+    id: uuid.UUID
+    podcast_id: uuid.UUID
+    podcast_title: str
+    art_url: Optional[str] = None
+    title: str
+    # Plain text. Render it as text, never as HTML.
+    description: Optional[str] = None
+    published_at: Optional[datetime] = None
+    duration_sec: Optional[int] = None
+    season: Optional[int] = None
+    episode: Optional[int] = None
+    # True when the publisher's file is video: listed, not played.
+    is_video: bool = False
+    # A file for this episode is on the server and ready.
+    has_file: bool = False
+    downloaded_by_f7five0: bool = False
+    # File type hint for a local copy ("mp3", "m4a"...).
+    container: Optional[str] = None
+    has_chapters: bool = False
+    # The caller's own: {"kind": "new"} | {"kind": "in_progress", "position_sec": n}
+    # | {"kind": "played"}.
+    state: dict
+
+
+class PodcastHomeOut(BaseModel):
+    in_progress: list[PodcastEpisodeOut]
+    mine: list[PodcastOut]
+    on_server: list[PodcastOut]
+
+
+class PodcastDetailOut(BaseModel):
+    podcast: PodcastOut
+    episodes: list[PodcastEpisodeOut]
+    total: int
+
+
+class PodcastSubscribeIn(BaseModel):
+    feed_url: Optional[str] = None
+    podcast_id: Optional[uuid.UUID] = None
+
+    @model_validator(mode="after")
+    def _one_of(self) -> "PodcastSubscribeIn":
+        if bool(self.feed_url) == bool(self.podcast_id):
+            raise ValueError("send either feed_url or podcast_id")
+        if self.feed_url is not None:
+            url = self.feed_url.strip()
+            if not url.lower().startswith(("http://", "https://")) or len(url) > 2048:
+                raise ValueError("feed_url must be a full http or https address")
+            self.feed_url = url
+        return self
+
+
+class PodcastSubscriptionPatchIn(BaseModel):
+    auto_download: bool
+
+
+class PodcastSubscriptionOut(BaseModel):
+    podcast_id: uuid.UUID
+    auto_download: bool
+    created_at: datetime
+
+
+class PodcastOpmlResultOut(BaseModel):
+    added: int
+    already: int
+    failed: int
+
+
+class PodcastProgressIn(BaseModel):
+    position_sec: int = Field(ge=0, le=7 * 86400)
+    duration_sec: Optional[int] = Field(default=None, ge=0, le=7 * 86400)
+
+
+class PodcastProgressOut(BaseModel):
+    episode_id: uuid.UUID
+    position_sec: int
+    duration_sec: Optional[int] = None
+    # {"kind": "new"} | {"kind": "in_progress", "position_sec": n} | {"kind": "played"}
+    state: dict
+
+
+class PodcastChapterOut(BaseModel):
+    start_sec: float
+    title: str
+    # http(s) addresses only; absent when the publisher gave none (or a bad one).
+    img: Optional[str] = None
+    url: Optional[str] = None
+
+
+class PodcastStreamOut(BaseModel):
+    """Returned by POST /api/podcasts/episodes/{id}/stream: a signed URL on the
+    stream gateway (`/stream/podcast/{id}`), bound to the caller's session."""
+    episode_id: uuid.UUID
+    url: str
+    expires_at: datetime
+    title: str
+    podcast_title: str
+    duration_sec: Optional[int] = None
+    container: Optional[str] = None
+    # "server_file" (the file is on this server) or "publisher" (relayed).
+    source: str
+    cover_path: Optional[str] = None
+    # Absolute, signed art URL for header-less loaders (the Android notification).
+    art_url: Optional[str] = None
+    # Where to resume for the caller: 0 for a new or played episode.
+    position_sec: int = 0
+
+
+class PodcastStreamOut(BaseModel):
+    """Returned by POST /api/podcasts/episodes/{id}/stream: a signed URL on the
+    stream gateway (`/stream/podcast/{id}`), bound to the caller's session."""
+    episode_id: uuid.UUID
+    url: str
+    expires_at: datetime
+    title: str
+    podcast_title: str
+    duration_sec: Optional[int] = None
+    container: Optional[str] = None
+    # "server_file" (the file is on this server) or "publisher" (relayed).
+    source: str
+    cover_path: Optional[str] = None
+    # Absolute, signed art URL for header-less loaders (the Android notification).
+    art_url: Optional[str] = None
+    # Where to resume for the caller: 0 for a new or played episode.
+    position_sec: int = 0
+
+
+class PodcastStorageFolderOut(BaseModel):
+    path: str
+    reachable: bool
+    free_bytes: Optional[int] = None
+    total_bytes: Optional[int] = None
+
+
+class PodcastStorageOut(BaseModel):
+    # The sum of the sizes of the files F7FIVE0 downloaded.
+    used_bytes: int
+    # Free space below this many GB on any podcasts folder drive raises the warning.
+    warn_gb: int
+    low_space: bool
+    folders: list[PodcastStorageFolderOut]
+

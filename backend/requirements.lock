@@ -301,6 +301,10 @@ cryptography==50.0.2 \
     # via
     #   pyopenssl
     #   webauthn
+defusedxml==0.7.1 \
+    --hash=sha256:1bb3032db185915b62d7c6209c5a8792be6a32ab2fedacc84e01b52c51aa3e69 \
+    --hash=sha256:a352e7e428770286cc899e2542b6cdaedb2b4953ff269a210103ec58f6198a61
+    # via -r requirements.txt
 dnspython==2.8.0 \
     --hash=sha256:01d9bbc4a2d76bf0db7c1f729812ded6d912bd318d3b1cf81d30c0f845dbf3af \
     --hash=sha256:181d3c6996452cb1189c4046c61599b84a5a86e099562ffde77d26984ff26d0f
@@ -313,6 +317,14 @@ fastapi==0.142.2 \
     --hash=sha256:06366626f2e70576367714d9ab2fe8472e6c8456dba69b399f9f797ab5e92570 \
     --hash=sha256:bd5f4d81f1e93a88bcd77caf4dfe3c2dbffc3805407a0007e9a114c18b3a670b
     # via -r requirements.txt
+feedparser==6.0.14 \
+    --hash=sha256:088679b0c4b543ee211a820dd544698c76a402122eae7473c04a43425f283d06 \
+    --hash=sha256:e35e3f760151b0c3b22cac9684155cae186a233e16c49bcbc6c49e91e3131137
+    # via -r requirements.txt
+feedparser-sgmllib==2.1.0 \
+    --hash=sha256:2cab2d43b95a954f920f18aebce7a4dbbb3f539780b127e2aa114f579821e01d \
+    --hash=sha256:61facf2918c4389b5b00714f76c5e03431ffcd94cd1f51d657edd6cd7c396579
+    # via feedparser
 greenlet==3.5.6 ; platform_machine == 'AMD64' or platform_machine == 'WIN32' or platform_machine == 'aarch64' or platform_machine == 'amd64' or platform_machine == 'ppc64le' or platform_machine == 'win32' or platform_machine == 'x86_64' \
     --hash=sha256:0616b8f878098c5681fd8f0dc92d887551717402342a70f0abcbfea5f5ad8a44 \
     --hash=sha256:06c0e933290fba8ffe53ead4ae1b8044b0e9754b75cebf381aa2bc3e50d82fac \

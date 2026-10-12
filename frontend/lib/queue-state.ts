@@ -22,6 +22,11 @@ export type QueueItem = {
   // not carry these; the UI falls back to plain text when null.
   artist_id?: string | null;
   album_id?: string | null;
+  // A podcast episode in the dock: kind "podcast", with the episode id in
+  // `media_file_id` and its show in `podcast_id`. A song has neither. See
+  // lib/podcast-queue.ts.
+  kind?: "podcast";
+  podcast_id?: string | null;
 };
 
 export type RepeatMode = "off" | "all" | "one";

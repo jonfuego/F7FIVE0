@@ -6,7 +6,7 @@ Where the folders come from:
   Library folders writes it. Once the table has any row it is the only
   source, for every library: a library with no rows is not configured.
 - Otherwise the `.env` keys LIBRARY_ROOT_MOVIES / _TV / _MUSIC /
-  _MUSIC_VIDEOS. Each takes one folder or several separated by `;`
+  _MUSIC_VIDEOS / _PODCASTS. Each takes one folder or several separated by `;`
   (Setup writes them this way).
 
 Folders keep the order they were given in. Paths are stored as typed;
@@ -30,8 +30,11 @@ from app.models.media_file import MediaFile, MediaKind, ScanState
 from app.services import arr_settings
 from app.services.path_map import translate as translate_path
 
-KINDS: tuple[str, ...] = ("movies", "tv", "music", "music_videos")
-LABELS = {"movies": "Movies", "tv": "TV shows", "music": "Music", "music_videos": "Music videos"}
+KINDS: tuple[str, ...] = ("movies", "tv", "music", "music_videos", "podcasts")
+LABELS = {
+    "movies": "Movies", "tv": "TV shows", "music": "Music", "music_videos": "Music videos",
+    "podcasts": "Podcasts",
+}
 MAX_FOLDERS_PER_LIBRARY = 20
 
 
@@ -169,6 +172,7 @@ def save(db: Session, proposed: dict[str, list[str]]) -> dict[str, list[str]]:
 _MEDIA_KIND = {
     "movies": MediaKind.movie, "tv": MediaKind.episode,
     "music": MediaKind.track, "music_videos": MediaKind.music_video,
+    "podcasts": MediaKind.podcast_episode,
 }
 
 

@@ -88,7 +88,7 @@ def begin(db: Session, *, force: bool = False, only: Optional[list] = None) -> b
 
 
 def _counts(label: str, state: str, stats) -> dict:
-    added = {"movies": "movies", "tv": "episodes", "music": "tracks"}[label]
+    added = {"movies": "movies", "tv": "episodes", "music": "tracks", "podcasts": "podcast_episodes"}[label]
     return {
         "state": state,
         "total": getattr(stats, "files_total", 0),
@@ -126,12 +126,13 @@ def finish(db: Session, error: Optional[str] = None) -> None:
 
 def reset_stale(db: Session) -> bool:
     """On API start: a `running` record belongs to a process that is gone.
-    Covers the folder scan, the music-videos scan and the *arr sync; returns
-    True when any of them was reset."""
+    Covers the folder scan, the music-videos scan, the *arr sync and the podcast
+    feed refresh; returns True when any of them was reset."""
     folder = _reset_stale_folder(db)
     music_videos = mv_reset_stale(db)
     arr = arr_reset_stale(db)
-    return folder or music_videos or arr
+    podcasts = pr_reset_stale(db)
+    return folder or music_videos or arr or podcasts
 
 
 def _reset_stale_folder(db: Session) -> bool:
@@ -329,4 +330,81 @@ def arr_reset_stale(db: Session) -> bool:
         if isinstance(entry, dict) and entry.get("state") in ("queued", "running"):
             entry["state"] = "interrupted"
     app_settings.put(db, ARR_KEY, current)
+    return True
+
+
+# ---------------------------------------------------------------------------
+# Podcast feed refresh (sibling key, one pass over the shows people follow)
+# ---------------------------------------------------------------------------
+PODCAST_KEY = "podcast_refresh_status"
+
+
+def _pr_blank() -> dict:
+    return {
+        "state": "idle", "started_at": None, "finished_at": None,
+        "total": 0, "count": 0, "added": 0, "errors": 0, "last_error": None,
+    }
+
+
+def pr_read(db: Session) -> dict:
+    """The stored podcast refresh status, with every field present:
+
+        {state: "idle" | "running", started_at, finished_at, total (shows to
+         refresh), count (shows done), added (new episodes), errors, last_error}
+    """
+    out = _pr_blank()
+    stored = app_settings.get(db, PODCAST_KEY)
+    if stored:
+        out.update({k: v for k, v in stored.items() if k in out})
+    return out
+
+
+def pr_is_running(db: Session) -> bool:
+    return pr_read(db)["state"] == "running"
+
+
+def pr_begin(db: Session, *, force: bool = False) -> bool:
+    """Mark the feed refresh as running. False (nothing changes) when one is
+    already running, unless `force` (the job restarting its own record)."""
+    current = pr_read(db)
+    if current["state"] == "running" and not force:
+        return False
+    app_settings.put(db, PODCAST_KEY, {
+        "state": "running", "started_at": _now(),
+        # The last finished time stays until this refresh finishes.
+        "finished_at": current["finished_at"],
+        "total": 0, "count": 0, "added": 0, "errors": 0, "last_error": None,
+    })
+    return True
+
+
+def pr_progress(db: Session, *, total: int, count: int, added: int, errors: int,
+                error: Optional[str] = None) -> None:
+    """Record the show total (counted up front) and the running tallies."""
+    current = pr_read(db)
+    current.update(total=total, count=count, added=added, errors=errors)
+    if error:
+        current["last_error"] = error
+    app_settings.put(db, PODCAST_KEY, current)
+
+
+def pr_finish(db: Session, error: Optional[str] = None) -> None:
+    """The refresh is over. The last error stays alongside the finished time."""
+    current = pr_read(db)
+    current["state"] = "idle"
+    current["finished_at"] = _now()
+    if error:
+        current["last_error"] = error
+    app_settings.put(db, PODCAST_KEY, current)
+
+
+def pr_reset_stale(db: Session) -> bool:
+    """On API start: a `running` refresh record belongs to a process that is
+    gone."""
+    current = pr_read(db)
+    if current["state"] != "running":
+        return False
+    current["state"] = "idle"
+    current["last_error"] = INTERRUPTED
+    app_settings.put(db, PODCAST_KEY, current)
     return True

@@ -14,6 +14,7 @@ import React, {
 } from "react";
 
 import { fetchDownloadUrl, postTrackPlay, reportProgress } from "@/api/media";
+import { fetchPodcastDownloadUrl, reportPodcastProgress } from "@/api/podcasts";
 import type { StreamQuality } from "@/api/types";
 import { useApi } from "@/state/auth";
 import { getSetting, setSetting, SETTINGS } from "@/state/settings";
@@ -21,9 +22,11 @@ import {
   addEvent,
   emptyBuffer,
   flush,
+  latestPodcastPosition,
   type BufferedEvent,
   type FlushBuffer,
 } from "./flushBuffer";
+import { downloadSource } from "./podcastEntries";
 import {
   canEnqueue,
   initialState,
@@ -70,6 +73,8 @@ interface DownloadContextValue {
   localPathFor: (mediaFileId: string) => string | undefined;
   /** Buffer a progress/track-play while offline; flushed on reconnect. */
   bufferOffline: (event: BufferedEvent) => void;
+  /** The latest position of a podcast episode kept while offline, or null. */
+  podcastPositionFor: (episodeId: string) => number | null;
 }
 
 const DownloadContext = createContext<DownloadContextValue | null>(null);
@@ -158,6 +163,8 @@ export function DownloadProvider({ children }: { children: React.ReactNode }): R
     const next = await flush(bufferRef.current, async (event) => {
       if (event.kind === "progress") {
         await reportProgress(api, event.mediaFileId, event.positionSec, event.durationSec);
+      } else if (event.kind === "podcast_progress") {
+        await reportPodcastProgress(api, event.episodeId, event.positionSec, event.durationSec);
       } else {
         await postTrackPlay(api, event.trackId, event.msPlayed, event.completed);
       }
@@ -180,7 +187,13 @@ export function DownloadProvider({ children }: { children: React.ReactNode }): R
       // could expire mid-download. 409 = video that can't be offered offline.
       let signed: { url: string; container?: string | null };
       try {
-        signed = await fetchDownloadUrl(api, id);
+        // A podcast episode downloads from its signed /stream/podcast URL (so it
+        // works whether or not the server has the file); everything else from
+        // the media file download endpoint.
+        signed =
+          downloadSource(next.kind) === "podcast"
+            ? await fetchPodcastDownloadUrl(api, id)
+            : await fetchDownloadUrl(api, id);
       } catch (e) {
         const status = (e as { status?: number }).status;
         dispatch({
@@ -321,6 +334,11 @@ export function DownloadProvider({ children }: { children: React.ReactNode }): R
     void AsyncStorage.setItem(BUFFER_KEY, JSON.stringify(bufferRef.current)).catch(() => {});
   }, []);
 
+  const podcastPositionFor = useCallback(
+    (episodeId: string) => latestPodcastPosition(bufferRef.current, episodeId),
+    [],
+  );
+
   const value = useMemo<DownloadContextValue>(
     () => ({
       state,
@@ -336,8 +354,9 @@ export function DownloadProvider({ children }: { children: React.ReactNode }): R
       isDownloaded,
       localPathFor,
       bufferOffline,
+      podcastPositionFor,
     }),
-    [state, online, enqueue, enqueueMany, itemFor, cancel, retry, remove, setLimitMb, isDownloaded, localPathFor, bufferOffline],
+    [state, online, enqueue, enqueueMany, itemFor, cancel, retry, remove, setLimitMb, isDownloaded, localPathFor, bufferOffline, podcastPositionFor],
   );
 
   return <DownloadContext.Provider value={value}>{children}</DownloadContext.Provider>;

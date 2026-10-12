@@ -47,6 +47,12 @@ function mixInputs(v: unknown): v is MixInputs {
   return true;
 }
 
+// Podcast playback speed, 0.5 to 3. Saved per user so it follows the person
+// across devices; separate from any music rate.
+function podcastSpeed(v: unknown): v is number {
+  return typeof v === "number" && Number.isFinite(v) && v >= 0.5 && v <= 3;
+}
+
 export const VIEW_PREFS = {
   // Music browse tab: /music (Artists), /music/albums, /music/songs.
   "music.browse": { fallback: "artists", valid: oneOf("artists", "albums", "songs") } as Spec<"artists" | "albums" | "songs">,
@@ -62,6 +68,8 @@ export const VIEW_PREFS = {
   // Admin page: the list of collapsed section ids. Every section starts
   // collapsed until the user opens it; attention (forceOpen) still opens one.
   "admin.collapsed": { fallback: [...ADMIN_SECTION_IDS], valid: adminCollapsed } as Spec<AdminSectionId[]>,
+  // Podcasts: playback speed.
+  podcast_speed: { fallback: 1, valid: podcastSpeed } as Spec<number>,
 };
 
 export type ViewPrefKey = keyof typeof VIEW_PREFS;

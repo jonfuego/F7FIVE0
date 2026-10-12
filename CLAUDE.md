@@ -1,13 +1,15 @@
 # F7FIVE0: notes for AI coding sessions
 
-Self-hosted media server (movies, TV, music, music videos) for Windows.
+Self-hosted media server (movies, TV, music, music videos, podcasts) for Windows.
 Public domain (Unlicense). Read README.md for the product view and
 INSTALL.md for the operator view.
 
 ## Layout
 
 - `backend/`: FastAPI. Two apps, one codebase: `app.main:app` (API, :8001)
-  and `app.stream:app` (stream gateway, :8002). Do not merge them.
+  and `app.stream:app` (stream gateway, :8002). Do not merge them. Podcasts
+  (feeds, search, downloads, relay, local scan) are `services/podcasts/` and
+  `api/podcasts.py`; the web and phone apps both have a Podcasts section.
 - `frontend/`: Next.js 16 App Router, strict TypeScript, Tailwind. Built as
   a standalone bundle; runs as `node server.js` on :3001.
 - `mobile/`: Expo SDK 54 + react-native-tvos 0.81, old architecture
@@ -136,7 +138,9 @@ INSTALL.md for the operator view.
   `ARR_WEBHOOK_SECRET` when it is blank (`install.ps1`, upgrades included; a
   non-blank value never changes).
 - Admin > Scans is the one place to start and watch scans: Movies, TV, Music,
-  Music videos and the *arr sync, with Scan all and a button per row. The rows
+  Music videos, Podcasts (the folder scan of the podcasts library), Podcast feeds
+  (Refresh feeds; not part of Scan all) and the *arr sync, with Scan all and a
+  button per row. The rows
   come from the pure helper `frontend/lib/scans-rows.ts`. Music is driven by the
   folder scan when Lidarr is not set and by the Lidarr sync when it is, so music
   is always scannable. `POST /api/admin/library/scan?library=movies|tv|music`
@@ -239,6 +243,71 @@ INSTALL.md for the operator view.
   the right side of the hero (clamped, More / Less); Home shows a one or two
   sentence excerpt (`services/bio_excerpt.py`, API field `artist_bio_excerpt` on
   album detail) when the featured pick is an album with an artist bio.
+- Podcasts (release 1.0.11). `LibraryKind` and `library_folders.KINDS` have
+  `podcasts`; its folders are stream roots through the same `libraries` table path
+  (`ensure_under_roots`), never a bypass. Tables: `podcasts` (feed or local show),
+  `podcast_episodes` (unique per show and guid), `podcast_subscriptions` and
+  `podcast_episode_progress` (both per user; one user never reads another's),
+  migration `0028_podcasts` (it adds the `podcasts` library_kind and
+  `podcast_episode` media_kind values; downgrade leaves them, PostgreSQL cannot
+  drop an enum value). Every outbound podcast fetch (feed, chapters JSON,
+  enclosure download, enclosure relay, show art) goes through
+  `services/net_guard.py`, which also holds the art SSRF check: it resolves the
+  host, refuses loopback, private, link-local, reserved, unspecified and multicast
+  addresses on the first request and on every redirect hop (at most
+  `MAX_REDIRECTS` = 5), reads bodies as a stream and stops at the caller's cap
+  (feed 20 MB, chapters 2 MB, OPML upload 1 MB, search answer 2 MB), uses 30 s
+  connect and read timeouts and the User-Agent `F7FIVE0/<version> (+project URL)`.
+  Never fetch a feed-supplied URL any other way. Feeds are parsed by feedparser,
+  plus a strict defusedxml pass for the `podcast:` tags; a feed that declares XML
+  entities is refused before parsing. Descriptions, titles and chapter titles are
+  stored as plain text (`services/podcasts/feed.py::plain_text`: tags and
+  script/style removed, entities unescaped); never store or render feed HTML, and
+  chapter `img` / `url` are kept only when they are http(s). The browser never
+  talks to a publisher: `POST /api/podcasts/episodes/{id}/stream` mints a
+  session-bound signed URL (action `podcast`, SEC-P1-2 rules) for
+  `/stream/podcast/{episode_id}`, which serves the server file under the stream
+  roots with Range, else relays the publisher enclosure with Range passed
+  through, nothing written to disk, the guard on every hop, and 415 for anything
+  that is not audio (`audio/*`, or an octet-stream with an audio extension). It
+  takes only an episode id. The CSP `media-src 'self' blob:` stays as it is.
+  Podcast Index search uses `services/podcastindex_key.py`, which mirrors
+  `tmdb_key`: the Admin-saved `{key, secret}` (`app_settings` `podcastindex_api`)
+  wins over `PODCASTINDEX_API_KEY` / `PODCASTINDEX_API_SECRET`, cached per process
+  and refreshed on save; read it only through `podcastindex_key.get()`. Search
+  falls back to Apple's iTunes Search API with no key. The secret is never
+  returned (the API says `secret_set`), never logged, never in an exception
+  message, and the signed headers are never logged. Played = within 30 s of the
+  end or past 95 percent, whichever comes first, and never without a known length
+  (`services/longform.py`, `frontend/lib/longform.ts`, `mobile/src/player/
+  longform.ts`: keep the three in step; they carry no podcast-only names so
+  audiobooks can reuse them); skip is back 15 s and forward 30 s; speed is the
+  per-user view pref `podcast_speed` (0.5 to 3.0). Progress is per user:
+  `PUT /api/podcasts/episodes/{id}/progress` every 15 s while playing and on pause
+  and end, buffered offline on the phone (`flushBuffer.ts`, one entry per
+  episode). Feed refresh: a scheduler job every `PODCAST_REFRESH_MINUTES` (60)
+  for shows with a subscriber, conditional GET (`ETag` / `Last-Modified`), upsert
+  by guid (enclosure URL when there is none), a failed fetch keeps the old
+  episodes and sets `last_error`; its state is `app_settings`
+  `podcast_refresh_status`, written through `scan_status.py` (`pr_*`) and reset on
+  startup if stale. A new episode published after a subscription with
+  auto-download on queues a server download. Server downloads
+  (`services/podcasts/download.py`) go to the first reachable podcasts folder as
+  `<folder>\<show>\<YYYY-MM-DD> <title>.<ext>` through `.part` then a rename,
+  with Windows-safe names; `DELETE /api/admin/podcasts/episodes/{id}/download`
+  removes only files with `downloaded_by_f7five0` and only under the library
+  roots. The folder scan reads the podcasts library (one subfolder per show, one
+  audio file per episode; a file already linked to an episode is matched by path
+  and never duplicated). There is no storage cap: Admin shows what downloads use
+  and the free space on each podcasts folder's drive, and `services/reminders.py`
+  raises a banner below `PODCAST_FREE_SPACE_WARN_GB` (10). OPML import
+  (`defusedxml`, 1 MB) and export are per user. Video enclosures are listed with
+  "Video podcasts aren't supported yet" and never played. The Android Podcasts tab
+  is phone only: `mobile/src/screens/tabs.ts` lists the TV tabs and the TV layout
+  hides every other route. The phone player switches
+  react-native-track-player to jump back 15 s / forward 30 s while an episode
+  plays (`player/setup.ts::setPlayerMode`) and never pushes an episode to the
+  shared music queue.
 - Auth events: `auth_events.event` is `String(64)` and PostgreSQL enforces it
   (SQLite does not, so a long event passed every test and answered HTTP 500 on
   Admin > Users > Disable). Every event string is built in

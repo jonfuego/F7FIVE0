@@ -15,6 +15,7 @@ from typing import Callable
 from sqlalchemy.orm import Session
 
 from app.services import app_settings, tmdb_key
+from app.services.podcasts import storage as podcast_storage
 
 SNOOZE_DAYS = 3
 MAX_SHOWINGS = 3
@@ -41,6 +42,18 @@ REMINDERS: tuple[Reminder, ...] = (
         action_label="Add key",
         action_href="/admin#metadata",
         applies=lambda db: not tmdb_key.get(),
+    ),
+    Reminder(
+        id="podcast_space",
+        title="Podcast storage is running low",
+        body=(
+            "The drive that holds a podcasts folder is nearly full. Downloaded episodes "
+            "need room, and there is no cap, so free some space or point the library "
+            "at a bigger drive. The warning level is PODCAST_FREE_SPACE_WARN_GB."
+        ),
+        action_label="Library folders",
+        action_href="/admin#library-folders",
+        applies=lambda db: podcast_storage.is_low(db),
     ),
 )
 _BY_ID = {r.id: r for r in REMINDERS}

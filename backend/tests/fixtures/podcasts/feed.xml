@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"
+     xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd"
+     xmlns:content="http://purl.org/rss/1.0/modules/content/"
+     xmlns:podcast="https://podcastindex.org/namespace/1.0">
+  <channel>
+    <title>The Fixture Show</title>
+    <link>https://fixture.example/show</link>
+    <description><![CDATA[<p>A show about <b>fixtures</b> &amp; tests.</p>]]></description>
+    <itunes:author>Fixture Co</itunes:author>
+    <itunes:image href="https://fixture.example/art.jpg"/>
+    <podcast:guid>ead4c236-bf58-58c6-a2c6-a6b28d128cb6</podcast:guid>
+    <item>
+      <title>Episode Three</title>
+      <guid isPermaLink="false">fixture-ep-3</guid>
+      <pubDate>Sat, 01 Mar 2025 08:00:00 +0000</pubDate>
+      <description><![CDATA[<p>Hello &amp; welcome <b>to</b> the <a href="https://x.example/">show</a>.</p><script>alert(1)</script>]]></description>
+      <enclosure url="https://cdn.fixture.example/ep3.mp3" length="12345" type="audio/mpeg"/>
+      <itunes:duration>01:02:03</itunes:duration>
+      <podcast:season name="Fixture Season">2</podcast:season>
+      <podcast:episode>3</podcast:episode>
+      <podcast:chapters url="https://fixture.example/ep3.chapters.json" type="application/json+chapters"/>
+    </item>
+    <item>
+      <title>Episode Two</title>
+      <guid isPermaLink="false">fixture-ep-2</guid>
+      <pubDate>Sat, 01 Feb 2025 08:00:00 +0000</pubDate>
+      <description>&lt;p&gt;Second &amp;amp; final&lt;br/&gt;line&lt;/p&gt;</description>
+      <enclosure url="https://cdn.fixture.example/ep2.mp3" length="2222" type="audio/mpeg"/>
+      <itunes:duration>1800</itunes:duration>
+      <itunes:season>2</itunes:season>
+      <itunes:episode>2</itunes:episode>
+    </item>
+    <item>
+      <title>Episode One (no guid)</title>
+      <pubDate>Sun, 01 Jun 2024 08:00:00 +0000</pubDate>
+      <description>Plain text only, Tom &amp; Jerry.</description>
+      <enclosure url="https://cdn.fixture.example/ep1.mp3" length="111" type="audio/mpeg"/>
+      <itunes:duration>12:30</itunes:duration>
+    </item>
+  </channel>
+</rss>

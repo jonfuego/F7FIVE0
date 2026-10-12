@@ -5,8 +5,9 @@
 // What each row runs: Movies, TV and Music use the folder scan when no
 // Radarr / Sonarr / Lidarr is set and that app's sync when it is (never both:
 // the app owns the library). Music videos always have their own scan. The
-// *arr sync row syncs every app that is set. Editing the folders themselves
-// stays in Library folders.
+// *arr sync row syncs every app that is set. Podcasts is a folder scan of the
+// podcasts library, and Podcast feeds (Refresh feeds) refreshes the feeds of the
+// shows people follow. Editing the folders themselves stays in Library folders.
 //
 // The page calls useScanStatuses once, so the folded card can still show a
 // running or failed scan (and open itself), and passes the result down.
@@ -17,6 +18,7 @@ import { useCallback, useEffect, useState } from "react";
 import { apiGet, apiPost, ApiError } from "@/lib/client-api";
 import {
   SCAN_POLL_MS, type ArrSyncStatus, type FolderScanStatus, type MusicVideosScanStatus,
+  type PodcastRefreshStatus,
 } from "@/lib/library-scan";
 import {
   buildScanRows, scanAllPlan, scanErrors, type ScanInputs, type ScanRow, type ScanRowState,
@@ -29,30 +31,36 @@ export type ScanStatuses = {
   folder: FolderScanStatus | null;
   musicVideos: MusicVideosScanStatus | null;
   arr: ArrSyncStatus | null;
+  podcasts: PodcastRefreshStatus | null;
 };
 
-/** Polls the three scan statuses: every few seconds while anything runs, every
+/** Polls the scan statuses: every few seconds while anything runs, every
  *  10 seconds otherwise, so a scan that starts elsewhere still shows up. */
 export function useScanStatuses(enabled: boolean): { statuses: ScanStatuses; refresh: () => Promise<void> } {
-  const [statuses, setStatuses] = useState<ScanStatuses>({ folder: null, musicVideos: null, arr: null });
+  const [statuses, setStatuses] = useState<ScanStatuses>({
+    folder: null, musicVideos: null, arr: null, podcasts: null,
+  });
 
   const refresh = useCallback(async () => {
-    const [f, m, a] = await Promise.allSettled([
+    const [f, m, a, p] = await Promise.allSettled([
       apiGet<FolderScanStatus>("/api/admin/library/scan"),
       apiGet<MusicVideosScanStatus>("/api/library/music-videos/scan"),
       apiGet<ArrSyncStatus>("/api/admin/library/arr-sync"),
+      apiGet<PodcastRefreshStatus>("/api/admin/podcasts/refresh"),
     ]);
     setStatuses((prev) => ({
       folder: f.status === "fulfilled" ? f.value : prev.folder,
       musicVideos: m.status === "fulfilled" ? m.value : prev.musicVideos,
       arr: a.status === "fulfilled" ? a.value : prev.arr,
+      podcasts: p.status === "fulfilled" ? p.value : prev.podcasts,
     }));
   }, []);
 
   const running =
     statuses.folder?.state === "running" ||
     statuses.musicVideos?.state === "running" ||
-    statuses.arr?.state === "running";
+    statuses.arr?.state === "running" ||
+    statuses.podcasts?.state === "running";
 
   useEffect(() => {
     if (!enabled) return;
@@ -76,6 +84,7 @@ export function scanInputs(statuses: ScanStatuses): ScanInputs {
     folder: statuses.folder,
     musicVideos: statuses.musicVideos,
     arr: statuses.arr,
+    podcastRefresh: statuses.podcasts,
   };
 }
 
@@ -84,6 +93,8 @@ const FRIENDLY: Record<string, string> = {
   library_not_scanned: "That library has no folder to scan, or an *arr app owns it.",
   app_not_configured: "That *arr app is not set up.",
   scan_not_started: "The scan could not be started.",
+  refresh_running: "The feeds are already being refreshed.",
+  refresh_not_started: "The refresh could not be started.",
 };
 
 function errorOf(err: unknown): string {
@@ -138,6 +149,8 @@ export function ScansSection({
         await apiPost(`/api/admin/library/scan?library=${row.action.library}`, {});
       } else if (row.action.kind === "arr") {
         await apiPost(`/api/admin/library/sync?${row.action.apps.map((a) => `app=${a}`).join("&")}`, {});
+      } else if (row.action.kind === "podcast_refresh") {
+        await apiPost("/api/admin/podcasts/refresh", {});
       } else {
         await apiPost("/api/admin/library/music-videos", {});
       }
@@ -281,5 +294,7 @@ function ScanListRow({
 }
 
 function buttonText(row: ScanRow): string {
-  return row.action.kind === "arr" ? "Sync now" : "Scan now";
+  if (row.action.kind === "arr") return "Sync now";
+  if (row.action.kind === "podcast_refresh") return "Refresh feeds";
+  return "Scan now";
 }

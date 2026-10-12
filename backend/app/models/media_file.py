@@ -21,6 +21,7 @@ class MediaKind(str, enum.Enum):
     episode = "episode"
     track = "track"
     music_video = "music_video"
+    podcast_episode = "podcast_episode"
 
 
 class ScanState(str, enum.Enum):

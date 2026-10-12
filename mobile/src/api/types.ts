@@ -405,3 +405,99 @@ export interface OnDeckItem {
   duration_sec?: number | null;
   updated_at: string;
 }
+
+// ---- Podcasts ---------------------------------------------------------------
+// Descriptions are plain text (the server strips tags): show them as text, never
+// as HTML.
+export type PodcastEpisodeState =
+  | { kind: "new" }
+  | { kind: "in_progress"; position_sec: number }
+  | { kind: "played" };
+
+/** Enough of a show to label an episode (download entries, rows). */
+export interface PodcastShowRef {
+  id: string;
+  title: string;
+  art_url: string | null;
+}
+
+export interface PodcastShow extends PodcastShowRef {
+  author: string | null;
+  description: string | null;
+  feed_url: string | null;
+  source: "feed" | "local";
+  subscribed: boolean;
+  auto_download: boolean;
+  episode_count: number;
+  files_on_server: number;
+  last_checked_at: string | null;
+  last_error: string | null;
+}
+
+export interface PodcastEpisodeRow {
+  id: string;
+  podcast_id: string;
+  title: string;
+  description?: string | null;
+  published_at?: string | null;
+  duration_sec: number | null;
+  /** The server holds a copy (a download or a file in the podcasts folder). */
+  has_file: boolean;
+  /** File type hint ("mp3", "m4a") for a local copy. */
+  container: string | null;
+  state: PodcastEpisodeState;
+  podcast_title?: string;
+  art_url?: string | null;
+  is_video?: boolean;
+  has_chapters?: boolean;
+  season?: number | null;
+  episode?: number | null;
+}
+
+export interface PodcastHome {
+  in_progress: PodcastEpisodeRow[];
+  mine: PodcastShow[];
+  on_server: PodcastShow[];
+}
+
+export interface PodcastDetail {
+  podcast: PodcastShow;
+  episodes: PodcastEpisodeRow[];
+  total: number;
+}
+
+export interface PodcastSearchResult {
+  title: string;
+  author: string;
+  art_url: string | null;
+  feed_url: string;
+  provider: string;
+}
+
+export interface PodcastSearch {
+  provider: string;
+  results: PodcastSearchResult[];
+}
+
+/** POST /api/podcasts/episodes/{id}/stream. */
+export interface PodcastStreamStart {
+  episode_id: string;
+  url: string;
+  expires_at: string;
+  title: string;
+  podcast_title: string;
+  duration_sec: number | null;
+  container: string | null;
+  source: "server_file" | "publisher";
+  cover_path: string | null;
+  art_url: string | null;
+  position_sec: number;
+}
+
+export interface PodcastChapter {
+  start_sec: number;
+  title: string;
+  img?: string;
+  url?: string;
+}
+

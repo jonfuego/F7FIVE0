@@ -2,6 +2,7 @@
  * TrackPlayer.registerPlaybackService. Handles lock-screen / notification /
  * headset remote controls and audio interruptions (headphone unplug, calls). */
 import TrackPlayer, { Event } from "react-native-track-player";
+import { skipBack, skipForward } from "./longform";
 import { trackPlayerController } from "./playerController";
 
 // Uniform player controller (item 8c) over the audio service. The remote
@@ -27,6 +28,17 @@ export async function PlaybackService(): Promise<void> {
   TrackPlayer.addEventListener(Event.RemoteNext, () => TrackPlayer.skipToNext());
   TrackPlayer.addEventListener(Event.RemotePrevious, () => TrackPlayer.skipToPrevious());
   TrackPlayer.addEventListener(Event.RemoteSeek, (e) => audioController.seek(e.position));
+
+  // Podcast mode (see setup.ts): the notification and headset jump back 15 s and
+  // forward 30 s. The jump stays inside the episode.
+  TrackPlayer.addEventListener(Event.RemoteJumpBackward, async () => {
+    const p = await TrackPlayer.getProgress();
+    await TrackPlayer.seekTo(skipBack(p.position));
+  });
+  TrackPlayer.addEventListener(Event.RemoteJumpForward, async () => {
+    const p = await TrackPlayer.getProgress();
+    await TrackPlayer.seekTo(skipForward(p.position, p.duration));
+  });
 
   // Interruptions: pause on headphone unplug / audio-becoming-noisy and on a
   // transient duck (phone call), resume when the interruption ends.

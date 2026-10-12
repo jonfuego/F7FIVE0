@@ -12,10 +12,8 @@ never replace a live asset.
 from __future__ import annotations
 
 import io
-import ipaddress
 import logging
 import os
-import socket
 import tempfile
 import uuid
 from pathlib import Path
@@ -28,9 +26,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import PROJECT_URL, settings
+from app.services import net_guard
 from app.models.art import (
     ArtOverride, ENTITY_ALBUM, ENTITY_ARTIST, ENTITY_MIX, ENTITY_MOVIE, ENTITY_MUSIC_VIDEO,
-    ENTITY_SERIES, ROLE_BACKDROP, ROLE_COVER, ROLE_POSTER, ROLE_THUMB,
+    ENTITY_PODCAST, ENTITY_SERIES, ROLE_BACKDROP, ROLE_COVER, ROLE_POSTER, ROLE_THUMB,
     SOURCE_ARTIST_AUTO,
 )
 
@@ -80,43 +79,20 @@ _URL_TIMEOUT = 10.0
 # Max redirect hops on an admin art URL fetch. Generous enough for normal
 # CDN chains, bounded so a redirect loop can't spin forever and so each hop
 # stays inside the SSRF check below.
-_MAX_REDIRECTS = 5
+_MAX_REDIRECTS = net_guard.MAX_REDIRECTS
 
 
 def _assert_public_host(url: str) -> None:
     """Reject a URL whose host resolves to a non-public address.
 
-    SSRF guard for the admin URL-paste path: a pasted URL must not be usable
-    to probe LAN or localhost services. Resolves every address the host maps
-    to and rejects loopback, private, link-local, reserved, unspecified, and
-    multicast ranges. Called on the original URL and again on every redirect
-    target so a public URL can't bounce the fetch onto an internal one.
+    The SSRF check itself lives in `services/net_guard.py` (one guard for art
+    and the podcast fetches); this keeps art's own error type and status codes.
+    Called on the original URL and again on every redirect target.
     """
-    host = (urlsplit(url).hostname or "").strip()
-    if not host:
-        raise ArtValidationError("url has no host", status_code=400)
     try:
-        infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
-    except socket.gaierror as exc:
-        raise ArtValidationError(
-            f"cannot resolve host {host}: {exc}", status_code=502,
-        )
-    for info in infos:
-        raw = info[4][0].split("%")[0]  # strip any IPv6 scope id
-        try:
-            ip = ipaddress.ip_address(raw)
-        except ValueError:
-            raise ArtValidationError(
-                f"unresolvable address for {host}", status_code=502,
-            )
-        if (
-            ip.is_private or ip.is_loopback or ip.is_link_local
-            or ip.is_reserved or ip.is_unspecified or ip.is_multicast
-        ):
-            raise ArtValidationError(
-                f"refusing to fetch from non-public address ({ip})",
-                status_code=400,
-            )
+        net_guard.assert_public_host(url)
+    except net_guard.NetGuardError as exc:
+        raise ArtValidationError(str(exc), status_code=exc.status_code) from exc
 
 # Valid (entity_kind, role) combinations. Reject anything else at the
 # service layer so garbage can never land in the table.
@@ -127,6 +103,7 @@ _VALID_ROLES: dict[str, set[str]] = {
     ENTITY_MOVIE: {ROLE_POSTER, ROLE_BACKDROP},
     ENTITY_SERIES: {ROLE_POSTER, ROLE_BACKDROP},
     ENTITY_MIX: {ROLE_COVER},
+    ENTITY_PODCAST: {ROLE_COVER},
 }
 
 # Mixes have no database row, so their art id is derived: uuid5 of the mix key
@@ -365,6 +342,7 @@ def fetch_url_bytes(url: str) -> bytes:
             timeout=_URL_TIMEOUT,
             follow_redirects=False,
             headers=headers,
+            transport=net_guard.client_transport(),
         ) as client:
             current = url
             for _hop in range(_MAX_REDIRECTS + 1):

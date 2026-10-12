@@ -2,7 +2,8 @@
 // page polls. Pure, so node:test covers it (scans-rows.test.ts); it imports
 // nothing at run time, like admin-sections.ts.
 //
-// Rows, always in this order: Movies, TV, Music, Music videos, *arr sync.
+// Rows, always in this order: Movies, TV, Music, Music videos, Podcasts, Podcast
+// feeds, *arr sync.
 //
 // - A library whose *arr app is set (Radarr for Movies, Sonarr for TV, Lidarr
 //   for Music) is driven by that app's sync. The folder scan must never touch
@@ -12,15 +13,21 @@
 // - The *arr sync row (every app that is set, in one go) appears only when at
 //   least one app is set.
 //
+// - Podcasts are a folder scan of the podcasts library (no *arr app owns them).
+//   "Podcast feeds" is a different job: it refreshes the feeds of the shows people
+//   follow. It has its own button (Refresh feeds) and is not part of Scan all,
+//   because it is not a scan of anything on disk.
+//
 // Music is always startable from the card: through the folder scan when there
 // is no Lidarr, through the Lidarr sync when there is. Without a Music folder
 // the button stays off and says to add one, because there is nothing to scan.
 
-export type ScanRowId = "movies" | "tv" | "music" | "music_videos" | "arr";
+export type ScanRowId =
+  | "movies" | "tv" | "music" | "music_videos" | "podcasts" | "podcast_feeds" | "arr";
 export type ScanRowState = "idle" | "running" | "error" | "never";
 export type ArrApp = "radarr" | "sonarr" | "lidarr";
 export type ArrApps = Record<ArrApp, boolean>;
-export type FolderLibraryId = "movies" | "tv" | "music";
+export type FolderLibraryId = "movies" | "tv" | "music" | "podcasts";
 
 export type FolderLibraryLike = {
   state: string;
@@ -61,6 +68,17 @@ export type ArrSyncLike = {
   last_error: string | null;
 };
 
+/** GET /api/admin/podcasts/refresh. */
+export type PodcastRefreshLike = {
+  state: string;
+  finished_at: string | null;
+  total: number;
+  count: number;
+  added: number;
+  errors: number;
+  last_error: string | null;
+};
+
 export type ScanInputs = {
   /** Which *arr apps have a key. null until known. */
   apps: ArrApps | null;
@@ -69,13 +87,16 @@ export type ScanInputs = {
   folder: FolderScanLike | null;
   musicVideos: MusicVideosLike | null;
   arr: ArrSyncLike | null;
+  /** The podcast feed refresh. null / missing until known. */
+  podcastRefresh?: PodcastRefreshLike | null;
   now?: number;
 };
 
 export type ScanAction =
   | { kind: "folder"; library: FolderLibraryId }
   | { kind: "arr"; apps: ArrApp[] }
-  | { kind: "music_videos" };
+  | { kind: "music_videos" }
+  | { kind: "podcast_refresh" };
 
 export type ScanRow = {
   id: ScanRowId;
@@ -268,6 +289,47 @@ function musicVideosRow(inputs: ScanInputs): ScanRow {
 }
 
 // ---------------------------------------------------------------------------
+// Podcast feeds (refresh the feeds of the shows people follow)
+// ---------------------------------------------------------------------------
+function podcastFeedsRow(inputs: ScanInputs): ScanRow {
+  const pr = inputs.podcastRefresh ?? null;
+  const now = inputs.now ?? Date.now();
+  const running = pr?.state === "running";
+
+  let state: ScanRowState;
+  if (running) state = "running";
+  else if (pr && (pr.errors > 0 || !!pr.last_error)) state = "error";
+  else if (pr && pr.finished_at) state = "idle";
+  else state = "never";
+
+  const progress =
+    pr && running && pr.total > 0
+      ? { done: pr.count, total: pr.total, percent: percentOf(pr.count, pr.total) }
+      : null;
+
+  let result: string;
+  if (!pr) result = "";
+  else if (running) result = pr.total > 0 ? `${pr.count} of ${pr.total} shows` : "Starting";
+  else if (state === "never") result = "Not refreshed yet";
+  else {
+    const parts = [`${pr.added} new ${pr.added === 1 ? "episode" : "episodes"}`];
+    if (pr.errors) parts.push(plural(pr.errors, "error", "errors"));
+    result = parts.join(", ");
+  }
+
+  let disabledReason: string | null = null;
+  if (!pr) disabledReason = CHECKING;
+  else if (running) disabledReason = "Refreshing now.";
+
+  return {
+    id: "podcast_feeds", label: "Podcast feeds", source: "feed refresh", state, progress, result,
+    when: !running && pr ? whenText(pr.finished_at, now) : "",
+    canStart: disabledReason === null, disabledReason,
+    action: { kind: "podcast_refresh" },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // The *arr sync (every app that is set)
 // ---------------------------------------------------------------------------
 function arrSyncRow(set: ArrApp[], inputs: ScanInputs): ScanRow {
@@ -322,6 +384,8 @@ export function buildScanRows(inputs: ScanInputs): ScanRow[] {
     rows.push(inputs.apps?.[app] ? arrAppRow(id, label, app, inputs) : folderRow(id, label, inputs));
   }
   rows.push(musicVideosRow(inputs));
+  rows.push(folderRow("podcasts", "Podcasts", inputs));
+  rows.push(podcastFeedsRow(inputs));
   if (set.length > 0) rows.push(arrSyncRow(set, inputs));
   return rows;
 }
@@ -344,7 +408,10 @@ export type ScanAllPlan = {
  *  one request and the apps in one request, because each of those runs one
  *  at a time. */
 export function scanAllPlan(rows: ScanRow[]): ScanAllPlan {
-  const startable = rows.filter((r) => r.canStart && r.state !== "running");
+  // Refreshing podcast feeds is not a scan of anything on disk: it keeps its own button.
+  const startable = rows.filter(
+    (r) => r.canStart && r.state !== "running" && r.action.kind !== "podcast_refresh",
+  );
   const libraries: FolderLibraryId[] = [];
   const apps = new Set<ArrApp>();
   let musicVideos = false;
@@ -385,7 +452,10 @@ export function scansSummary(rows: ScanRow[]): { text: string; attention: boolea
 
 /** The last error text of each status, once each, for the red lines under the list. */
 export function scanErrors(inputs: ScanInputs): string[] {
-  const texts = [inputs.folder?.last_error, inputs.musicVideos?.last_error, inputs.arr?.last_error];
+  const texts = [
+    inputs.folder?.last_error, inputs.musicVideos?.last_error, inputs.podcastRefresh?.last_error,
+    inputs.arr?.last_error,
+  ];
   const out: string[] = [];
   for (const t of texts) {
     const text = (t ?? "").trim();

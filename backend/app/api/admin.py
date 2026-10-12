@@ -14,7 +14,7 @@ from typing import Annotated, Any, Optional
 
 from urllib.parse import unquote
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Query, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -31,6 +31,7 @@ from app.api.schemas import (
     LibraryFolderOut, LibraryFoldersIn, LibraryFoldersLibraryOut, LibraryFoldersOut,
     MergeArtistIn, MergePreviewOut, MergeResultOut, UndoMergeResultOut,
     MetadataSettingsOut, NasCredentialIn, NasCredentialOut, NasSaveOut,
+    PodcastIndexKeyIn, PodcastIndexStatusOut, PodcastStorageOut,
     ReminderOut, ReminderSnoozeIn, TmdbKeyCheckOut, TmdbKeyIn,
     TmdbKeyStatusOut, UpdateBadgeOut, UpdateRunOut, UpdatesOut,
     ActiveTranscodeOut, AdminSessionOut, AuthEventOut, MatchApply,
@@ -56,9 +57,12 @@ from app.services.arr.radarr import RadarrClient
 from app.services.arr.sonarr import SonarrClient
 from app.config import settings
 from app.services import (
-    android_app, app_settings, arr_settings, library_folders, nas_auth, reminders,
-    remote_access as ra, scan_library, scan_status, server_version, tmdb_key, updates,
+    android_app, app_settings, arr_settings, library_folders, nas_auth, podcastindex_key,
+    reminders, remote_access as ra, scan_library, scan_status, server_version, tmdb_key, updates,
 )
+from app.services.podcasts import download as podcast_download
+from app.services.podcasts import search as podcast_search
+from app.services.podcasts import storage as podcast_storage
 from app.services import art as art_service
 from app.services import artist_merge, auth_events
 from app.services.metadata._base import ProviderError
@@ -1488,7 +1492,7 @@ def put_library_folders(
 
 
 # The libraries the folder scan can do, in the order Admin lists them.
-_FOLDER_SCAN_LIBRARIES = ("movies", "tv", "music")
+_FOLDER_SCAN_LIBRARIES = ("movies", "tv", "music", "podcasts")
 
 
 def _folder_scan_out(db: Session) -> dict:
@@ -1531,6 +1535,7 @@ def start_library_scan(
             "movies": scan_library.movies_enabled,
             "tv": scan_library.tv_enabled,
             "music": scan_library.music_enabled,
+            "podcasts": scan_library.podcasts_enabled,
         }
         if not all(enabled[k](db) for k in only):
             raise HTTPException(status_code=400, detail="library_not_scanned")
@@ -1841,9 +1846,19 @@ async def upload_update(
 def _metadata_out(db: Session) -> MetadataSettingsOut:
     src = tmdb_key.source(db)
     key = tmdb_key.saved(db) if src == "admin" else (settings.tmdb_api_key or "").strip()
-    return MetadataSettingsOut(tmdb=TmdbKeyStatusOut(
-        configured=src is not None, source=src, masked=tmdb_key.masked(key) if key else None,
-    ))
+    pi_src = podcastindex_key.source(db)
+    pi_key, pi_secret = podcastindex_key.effective(db)
+    return MetadataSettingsOut(
+        tmdb=TmdbKeyStatusOut(
+            configured=src is not None, source=src, masked=tmdb_key.masked(key) if key else None,
+        ),
+        # The secret is never put in a response: only whether it is set.
+        podcastindex=PodcastIndexStatusOut(
+            configured=pi_src is not None, source=pi_src,
+            key_masked=podcastindex_key.masked(pi_key) if pi_key else None,
+            secret_set=bool(pi_secret),
+        ),
+    )
 
 
 @router.get("/metadata", response_model=MetadataSettingsOut)
@@ -1902,6 +1917,115 @@ def delete_tmdb_key(
     tmdb_key.clear(db)
     db.commit()
     return _metadata_out(db)
+
+
+@router.post("/metadata/podcastindex/test", response_model=TmdbKeyCheckOut)
+def test_podcastindex_key(
+    body: PodcastIndexKeyIn,
+    _admin: Annotated[User, Depends(require_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> TmdbKeyCheckOut:
+    """Run one search with a key and secret, without saving them. Blank fields
+    test the pair that is in use now."""
+    key, secret = body.key.strip(), body.secret.strip()
+    if not key and not secret:
+        key, secret = podcastindex_key.effective(db)
+    ok, message = podcast_search.check_credentials(key, secret)
+    return TmdbKeyCheckOut(ok=ok, message=message)
+
+
+@router.put("/metadata/podcastindex", response_model=MetadataSettingsOut)
+def put_podcastindex_key(
+    body: PodcastIndexKeyIn,
+    _admin: Annotated[User, Depends(require_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> MetadataSettingsOut:
+    """Check the pair with Podcast Index (one search), then save it. It takes
+    effect at once, without a restart, and wins over `.env`."""
+    ok, message = podcast_search.check_credentials(body.key, body.secret)
+    if not ok:
+        raise HTTPException(status_code=400, detail=message)
+    podcastindex_key.save(db, body.key, body.secret)
+    db.commit()
+    log.info("podcast index key saved from the admin page")
+    return _metadata_out(db)
+
+
+@router.delete("/metadata/podcastindex", response_model=MetadataSettingsOut)
+def delete_podcastindex_key(
+    _admin: Annotated[User, Depends(require_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> MetadataSettingsOut:
+    """Remove the saved pair. PODCASTINDEX_API_KEY / _SECRET in .env apply again
+    if set; otherwise search uses iTunes."""
+    podcastindex_key.clear(db)
+    db.commit()
+    return _metadata_out(db)
+
+
+# ---------------------------------------------------------------------------
+# Podcasts: remove a server download
+# ---------------------------------------------------------------------------
+@router.delete("/podcasts/episodes/{id}/download", status_code=204)
+def delete_podcast_download(
+    id: uuid.UUID,
+    _admin: Annotated[User, Depends(require_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> Response:
+    """Remove the file F7FIVE0 downloaded for an episode (the episode and its
+    feed entry stay, and it can be streamed again). Only files F7FIVE0 put there
+    itself, and only under the podcasts library folders: anything else answers
+    409 and nothing is touched."""
+    from app.models.podcast import PodcastEpisode
+    ep = db.get(PodcastEpisode, id)
+    if ep is None:
+        raise HTTPException(status_code=404, detail="episode_not_found")
+    try:
+        podcast_download.delete_download(db, ep)
+    except podcast_download.RemovalRefused as exc:
+        raise HTTPException(status_code=409, detail=exc.code) from None
+    db.commit()
+    return Response(status_code=204)
+
+
+@router.get("/podcasts/storage", response_model=PodcastStorageOut)
+def get_podcast_storage(
+    _admin: Annotated[User, Depends(require_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> PodcastStorageOut:
+    """What the downloaded episodes use, and the free space on the drive of each
+    podcasts folder. There is no cap; `low_space` drives the warning."""
+    return PodcastStorageOut(**podcast_storage.usage(db))
+
+
+@router.get("/podcasts/refresh")
+def get_podcast_refresh(
+    _admin: Annotated[User, Depends(require_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """The feed refresh status (`podcast_refresh_status`): idle or running, how
+    many shows are done, new episodes found, errors, the last error."""
+    return scan_status.pr_read(db)
+
+
+@router.post("/podcasts/refresh", status_code=202)
+def start_podcast_refresh(
+    _admin: Annotated[User, Depends(require_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Refresh the feeds of every followed show now. 409 while one is running.
+    The refresh runs on the scheduler; poll GET /podcasts/refresh to watch it."""
+    if not scan_status.pr_begin(db):
+        raise HTTPException(status_code=409, detail="refresh_running")
+    db.commit()
+    try:
+        scheduler.trigger_podcast_refresh_now()
+    except Exception as exc:
+        log.exception("could not queue the podcast refresh")
+        scan_status.pr_finish(db, "The refresh could not be started.")
+        db.commit()
+        raise HTTPException(status_code=500, detail="refresh_not_started") from exc
+    return scan_status.pr_read(db)
 
 
 # ---------------------------------------------------------------------------
