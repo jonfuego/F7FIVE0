@@ -306,11 +306,13 @@ def login_verify(
 ) -> TokenPair:
     """Verify an assertion and issue tokens. Uses the shared login throttle."""
     client_ip = _client_ip(request)
+    # Same rules as the password login: check-and-record under a per-key lock on
+    # PostgreSQL, and a blocked attempt is not recorded (Retry-After stays true).
+    login_throttle.lock_username(db, _PASSKEY_THROTTLE_USER)
     retry = login_throttle.retry_after_for(
         db, username=_PASSKEY_THROTTLE_USER, client_ip=client_ip,
     )
     if retry is not None:
-        login_throttle.record_failure(db, username=_PASSKEY_THROTTLE_USER, client_ip=client_ip)
         db.commit()
         raise HTTPException(
             status_code=429, detail="too_many_attempts",

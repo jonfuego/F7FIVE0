@@ -295,3 +295,34 @@ describe("adoptSession", () => {
     expect(seen[0]).toBe("Bearer acc-1");
   });
 });
+
+describe("ApiClient.login lockout", () => {
+  const throttled = (retryAfter: string | null): Response =>
+    ({
+      status: 429,
+      ok: false,
+      headers: { get: (name: string) => (name.toLowerCase() === "retry-after" ? retryAfter : null) },
+      async json() {
+        return { detail: "too_many_attempts" };
+      },
+    }) as unknown as Response;
+
+  it("turns a 429 into a LoginThrottledError carrying the server's wait", async () => {
+    const { LoginThrottledError } = await import("../throttle");
+    const fetchImpl = jest.fn(async () => throttled("317")) as unknown as typeof fetch;
+    const client = new ApiClient({ baseUrl: "http://x", tokenStore: memStore(null), fetchImpl });
+    const err = await client.login("jon", "pw").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(LoginThrottledError);
+    expect((err as InstanceType<typeof LoginThrottledError>).retryAfterSeconds).toBe(317);
+    expect((err as Error).message).toBe("too_many_attempts");
+  });
+
+  it("a 429 without a usable Retry-After still throws the lockout error", async () => {
+    const { LoginThrottledError } = await import("../throttle");
+    const fetchImpl = jest.fn(async () => throttled(null)) as unknown as typeof fetch;
+    const client = new ApiClient({ baseUrl: "http://x", tokenStore: memStore(null), fetchImpl });
+    const err = await client.login("jon", "pw").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(LoginThrottledError);
+    expect((err as InstanceType<typeof LoginThrottledError>).retryAfterSeconds).toBeNull();
+  });
+});

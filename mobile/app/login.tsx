@@ -13,21 +13,16 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { loginMessage } from "@/api/loginMessage";
 import { passkeysAvailable, serverHasPasskeys } from "@/auth/passkey";
 import { useAuth } from "@/state/auth";
 import { getApiBase, normalizeServerUrl, saveServerUrl, serverFilledFromStamp } from "@/state/config";
-import type { LoginError } from "@/state/auth";
 import { keyboardAvoidBehavior } from "@/lib/keyboardBehavior";
 import { colors, MIN_TOUCH, radius, spacing, typography } from "@/state/theme";
 import { HiveWordmark } from "@/ui/HiveWordmark";
 import { IconButton } from "@/ui/IconButton";
 
-function messageFor(err: string): string {
-  const e = err as LoginError;
-  if (e === "invalid_credentials") return "That username or password is incorrect.";
-  if (e === "unreachable") return "Can't reach that server. Check the address and your connection.";
-  return "Something went wrong signing in. Please try again.";
-}
+const messageFor = loginMessage;
 
 export default function LoginScreen(): React.ReactElement {
   const { signIn, signInWithPasskey } = useAuth();
@@ -78,8 +73,8 @@ export default function LoginScreen(): React.ReactElement {
       setError(
         msg === "invalid_credentials"
           ? "That passkey isn't registered on this server. Use your password."
-          : msg === "unreachable"
-            ? messageFor(msg)
+          : msg === "unreachable" || msg === "too_many_attempts"
+            ? messageFor(e)
             : "Passkey sign-in was cancelled or unavailable. Use your password.",
       );
     } finally {
@@ -103,7 +98,7 @@ export default function LoginScreen(): React.ReactElement {
       setServer(await saveServerUrl(server));
       await signIn(username.trim().toLowerCase(), password);
     } catch (e) {
-      setError(messageFor(e instanceof Error ? e.message : "unknown"));
+      setError(messageFor(e));
     } finally {
       setBusy(false);
     }

@@ -8,6 +8,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { backend } from "@/lib/api";
 import { setSessionCookies } from "@/lib/cookies";
+import { retryAfterHeader } from "@/lib/login-errors";
 
 export async function POST(req: NextRequest): Promise<Response> {
   let body: { credential?: unknown };
@@ -39,8 +40,13 @@ export async function POST(req: NextRequest): Promise<Response> {
 
   const payload = await safeJson(backendRes);
   if (!backendRes.ok) {
+    // Keep a lockout's Retry-After so the page can say how long to wait.
+    const headers: Record<string, string> = {};
+    const retryAfter = retryAfterHeader(backendRes.headers.get("retry-after"));
+    if (retryAfter) headers["retry-after"] = retryAfter;
     return NextResponse.json(payload ?? { detail: "passkey_login_failed" }, {
       status: backendRes.status,
+      headers,
     });
   }
 
