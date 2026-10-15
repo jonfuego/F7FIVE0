@@ -68,3 +68,72 @@ describe("ProgressSyncer 15-second sync", () => {
     syncer.stop();
   });
 });
+
+describe("ProgressSyncer with an async (native) source", () => {
+  beforeEach(() => jest.useFakeTimers());
+  afterEach(() => jest.useRealTimers());
+
+  it("a flush reports the native position, not a stale cached one", async () => {
+    // The JS-side cache froze at 120 s (screen off); the native player is at 410 s.
+    const cached = { position: 120 };
+    const native = { position: 410 };
+    const report = jest.fn();
+    const syncer = new ProgressSyncer({
+      report,
+      getSnapshot: async () => ({
+        trackId: "ep1",
+        kind: "podcast",
+        positionSec: native.position,
+        durationSec: 3000,
+        playing: false,
+      }),
+    });
+    syncer.flush();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(report).toHaveBeenCalledTimes(1);
+    expect(report).toHaveBeenCalledWith(expect.objectContaining({ trackId: "ep1", positionSec: 410 }));
+    expect(report).not.toHaveBeenCalledWith(expect.objectContaining({ positionSec: cached.position }));
+  });
+
+  it("the timer tick reads the native position each time", async () => {
+    let native = 0;
+    const report = jest.fn();
+    const syncer = new ProgressSyncer({
+      report,
+      getSnapshot: async () => ({ trackId: "ep1", positionSec: (native += 15), playing: true }),
+    });
+    syncer.start();
+    await jest.advanceTimersByTimeAsync(30_000);
+    expect(report.mock.calls.map((c) => c[0].positionSec)).toEqual([15, 30]);
+    syncer.stop();
+  });
+
+  it("tick() skips a save right after another one, so the timer and a native event do not double up", async () => {
+    const report = jest.fn();
+    const syncer = new ProgressSyncer({
+      report,
+      getSnapshot: async () => ({ trackId: "ep1", positionSec: 5, playing: true }),
+    });
+    syncer.tick();
+    await jest.advanceTimersByTimeAsync(0);
+    syncer.tick();
+    await jest.advanceTimersByTimeAsync(0);
+    expect(report).toHaveBeenCalledTimes(1);
+    await jest.advanceTimersByTimeAsync(8_000);
+    syncer.tick();
+    await jest.advanceTimersByTimeAsync(0);
+    expect(report).toHaveBeenCalledTimes(2);
+  });
+
+  it("a snapshot that fails does not report or throw", async () => {
+    const report = jest.fn();
+    const syncer = new ProgressSyncer({
+      report,
+      getSnapshot: () => Promise.reject(new Error("player not ready")),
+    });
+    syncer.flush();
+    await jest.advanceTimersByTimeAsync(0);
+    expect(report).not.toHaveBeenCalled();
+  });
+});

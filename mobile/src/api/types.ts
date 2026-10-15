@@ -252,6 +252,10 @@ export interface RequestSearchResult {
   title: string;
   year?: number | null;
   poster_url?: string | null;
+  /** Already has an open (non-denied) request. */
+  requested?: boolean;
+  /** Already in the library. */
+  in_library?: boolean;
 }
 
 /** GET /api/auth/me */

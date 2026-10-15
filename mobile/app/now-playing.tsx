@@ -19,12 +19,13 @@ import {
   SlidersHorizontal,
 } from "lucide-react-native";
 import React, { useEffect, useRef, useState } from "react";
-import { Modal, Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
+import { Modal, Pressable, ScrollView, StyleSheet, Switch, Text, useWindowDimensions, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { CastButton, useCast } from "@/cast";
 import { usePodcastChapters } from "@/api/podcasts";
 import { SKIP_BACK_SEC, SKIP_FORWARD_SEC, SPEEDS, chapterAt, formatSpeed } from "@/player/longform";
+import { nowPlayingLayout } from "@/player/nowPlayingLayout";
 import { usePlayer } from "@/player/PlayerProvider";
 import { colors, MIN_TOUCH, radius, spacing, typography } from "@/state/theme";
 import { Artwork } from "@/ui/Artwork";
@@ -81,6 +82,8 @@ export default function NowPlayingScreen(): React.ReactElement {
     markEpisodePlayed,
   } = usePlayer();
   const router = useRouter();
+  const { width, height } = useWindowDimensions();
+  const layout = nowPlayingLayout(width, height);
   const api = useApi();
   const cast = useCast();
 
@@ -193,7 +196,7 @@ export default function NowPlayingScreen(): React.ReactElement {
       </View>
 
       <View style={styles.art}>
-        <Artwork path={nowPlaying?.artPath} size={280} rounded />
+        <Artwork path={nowPlaying?.artPath} size={layout.artwork} rounded />
       </View>
 
       <View style={styles.meta}>
@@ -221,6 +224,9 @@ export default function NowPlayingScreen(): React.ReactElement {
         <Text style={styles.time}>{fmt(duration)}</Text>
       </View>
 
+      {/* Leftover height goes here, so the transport row sits low on the screen. */}
+      <View style={styles.spacer} />
+
       {podcast ? (
         <View style={styles.transport}>
           <IconButton
@@ -230,7 +236,7 @@ export default function NowPlayingScreen(): React.ReactElement {
               void skipBy(-1);
             }}
             accessibilityLabel={`Back ${SKIP_BACK_SEC} seconds`}
-            size={32}
+            size={layout.skipIcon}
           />
           <IconButton
             icon={isPlaying ? Pause : Play}
@@ -239,8 +245,8 @@ export default function NowPlayingScreen(): React.ReactElement {
               void togglePlay();
             }}
             accessibilityLabel={isPlaying ? "Pause" : "Play"}
-            size={28}
-            diameter={56}
+            size={layout.playIcon}
+            diameter={layout.playDiameter}
             square
             outlined
             fill
@@ -253,7 +259,7 @@ export default function NowPlayingScreen(): React.ReactElement {
               void skipBy(1);
             }}
             accessibilityLabel={`Forward ${SKIP_FORWARD_SEC} seconds`}
-            size={32}
+            size={layout.skipIcon}
           />
         </View>
       ) : (
@@ -265,7 +271,7 @@ export default function NowPlayingScreen(): React.ReactElement {
             void toggleShuffle();
           }}
           accessibilityLabel="Shuffle"
-          size={24}
+          size={layout.secondaryIcon}
           color={shuffleOn ? colors.accent : colors.textMuted}
         />
         <IconButton
@@ -275,7 +281,7 @@ export default function NowPlayingScreen(): React.ReactElement {
             void previous();
           }}
           accessibilityLabel="Previous track"
-          size={34}
+          size={layout.skipIcon}
           fill
         />
         <IconButton
@@ -285,8 +291,8 @@ export default function NowPlayingScreen(): React.ReactElement {
             void togglePlay();
           }}
           accessibilityLabel={isPlaying ? "Pause" : "Play"}
-          size={28}
-          diameter={56}
+          size={layout.playIcon}
+          diameter={layout.playDiameter}
           square
           outlined
           fill
@@ -299,7 +305,7 @@ export default function NowPlayingScreen(): React.ReactElement {
             void next();
           }}
           accessibilityLabel="Next track"
-          size={34}
+          size={layout.skipIcon}
           fill
         />
         <View style={styles.repeatWrap}>
@@ -310,7 +316,7 @@ export default function NowPlayingScreen(): React.ReactElement {
               void cycleRepeat();
             }}
             accessibilityLabel={`Repeat ${repeatMode}`}
-            size={24}
+            size={layout.secondaryIcon}
             color={repeatMode !== "off" ? colors.accent : colors.textMuted}
           />
           {repeatMode === "one" ? <Text style={styles.repeatOne}>1</Text> : null}
@@ -539,10 +545,9 @@ const styles = StyleSheet.create({
   transport: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
-    gap: spacing.lg,
-    marginTop: spacing.xl,
+    justifyContent: "space-evenly",
   },
+  spacer: { flex: 1, minHeight: spacing.xl },
   queueBtn: { minWidth: MIN_TOUCH, minHeight: MIN_TOUCH, alignItems: "center", justifyContent: "center" },
   topRight: { flexDirection: "row", alignItems: "center" },
   repeatWrap: { justifyContent: "center", alignItems: "center" },

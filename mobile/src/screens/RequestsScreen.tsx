@@ -1,7 +1,8 @@
 import React, { useState } from "react";
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
-import { createRequest, searchRequests } from "@/api/media";
+import { ApiError } from "@/api/client";
+import { createRequest, requestErrorDetail, searchRequests } from "@/api/media";
 import { useMyRequests } from "@/api/queries";
 import type { RequestSearchResult } from "@/api/types";
 import { useApi } from "@/state/auth";
@@ -39,11 +40,22 @@ export default function RequestsScreen(): React.ReactElement {
 
   const request = async (r: RequestSearchResult) => {
     try {
-      await createRequest(api, r.kind || kind, r.external_id);
+      await createRequest(api, r, kind);
       setRequested((prev) => new Set(prev).add(r.external_id));
       void requests.refetch();
     } catch (e) {
-      Alert.alert("Request failed", e instanceof Error ? e.message : "Please try again.");
+      const detail = e instanceof ApiError && e.status === 409 ? requestErrorDetail(e) : undefined;
+      if (detail === "already_requested") {
+        // Someone (maybe you) already asked for it: show it as Requested.
+        setRequested((prev) => new Set(prev).add(r.external_id));
+        void requests.refetch();
+        return;
+      }
+      if (detail === "requests_disabled") {
+        Alert.alert("Request failed", "Requests are turned off on this server.");
+        return;
+      }
+      Alert.alert("Request failed", "That request didn't go through. Please try again.");
     }
   };
 
@@ -83,7 +95,9 @@ export default function RequestsScreen(): React.ReactElement {
 
         {searching ? <ActivityIndicator color={colors.accent} style={{ marginVertical: spacing.md }} /> : null}
         {results.map((r) => {
-          const done = requested.has(r.external_id);
+          const inLibrary = r.in_library === true;
+          const done = inLibrary || requested.has(r.external_id) || r.requested === true;
+          const label = inLibrary ? "In library" : done ? "Requested" : "Request";
           return (
             <View key={`${r.kind}-${r.external_id}`} style={styles.resultRow}>
               <View style={styles.meta}>
@@ -96,10 +110,10 @@ export default function RequestsScreen(): React.ReactElement {
                 disabled={done}
                 onPress={() => void request(r)}
                 accessibilityRole="button"
-                accessibilityLabel={done ? "Requested" : `Request ${r.title}`}
+                accessibilityLabel={done ? label : `Request ${r.title}`}
                 style={[styles.reqBtn, done && styles.reqBtnDone]}
               >
-                <Text style={[styles.reqText, done && styles.reqTextDone]}>{done ? "Requested" : "Request"}</Text>
+                <Text style={[styles.reqText, done && styles.reqTextDone]}>{label}</Text>
               </Pressable>
             </View>
           );
