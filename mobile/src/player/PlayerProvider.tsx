@@ -47,7 +47,7 @@ import { getSetting, setSetting, SETTINGS } from "@/state/settings";
 import { useApi } from "@/state/auth";
 import { useViewPref } from "@/state/viewPrefs";
 import { clampSpeed, isSpeed, skipBack, skipForward } from "./longform";
-import { ProgressSyncer } from "./progressSync";
+import { ProgressSyncer, type ProgressSnapshot } from "./progressSync";
 import { setPlayerMode, setupPlayer } from "./setup";
 
 interface QueueMeta {
@@ -219,8 +219,42 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   // Progress sync: every 15s while playing, and once on each track change.
+  //
+  // Podcast resume rollback, root cause (confirmed by reading react-native-track-
+  // player 4.1.2 `useProgress` and the old snapshot, not yet by a phone run): the
+  // snapshot used to report `progressRef.current.position`, which is the value of
+  // the `useProgress(250)` hook. That hook is a JS `setTimeout` poll of the native
+  // position, so with the screen off or the app in the background the timer
+  // stalls and the value freezes at the last foreground position. Both the
+  // 15 s `setInterval` save and the pause flush (notification, headset, car)
+  // read that frozen value and PUT it, so the server kept a position from
+  // minutes back. The hook also resets to 0 on every track change. A podcast now
+  // reads `TrackPlayer.getProgress()` (the native player) for every save: the
+  // tick, the pause flush, a track change and the queue end. The native
+  // `PlaybackProgressUpdated` event (see setup.ts) drives the tick as well, so a
+  // stalled JS timer does not stop saves.
   const syncer = useRef<ProgressSyncer | null>(null);
   const activeIndexRef = useRef<number>(-1);
+
+  /** Save an episode's place: the podcast API when online, else the offline buffer. */
+  const savePodcastProgress = useCallback(
+    async (episodeId: string, positionSec: number, durationSec?: number) => {
+      const buffer = () =>
+        downloadsRef.current.bufferOffline({
+          kind: "podcast_progress",
+          episodeId,
+          positionSec,
+          durationSec,
+          at: Date.now(),
+        });
+      if (!downloadsRef.current.online) {
+        buffer();
+        return;
+      }
+      await reportPodcastProgress(api, episodeId, positionSec, durationSec).catch(buffer);
+    },
+    [api],
+  );
 
   useEffect(() => {
     const s = new ProgressSyncer({
@@ -228,8 +262,20 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         const idx = activeIndexRef.current;
         const meta = idx >= 0 ? queueMeta.current[idx] : undefined;
         if (!meta) return null;
+        if (meta.kind === "podcast") {
+          // Native position, never the hook value (see the note above).
+          return TrackPlayer.getProgress().then(
+            (p): ProgressSnapshot => ({
+              trackId: meta.episodeId ?? meta.mediaFileId,
+              kind: "podcast",
+              positionSec: p.position,
+              durationSec: p.duration || undefined,
+              playing: playingRef.current,
+            }),
+          );
+        }
         return {
-          trackId: meta.kind === "podcast" ? (meta.episodeId ?? meta.mediaFileId) : meta.mediaFileId,
+          trackId: meta.mediaFileId,
           kind: meta.kind,
           positionSec: progressRef.current.position,
           durationSec: progressRef.current.duration || undefined,
@@ -240,25 +286,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         // An episode reports through the podcast API every 15 s while playing, and
         // is kept in the offline buffer when the server cannot be reached.
         if (snap.kind === "podcast") {
-          if (!downloadsRef.current.online) {
-            downloadsRef.current.bufferOffline({
-              kind: "podcast_progress",
-              episodeId: snap.trackId,
-              positionSec: snap.positionSec,
-              durationSec: snap.durationSec,
-              at: Date.now(),
-            });
-            return;
-          }
-          await reportPodcastProgress(api, snap.trackId, snap.positionSec, snap.durationSec).catch(() => {
-            downloadsRef.current.bufferOffline({
-              kind: "podcast_progress",
-              episodeId: snap.trackId,
-              positionSec: snap.positionSec,
-              durationSec: snap.durationSec,
-              at: Date.now(),
-            });
-          });
+          await savePodcastProgress(snap.trackId, snap.positionSec, snap.durationSec);
           return;
         }
         if (!downloadsRef.current.online) {
@@ -277,7 +305,16 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     s.start();
     syncer.current = s;
     return () => s.stop();
-  }, [api]);
+  }, [api, savePodcastProgress]);
+
+  // The native player pings every 15 s (progressUpdateEventInterval, setup.ts)
+  // even when the JS timer above is throttled with the screen off.
+  useEffect(() => {
+    const sub = TrackPlayer.addEventListener(Event.PlaybackProgressUpdated, () => {
+      if (podcastModeRef.current) syncer.current?.tick();
+    });
+    return () => sub.remove();
+  }, []);
 
   // Keep refs the syncer reads without re-creating it.
   const progressRef = useRef(progress);
@@ -453,9 +490,13 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
   // Save an episode's place when it stops (pause, notification pause, headset),
   // and its end, so it reads as played. Playing saves every 15 s (the syncer).
+  // Only on a real stop: loading and buffering also read "not playing", and a
+  // save then would write the not-yet-seeked position over the saved one.
   useEffect(() => {
-    if (!isPlaying && podcastModeRef.current) syncer.current?.flush();
-  }, [isPlaying]);
+    const stopped =
+      playback.state === State.Paused || playback.state === State.Stopped || playback.state === State.Ended;
+    if (stopped && podcastModeRef.current) syncer.current?.flush();
+  }, [playback.state]);
 
   useEffect(() => {
     const sub = TrackPlayer.addEventListener(Event.PlaybackQueueEnded, async () => {
@@ -464,22 +505,14 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       const meta = idx >= 0 ? queueMeta.current[idx] : undefined;
       if (!meta || meta.kind !== "podcast") return;
       const id = meta.episodeId ?? meta.mediaFileId;
-      const dur = progressRef.current.duration || meta.durationSec || 0;
-      const pos = dur > 0 ? dur : progressRef.current.position;
-      if (!downloadsRef.current.online) {
-        downloadsRef.current.bufferOffline({
-          kind: "podcast_progress", episodeId: id, positionSec: pos, durationSec: dur || undefined, at: Date.now(),
-        });
-        return;
-      }
-      await reportPodcastProgress(api, id, pos, dur || undefined).catch(() => {
-        downloadsRef.current.bufferOffline({
-          kind: "podcast_progress", episodeId: id, positionSec: pos, durationSec: dur || undefined, at: Date.now(),
-        });
-      });
+      // Native position and length, not the hook (see the note at the syncer).
+      const native = await TrackPlayer.getProgress().catch(() => null);
+      const dur = native?.duration || meta.durationSec || 0;
+      const pos = dur > 0 ? dur : (native?.position ?? 0);
+      await savePodcastProgress(id, pos, dur || undefined);
     });
     return () => sub.remove();
-  }, [api]);
+  }, [savePodcastProgress]);
 
   // Expired-URL recovery: on a playback error, re-sign the active track's URL
   // and reload it once.

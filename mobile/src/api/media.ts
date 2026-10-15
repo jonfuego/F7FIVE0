@@ -279,17 +279,34 @@ export async function searchRequests(
   );
 }
 
-/** File a request for a catalogue hit (POST /api/requests). */
+/** File a request for a catalogue hit (POST /api/requests). The server needs
+ * `title` too (RequestCreate), and `api.request` does not throw on a non-2xx
+ * answer, so this goes through `api.json`: a 409 or 422 throws an ApiError
+ * with the server's body, never a silent "Requested". */
 export async function createRequest(
   api: ApiClient,
-  kind: string,
-  externalId: string,
+  hit: Pick<RequestSearchResult, "kind" | "external_id" | "title" | "year" | "poster_url">,
+  fallbackKind?: string,
 ): Promise<void> {
-  await api.request("/api/requests", {
+  await api.json<unknown>("/api/requests", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ kind, external_id: externalId }),
+    body: JSON.stringify({
+      kind: hit.kind || fallbackKind,
+      external_id: hit.external_id,
+      title: hit.title,
+      year: hit.year ?? null,
+      poster_url: hit.poster_url ?? null,
+    }),
   });
+}
+
+/** The server's `detail` string on a failed request call (FastAPI wraps it as
+ * `{detail: "..."}`), or undefined when the error carries none. */
+export function requestErrorDetail(e: unknown): string | undefined {
+  const body = (e as { body?: unknown } | null)?.body;
+  const detail = (body as { detail?: unknown } | null | undefined)?.detail;
+  return typeof detail === "string" ? detail : undefined;
 }
 
 /** Post one client error line (Phase 4 crash reporting). Best-effort. */

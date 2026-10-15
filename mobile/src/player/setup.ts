@@ -8,6 +8,9 @@ import TrackPlayer, {
 
 import { SKIP_BACK_SEC, SKIP_FORWARD_SEC } from "./longform";
 
+/** Seconds between native progress events while an episode plays. */
+const PODCAST_PROGRESS_EVENT_SEC = 15;
+
 export type PlayerMode = "music" | "podcast";
 
 let isSetup = false;
@@ -28,6 +31,10 @@ function optionsFor(m: PlayerMode) {
       android: ANDROID,
       forwardJumpInterval: SKIP_FORWARD_SEC,
       backwardJumpInterval: SKIP_BACK_SEC,
+      // The native player emits PlaybackProgressUpdated every 15 s; PlayerProvider
+      // saves the episode's place on it, so a throttled JS timer (screen off)
+      // does not stop the saves.
+      progressUpdateEventInterval: PODCAST_PROGRESS_EVENT_SEC,
       capabilities: [
         Capability.Play,
         Capability.Pause,
