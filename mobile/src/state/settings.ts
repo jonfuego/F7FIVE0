@@ -14,6 +14,8 @@ export const SETTINGS = {
   loudnessAllowBoost: "loudnessAllowBoost",
   playbackRate: "playbackRate",
   storageLimitMb: "storageLimitMb",
+  /** Save podcast episodes and music to the phone as they play (on by default). */
+  autoCacheAudio: "autoCacheAudio",
 } as const;
 
 export async function getSetting<T>(key: string, fallback: T): Promise<T> {

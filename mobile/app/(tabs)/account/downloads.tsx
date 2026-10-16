@@ -1,8 +1,9 @@
 import { useRouter } from "expo-router";
 import { CloudOff, Trash2, XCircle } from "lucide-react-native";
 import React from "react";
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
 
+import type { CacheEntry } from "@/download/autoCache";
 import { useDownloads } from "@/download/DownloadProvider";
 import { downloadToSong } from "@/download/entries";
 import { downloadToEpisode } from "@/download/podcastEntries";
@@ -21,11 +22,38 @@ const LIMIT_OPTIONS = [0, 1024, 5120, 10240, 20480]; // MB (0 = unlimited)
  * delete, cancel, retry for failed rows, a storage-limit setting
  * (SETTINGS.storageLimitMb), and play: tap a finished song to play every downloaded song from local files, or a
  * finished movie/episode to watch it from disk. With no network the app opens
- * here. Nothing here stores a URL. */
+ * here. Nothing here stores a URL. "Saved while playing" lists the audio kept
+ * by the auto cache (download/autoCache.ts), with its on/off switch. */
 export default function DownloadsScreen(): React.ReactElement {
   const router = useRouter();
   const { playSongs, playEpisode } = usePlayer();
-  const { state, usedBytes, online, cancel, retry, remove, setLimitMb } = useDownloads();
+  const {
+    state, usedBytes, online, cancel, retry, remove, setLimitMb,
+    autoCacheOn, setAutoCacheOn, audioCache, clearAudioCache,
+  } = useDownloads();
+  const saved = audioCache.entries.filter((e) => e.status === "done");
+
+  // A copy saved while it played: an episode plays on its own; a track plays
+  // with the other saved tracks.
+  const playSaved = (e: CacheEntry) => {
+    const m = e.meta ?? {};
+    if (e.kind === "podcast") {
+      void playEpisode({
+        id: m.episodeId ?? e.id,
+        podcastId: m.podcastId ?? null,
+        title: e.title,
+        showTitle: m.album ?? m.artist ?? "",
+        coverPath: m.coverPath ?? null,
+        durationSec: m.durationSec ?? null,
+      });
+      return;
+    }
+    const tracks = saved.filter((x) => x.kind === "track");
+    const asItem = (x: CacheEntry): DownloadItem => ({
+      id: x.id, title: x.title, status: "done", progress: 1, bytes: x.bytes, localPath: x.localPath, kind: "track", meta: x.meta,
+    });
+    void playSongs(tracks.map((x) => downloadToSong(asItem(x))), Math.max(0, tracks.findIndex((x) => x.id === e.id)));
+  };
 
   const play = (it: DownloadItem) => {
     const kind = it.kind ?? "track";
@@ -98,6 +126,54 @@ export default function DownloadsScreen(): React.ReactElement {
             );
           })}
         </View>
+
+        <Text style={styles.section}>Saved while playing</Text>
+        <View style={styles.switchRow}>
+          <Text style={[styles.storageLine, styles.switchLabel]}>Save podcasts and music as they play</Text>
+          <Switch
+            value={autoCacheOn}
+            onValueChange={setAutoCacheOn}
+            accessibilityLabel="Save podcasts and music as they play"
+            trackColor={{ true: colors.accent, false: colors.surfaceAlt }}
+          />
+        </View>
+        <Text style={styles.empty}>
+          Keeps playing when the phone loses service. An episode is removed once it is played, anything else 7 days
+          after it was last played. Tap Download to keep one for good.
+        </Text>
+        <Text style={[styles.storageLine, styles.savedLine]}>
+          {saved.length === 0 ? "Nothing saved right now" : `${saved.length} saved · ${formatBytes(audioCache.bytes)}`}
+        </Text>
+        {saved.map((e) => (
+          <Pressable
+            key={e.id}
+            style={styles.row}
+            onPress={() => playSaved(e)}
+            accessibilityRole="button"
+            accessibilityLabel={`Play saved ${e.title}`}
+          >
+            <View style={styles.rowMeta}>
+              <Text style={styles.rowTitle} numberOfLines={1}>
+                {e.title}
+              </Text>
+              <Text style={styles.rowSub} numberOfLines={1}>
+                {[e.meta?.artist, e.meta?.album !== e.meta?.artist ? e.meta?.album : null, formatBytes(e.bytes)]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </Text>
+            </View>
+          </Pressable>
+        ))}
+        {saved.length > 0 ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Clear saved audio"
+            onPress={() => void clearAudioCache()}
+            style={({ pressed }) => [styles.retry, styles.clearBtn, pressed && styles.retryPressed]}
+          >
+            <Text style={styles.retryTxt}>Clear saved audio</Text>
+          </Pressable>
+        ) : null}
 
         <Text style={styles.section}>Downloads</Text>
         {state.items.length === 0 ? (
@@ -214,4 +290,8 @@ const styles = StyleSheet.create({
   retryTxt: { color: colors.accent, fontWeight: "600" },
   rowBar: { height: 4, borderRadius: radius.pill, backgroundColor: colors.surfaceAlt, marginTop: spacing.xs },
   rowBarFill: { height: 4, borderRadius: radius.pill, backgroundColor: colors.accent },
+  switchRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, minHeight: MIN_TOUCH },
+  switchLabel: { flex: 1 },
+  savedLine: { marginTop: spacing.sm },
+  clearBtn: { alignSelf: "flex-start", marginTop: spacing.sm },
 });
