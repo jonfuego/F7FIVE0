@@ -296,6 +296,13 @@ class Settings(BaseSettings):
     remote_access_dir: str = ""
     remote_access_task: str = "F7FIVE0-RemoteAccess"
 
+    # DuckDNS refresh (port forwarding with a DuckDNS name). The API's scheduler
+    # calls DuckDNS every 5 minutes when both are set; Setup writes them from
+    # installer/remote-access.ps1. The domain is the subdomain only, no
+    # ".duckdns.org". The token lives only in the private .env.
+    duckdns_domain: str = ""
+    duckdns_token: str = ""
+
     # Admin > Updates. The web app hands an update to a SYSTEM scheduled task
     # through files in UPDATES_DIR (installer/update.ps1; blank means
     # <install folder>/data/updates). SERVER_VERSION_FILE is the record Setup

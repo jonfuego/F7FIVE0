@@ -44,6 +44,23 @@ def test_a_record_with_a_key_in_the_message_is_written_with_stars(redacting):
     assert "api_key=***" in redacting.text
 
 
+def test_redact_masks_a_token_parameter():
+    from app import log_redact
+
+    out = log_redact.redact("GET https://www.duckdns.org/update?domains=home&token=SECRET&ip= HTTP/1.1")
+    assert "SECRET" not in out
+    assert "token=***&ip=" in out
+    assert log_redact.redact("TOKEN=ABC123") == "TOKEN=***"
+
+
+def test_a_duckdns_style_url_is_logged_as_token_stars(redacting):
+    logging.getLogger("f7five0.test").warning(
+        "GET https://www.duckdns.org/update?domains=home&token=%s&ip=", "00000000-0000-0000-0000-000000000000"
+    )
+    assert "00000000-0000-0000-0000-000000000000" not in redacting.text
+    assert "token=***" in redacting.text
+
+
 def test_a_key_in_the_log_arguments_is_redacted(redacting):
     logging.getLogger("f7five0.test").warning("fetch %s failed (%d)", "https://x/y?api_key=SECRET", 404)
     assert "SECRET" not in redacting.text

@@ -88,6 +88,8 @@ $script:LastWarn = ""
 # The tunnel Setup-Cloudflare settled on; saved to .env as
 # CLOUDFLARE_TUNNEL_NAME once the whole run succeeds.
 $script:TunnelNameToSave = ""
+$script:DuckDomainToSave = ""
+$script:DuckTokenToSave = ""
 # Open sign-in links in a browser only when someone is at this console. The
 # scheduled task runs as SYSTEM with no desktop; the admin page shows the link.
 $OpenLinks = -not $FromRequest
@@ -135,7 +137,7 @@ function Test-Cancel {
 # Answers
 # ---------------------------------------------------------------------------
 $HostPattern  = '^(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]([a-z0-9-]{0,61}[a-z0-9])?$'
-$DuckPattern  = '^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$'
+# $DuckPattern (the DuckDNS token shape) comes from common.ps1.
 $TokenPattern = '^[A-Za-z0-9_\-+/=]{40,4096}$'
 
 $requestError = ""
@@ -512,19 +514,30 @@ function Setup-PortForward([string]$hostName, [string]$duckToken) {
         if ($busy) { Warn "Port $port is already used by another program (often IIS or another web server). HTTPS will not work until it is freed." }
     }
 
-    # Keep a DuckDNS name pointed at this home's public IP.
-    if ($duckToken -and $hostName -like "*.duckdns.org") {
+    # Keep a DuckDNS name pointed at this home's public IP. Setup updates it
+    # once here, in this process. After that the F7FIVE0 API refreshes it every
+    # 5 minutes from DUCKDNS_DOMAIN / DUCKDNS_TOKEN in the private .env (saved
+    # below). No scheduled task and no extra PowerShell process: a hidden
+    # PowerShell window calling a web URL on a timer is what Defender flags as
+    # malware, and a task would also keep the token in plain text.
+    $script:DuckDomainToSave = ""
+    $script:DuckTokenToSave = ""
+    if ($hostName -like "*.duckdns.org") {
         $sub = $hostName -replace '\.duckdns\.org$', ''
-        $updateUrl = "https://www.duckdns.org/update?domains=$sub&token=$duckToken&ip="
-        try {
-            $r = Invoke-RestMethod -Uri $updateUrl -UseBasicParsing -TimeoutSec 15
-            if ("$r" -match "OK") { Ok "DuckDNS updated for $hostName" } else { Warn "DuckDNS did not accept the update ($r). Check the token." }
-        } catch { Warn "Could not reach DuckDNS: $($_.Exception.Message)" }
-        $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -WindowStyle Hidden -Command `"Invoke-RestMethod -UseBasicParsing '$updateUrl' | Out-Null`""
-        $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 5)
-        $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
-        Register-ScheduledTask -TaskName "F7FIVE0-DuckDNS" -Action $action -Trigger $trigger -Principal $principal -Force | Out-Null
-        Ok "DuckDNS will be refreshed every 5 minutes (scheduled task F7FIVE0-DuckDNS)"
+        if ($duckToken) {
+            $updateUrl = "https://www.duckdns.org/update?domains=$sub&token=$duckToken&ip="
+            try {
+                $r = Invoke-RestMethod -Uri $updateUrl -UseBasicParsing -TimeoutSec 15
+                if ("$r" -match "OK") { Ok "DuckDNS updated for $hostName" } else { Warn "DuckDNS did not accept the update ($r). Check the token." }
+            } catch { Warn "Could not reach DuckDNS to update $hostName. The API keeps trying every 5 minutes." }
+            $script:DuckDomainToSave = $sub
+            $script:DuckTokenToSave = $duckToken
+        } elseif ((Get-EnvValue "DUCKDNS_DOMAIN") -eq $sub -and (Get-EnvValue "DUCKDNS_TOKEN")) {
+            # Same name, no new token: keep the one already in .env.
+            $script:DuckDomainToSave = $sub
+            $script:DuckTokenToSave = Get-EnvValue "DUCKDNS_TOKEN"
+        }
+        if ($script:DuckTokenToSave) { Ok "F7FIVE0 refreshes DuckDNS every 5 minutes" }
     }
 
     $caddyfile = Join-Path $caddyDir "Caddyfile"
@@ -622,6 +635,10 @@ try {
     } else {
         Step "Saving the address"
         Set-EnvKey "PUBLIC_URL" $url
+        # DuckDNS refresh settings: set by Setup-PortForward, blank for every
+        # other method and for off (the API job runs only when both are set).
+        Set-EnvKey "DUCKDNS_DOMAIN" $script:DuckDomainToSave
+        Set-EnvKey "DUCKDNS_TOKEN" $script:DuckTokenToSave
         # Each install keeps its own tunnel: remember its name for reruns.
         if ($Method -eq "cloudflare" -and $script:TunnelNameToSave) { Set-EnvKey "CLOUDFLARE_TUNNEL_NAME" $script:TunnelNameToSave }
         # Keep read access for the services' account (none when SYSTEM).

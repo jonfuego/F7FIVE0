@@ -1,4 +1,4 @@
-"""Keep API keys out of the log files.
+"""Keep API keys and tokens out of the log files.
 
 TMDB takes its key as a query parameter, and httpx logs every request URL at
 INFO, so a default setup wrote `api_key=<key>` into F7FIVE0-API.err.log. Two
@@ -6,7 +6,7 @@ layers, both installed by `install()` right after logging is configured:
 
 - `httpx` and `httpcore` are held at WARNING, so request URLs are not logged.
 - `RedactApiKeyFilter` sits on the root handler(s) and rewrites the value of
-  any `api_key=` parameter to `***` in every record: the message, its
+  any `api_key=` or `token=` parameter to `***` in every record: the message, its
   arguments, and the traceback text, so an exception that carries a URL is
   covered too.
 """
@@ -15,9 +15,10 @@ from __future__ import annotations
 import logging
 import re
 
-# `api_key=` up to the next `&`, space, or quote. Case-insensitive, and the
-# original spelling of the name is kept.
-_KEY_RE = re.compile(r"(api_key=)[^&\s'\"]+", re.IGNORECASE)
+# `api_key=` or `token=` up to the next `&`, space, or quote. Case-insensitive,
+# and the original spelling of the name is kept. `token=` covers the DuckDNS
+# update URL; it also covers names that end in it, such as `access_token=`.
+_KEY_RE = re.compile(r"((?:api_key|token)=)[^&\s'\"]+", re.IGNORECASE)
 
 _NOISY_LOGGERS = ("httpx", "httpcore")
 # uvicorn logs request-handling tracebacks through its own handlers, which
@@ -26,12 +27,12 @@ _UVICORN_LOGGERS = ("uvicorn", "uvicorn.error", "uvicorn.access")
 
 
 def redact(text: str) -> str:
-    """`...?api_key=SECRET&q=1` -> `...?api_key=***&q=1`."""
+    """`...?api_key=SECRET&q=1` -> `...?api_key=***&q=1` (same for `token=`)."""
     return _KEY_RE.sub(r"\1***", text)
 
 
 class RedactApiKeyFilter(logging.Filter):
-    """Rewrites `api_key=<value>` to `api_key=***` on the way to the handler.
+    """Rewrites `api_key=<value>` and `token=<value>` to `***` on the way to the handler.
     Never drops a record."""
 
     def filter(self, record: logging.LogRecord) -> bool:

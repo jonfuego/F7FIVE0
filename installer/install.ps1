@@ -812,6 +812,31 @@ $added = Merge-EnvFile $EnvFile $want $portKeys @("ARR_WEBHOOK_SECRET", "JWT_SEC
 # The services read .env, so their account (when not SYSTEM) gets read access.
 Set-PrivateAcl $EnvFile @($svcSid)
 Ok ("{0} ({1} new setting(s))" -f $EnvFile, $added)
+
+# An older Setup refreshed DuckDNS from a hidden PowerShell scheduled task
+# (F7FIVE0-DuckDNS) that held the token in its arguments. Defender flags that
+# pattern as malware. The API refreshes DuckDNS now, from DUCKDNS_DOMAIN and
+# DUCKDNS_TOKEN in .env: move the values over (never over a value already in
+# .env), then remove the task. The token is never printed.
+try {
+    $duckTask = Get-ScheduledTask -TaskName "F7FIVE0-DuckDNS" -ErrorAction SilentlyContinue
+    if ($duckTask) {
+        $duckArgs = (@($duckTask.Actions) | ForEach-Object { $_.Arguments }) -join " "
+        $duck = Get-DuckDnsFromTaskArgs $duckArgs
+        if ($duck) {
+            if (-not (Get-EnvValue "DUCKDNS_DOMAIN")) { Set-EnvKey "DUCKDNS_DOMAIN" $duck.Domain }
+            if (-not (Get-EnvValue "DUCKDNS_TOKEN")) { Set-EnvKey "DUCKDNS_TOKEN" $duck.Token }
+            Set-PrivateAcl $EnvFile @($svcSid)
+            Ok "DuckDNS settings moved from the old scheduled task into .env"
+        } else {
+            Warn "Could not read the DuckDNS settings from the old F7FIVE0-DuckDNS task. Set DuckDNS again in Admin > Remote access."
+        }
+        Unregister-ScheduledTask -TaskName "F7FIVE0-DuckDNS" -Confirm:$false -ErrorAction SilentlyContinue
+        Ok "removed the old F7FIVE0-DuckDNS scheduled task (the API refreshes DuckDNS now)"
+    }
+} catch {
+    Warn "Could not move the old DuckDNS task: $($_.Exception.Message)"
+}
 $secretProblems = @(Get-EnvSecretProblems $EnvFile)
 if ($secretProblems.Count -gt 0) {
     Warn ("The signing secrets in .env are weak: " + ($secretProblems -join "; ") + ". The API refuses to start with them in production. Set JWT_SECRET and STREAM_HMAC_SECRET to two different random values of 32 or more characters, then restart the F7FIVE0 services.")

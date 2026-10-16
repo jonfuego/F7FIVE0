@@ -38,6 +38,7 @@ JOB_ARTIST_ART = "artist_art_autofill"
 JOB_ARTIST_BIOS = "artist_bios_backfill"
 JOB_PODCAST_REFRESH = "podcast_refresh"
 JOB_PODCAST_DOWNLOAD = "podcast_download"
+JOB_DUCKDNS = "duckdns_refresh"
 
 # Once a day, give or take an hour, so a fleet of servers doesn't hit GitHub
 # at the same second. Checking never installs anything.
@@ -259,6 +260,17 @@ def _run_update_check() -> None:
             updates.check_for_update(db)
     except Exception:
         log.exception("scheduled update check raised")
+
+
+def _run_duckdns_refresh() -> None:
+    """Scheduler-invoked DuckDNS update. Stores the answer under
+    `duckdns_status`; never raises and never logs the URL or the token."""
+    try:
+        from app.services import duckdns
+        with db_session() as db:
+            duckdns.refresh(db)
+    except Exception:
+        log.warning("scheduled DuckDNS refresh failed")
 
 
 def _run_art_copies_backfill() -> None:
@@ -614,6 +626,20 @@ def start() -> BackgroundScheduler:
         replace_existing=True,
         next_run_time=datetime.now(timezone.utc) + timedelta(seconds=180),
     )
+    # DuckDNS: only when Setup wrote both DUCKDNS_DOMAIN and DUCKDNS_TOKEN into
+    # .env (port forwarding with a DuckDNS name). First update shortly after
+    # boot, then every 5 minutes.
+    if settings.duckdns_domain.strip() and settings.duckdns_token.strip():
+        sched.add_job(
+            _run_duckdns_refresh,
+            trigger=IntervalTrigger(minutes=5),
+            id=JOB_DUCKDNS,
+            name="refresh the DuckDNS address",
+            max_instances=1,
+            coalesce=True,
+            replace_existing=True,
+            next_run_time=datetime.now(timezone.utc) + timedelta(seconds=20),
+        )
     sched.start()
     _scheduler = sched
     log.info("scheduler started (full_sync every 5 minutes)")
