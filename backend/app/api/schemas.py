@@ -1360,6 +1360,13 @@ class PodcastOpmlResultOut(BaseModel):
 class PodcastProgressIn(BaseModel):
     position_sec: int = Field(ge=0, le=7 * 86400)
     duration_sec: Optional[int] = Field(default=None, ge=0, le=7 * 86400)
+    # When the device read this position (epoch milliseconds, its own clock). A
+    # save older than the one already stored is ignored. Optional: older apps
+    # do not send it and are saved as before.
+    recorded_at_ms: Optional[int] = Field(default=None, ge=0, le=10**14)
+    # Which code path sent it (for the server log only), e.g. "phone-tick",
+    # "phone-pause", "phone-buffer", "web".
+    client: Optional[str] = Field(default=None, max_length=32, pattern=r"^[A-Za-z0-9_.-]+$")
 
 
 class PodcastProgressOut(BaseModel):

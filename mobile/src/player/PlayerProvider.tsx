@@ -47,7 +47,8 @@ import { getSetting, setSetting, SETTINGS } from "@/state/settings";
 import { useApi } from "@/state/auth";
 import { useViewPref } from "@/state/viewPrefs";
 import { clampSpeed, isSpeed, skipBack, skipForward } from "./longform";
-import { ProgressSyncer, type ProgressSnapshot } from "./progressSync";
+import { ProgressSyncer } from "./progressSync";
+import { PodcastProgressSaver, podcastSaverBridge } from "./podcastProgress";
 import { setPlayerMode, setupPlayer } from "./setup";
 
 interface QueueMeta {
@@ -218,62 +219,24 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  // Progress sync: every 15s while playing, and once on each track change.
+  // Progress sync for music and video tracks: every 15 s while playing, and
+  // once on each track change.
   //
-  // Podcast resume rollback, root cause (confirmed by reading react-native-track-
-  // player 4.1.2 `useProgress` and the old snapshot, not yet by a phone run): the
-  // snapshot used to report `progressRef.current.position`, which is the value of
-  // the `useProgress(250)` hook. That hook is a JS `setTimeout` poll of the native
-  // position, so with the screen off or the app in the background the timer
-  // stalls and the value freezes at the last foreground position. Both the
-  // 15 s `setInterval` save and the pause flush (notification, headset, car)
-  // read that frozen value and PUT it, so the server kept a position from
-  // minutes back. The hook also resets to 0 on every track change. A podcast now
-  // reads `TrackPlayer.getProgress()` (the native player) for every save: the
-  // tick, the pause flush, a track change and the queue end. The native
-  // `PlaybackProgressUpdated` event (see setup.ts) drives the tick as well, so a
-  // stalled JS timer does not stop saves.
+  // Podcast episodes are saved by PodcastProgressSaver (podcastProgress.ts)
+  // instead, driven from the playback service (service.ts) by the native
+  // PlaybackProgressUpdated (every 15 s) and PlaybackState (pause, stop, end)
+  // events, so the saves keep going with the screen off and do not wait for a
+  // React render. Every read is native, every save carries the time it was
+  // taken, and the server ignores a save older than the one it has.
   const syncer = useRef<ProgressSyncer | null>(null);
   const activeIndexRef = useRef<number>(-1);
-
-  /** Save an episode's place: the podcast API when online, else the offline buffer. */
-  const savePodcastProgress = useCallback(
-    async (episodeId: string, positionSec: number, durationSec?: number) => {
-      const buffer = () =>
-        downloadsRef.current.bufferOffline({
-          kind: "podcast_progress",
-          episodeId,
-          positionSec,
-          durationSec,
-          at: Date.now(),
-        });
-      if (!downloadsRef.current.online) {
-        buffer();
-        return;
-      }
-      await reportPodcastProgress(api, episodeId, positionSec, durationSec).catch(buffer);
-    },
-    [api],
-  );
 
   useEffect(() => {
     const s = new ProgressSyncer({
       getSnapshot: () => {
         const idx = activeIndexRef.current;
         const meta = idx >= 0 ? queueMeta.current[idx] : undefined;
-        if (!meta) return null;
-        if (meta.kind === "podcast") {
-          // Native position, never the hook value (see the note above).
-          return TrackPlayer.getProgress().then(
-            (p): ProgressSnapshot => ({
-              trackId: meta.episodeId ?? meta.mediaFileId,
-              kind: "podcast",
-              positionSec: p.position,
-              durationSec: p.duration || undefined,
-              playing: playingRef.current,
-            }),
-          );
-        }
+        if (!meta || meta.kind === "podcast") return null;
         return {
           trackId: meta.mediaFileId,
           kind: meta.kind,
@@ -283,12 +246,6 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         };
       },
       report: async (snap) => {
-        // An episode reports through the podcast API every 15 s while playing, and
-        // is kept in the offline buffer when the server cannot be reached.
-        if (snap.kind === "podcast") {
-          await savePodcastProgress(snap.trackId, snap.positionSec, snap.durationSec);
-          return;
-        }
         if (!downloadsRef.current.online) {
           downloadsRef.current.bufferOffline({
             kind: "progress",
@@ -305,16 +262,48 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     s.start();
     syncer.current = s;
     return () => s.stop();
-  }, [api, savePodcastProgress]);
+  }, [api]);
 
-  // The native player pings every 15 s (progressUpdateEventInterval, setup.ts)
-  // even when the JS timer above is throttled with the screen off.
+  // The podcast saver, handed to the playback service through the bridge.
+  const podcastSaver = useRef<PodcastProgressSaver | null>(null);
   useEffect(() => {
-    const sub = TrackPlayer.addEventListener(Event.PlaybackProgressUpdated, () => {
-      if (podcastModeRef.current) syncer.current?.tick();
+    const saver = new PodcastProgressSaver({
+      currentEpisode: () => {
+        if (!podcastModeRef.current) return null;
+        const idx = activeIndexRef.current;
+        const meta = idx >= 0 ? queueMeta.current[idx] : undefined;
+        if (!meta || meta.kind !== "podcast") return null;
+        return { episodeId: meta.episodeId ?? meta.mediaFileId, durationSec: meta.durationSec };
+      },
+      activeTrackId: async () => (await TrackPlayer.getActiveTrack())?.id ?? null,
+      progress: () => TrackPlayer.getProgress(),
+      isPlaying: async () => (await TrackPlayer.getPlaybackState()).state === State.Playing,
+      online: () => downloadsRef.current.online,
+      send: async (save) => {
+        await reportPodcastProgress(api, save.episodeId, save.positionSec, save.durationSec, {
+          recordedAtMs: save.recordedAtMs,
+          client: save.client,
+        });
+        // The server answered: send anything kept from earlier too.
+        void downloadsRef.current.flushBuffered();
+      },
+      buffer: (save) =>
+        downloadsRef.current.bufferOffline({
+          kind: "podcast_progress",
+          episodeId: save.episodeId,
+          positionSec: save.positionSec,
+          durationSec: save.durationSec,
+          at: save.recordedAtMs,
+        }),
+      clearBuffered: (episodeId, atMs) => downloadsRef.current.clearBufferedPodcast(episodeId, atMs),
     });
-    return () => sub.remove();
-  }, []);
+    podcastSaver.current = saver;
+    podcastSaverBridge.set(saver);
+    return () => {
+      if (podcastSaverBridge.get() === saver) podcastSaverBridge.set(null);
+      podcastSaver.current = null;
+    };
+  }, [api]);
 
   // Keep refs the syncer reads without re-creating it.
   const progressRef = useRef(progress);
@@ -488,31 +477,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     return () => sub.remove();
   }, [api, pushQueue, applyLoudness]);
 
-  // Save an episode's place when it stops (pause, notification pause, headset),
-  // and its end, so it reads as played. Playing saves every 15 s (the syncer).
-  // Only on a real stop: loading and buffering also read "not playing", and a
-  // save then would write the not-yet-seeked position over the saved one.
-  useEffect(() => {
-    const stopped =
-      playback.state === State.Paused || playback.state === State.Stopped || playback.state === State.Ended;
-    if (stopped && podcastModeRef.current) syncer.current?.flush();
-  }, [playback.state]);
-
-  useEffect(() => {
-    const sub = TrackPlayer.addEventListener(Event.PlaybackQueueEnded, async () => {
-      if (!podcastModeRef.current) return;
-      const idx = activeIndexRef.current;
-      const meta = idx >= 0 ? queueMeta.current[idx] : undefined;
-      if (!meta || meta.kind !== "podcast") return;
-      const id = meta.episodeId ?? meta.mediaFileId;
-      // Native position and length, not the hook (see the note at the syncer).
-      const native = await TrackPlayer.getProgress().catch(() => null);
-      const dur = native?.duration || meta.durationSec || 0;
-      const pos = dur > 0 ? dur : (native?.position ?? 0);
-      await savePodcastProgress(id, pos, dur || undefined);
-    });
-    return () => sub.remove();
-  }, [savePodcastProgress]);
+  // An episode's place on pause, stop and end is saved by the playback service
+  // (service.ts) through the podcast saver; see the note at the syncer.
 
   // Expired-URL recovery: on a playback error, re-sign the active track's URL
   // and reload it once.
@@ -524,7 +490,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         const idx = (await TrackPlayer.getActiveTrackIndex()) ?? -1;
         const meta = idx >= 0 ? queueMeta.current[idx] : undefined;
         if (!meta) return;
-        const at = progressRef.current.position;
+        // The native position: the hook value freezes with the screen off, so
+        // reloading at it would jump playback back by however long that was.
+        const native = await TrackPlayer.getProgress().catch(() => null);
+        const at = native?.position ?? progressRef.current.position;
         const fresh =
           meta.kind === "podcast"
             ? await startPodcastStream(api, meta.episodeId ?? meta.mediaFileId)
@@ -611,6 +580,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         });
       });
       if (tracks.length === 0) return;
+      // Save the episode that was playing before it is replaced.
+      await podcastSaver.current?.save("switch");
       await leavePodcastMode();
       queueMeta.current = metas;
       await TrackPlayer.reset();
@@ -642,6 +613,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         // else from the server when it can be asked.
         url = local;
         if (resume == null) {
+          // Send what was kept first (a sent save is cleared from the buffer,
+          // and the server keeps the newest place). A place still kept after
+          // that is newer than the server's, so it wins; else ask the server.
+          if (downloadsRef.current.online) await downloadsRef.current.flushBuffered();
           const kept = downloadsRef.current.podcastPositionFor(ep.id);
           if (kept != null) resume = kept;
           else if (downloadsRef.current.online) {
@@ -650,51 +625,61 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         }
       } else {
         if (!downloadsRef.current.online) return false;
+        // Send any place kept from a failed save before asking for the server's.
+        await downloadsRef.current.flushBuffered();
         try {
           const s = await startPodcastStream(api, ep.id);
           url = s.url;
           artUrl = s.art_url;
           coverPath = s.cover_path ?? coverPath;
-          if (resume == null) resume = s.position_sec;
+          if (resume == null) resume = downloadsRef.current.podcastPositionFor(ep.id) ?? s.position_sec;
         } catch {
           return false;
         }
       }
       const startAt = resume != null && resume >= 5 ? Math.floor(resume) : 0;
-      await setPlayerMode("podcast");
-      podcastModeRef.current = true;
-      setPodcastModeState(true);
-      const track: Track = {
-        id: ep.id,
-        url,
-        title: ep.title,
-        artist: ep.showTitle,
-        album: ep.showTitle,
-        duration: ep.durationSec ?? undefined,
-        artwork: buildTrackArtwork({ base: getApiBase(), artUrl, coverPath }),
-      };
-      queueMeta.current = [{
-        mediaFileId: ep.id,
-        kind: "podcast",
-        episodeId: ep.id,
-        podcastId: ep.podcastId ?? null,
-        title: ep.title,
-        artist: ep.showTitle,
-        album: ep.showTitle,
-        artPath: coverPath,
-        durationSec: ep.durationSec,
-      }];
-      await TrackPlayer.reset();
-      await TrackPlayer.add([track]);
-      activeIndexRef.current = 0;
-      await TrackPlayer.setRepeatMode(RepeatMode.Off).catch(() => {});
-      await TrackPlayer.setVolume(1).catch(() => {});
-      await TrackPlayer.setRate(clampSpeed(podcastSpeedRef.current)).catch(() => {});
-      if (startAt > 0) await TrackPlayer.seekTo(startAt).catch(() => {});
-      setHasQueue(true);
-      lastPlayReported.current = null;
-      await TrackPlayer.play();
-      syncer.current?.flush();
+      // Save the episode that was playing (if any), then hold saves until the
+      // new one is loaded and at its place: a reset reads as a stop at 0.
+      const saver = podcastSaver.current;
+      await saver?.save("switch");
+      saver?.suspend();
+      try {
+        await setPlayerMode("podcast");
+        podcastModeRef.current = true;
+        setPodcastModeState(true);
+        const track: Track = {
+          id: ep.id,
+          url,
+          title: ep.title,
+          artist: ep.showTitle,
+          album: ep.showTitle,
+          duration: ep.durationSec ?? undefined,
+          artwork: buildTrackArtwork({ base: getApiBase(), artUrl, coverPath }),
+        };
+        queueMeta.current = [{
+          mediaFileId: ep.id,
+          kind: "podcast",
+          episodeId: ep.id,
+          podcastId: ep.podcastId ?? null,
+          title: ep.title,
+          artist: ep.showTitle,
+          album: ep.showTitle,
+          artPath: coverPath,
+          durationSec: ep.durationSec,
+        }];
+        await TrackPlayer.reset();
+        await TrackPlayer.add([track]);
+        activeIndexRef.current = 0;
+        await TrackPlayer.setRepeatMode(RepeatMode.Off).catch(() => {});
+        await TrackPlayer.setVolume(1).catch(() => {});
+        await TrackPlayer.setRate(clampSpeed(podcastSpeedRef.current)).catch(() => {});
+        if (startAt > 0) await TrackPlayer.seekTo(startAt).catch(() => {});
+        setHasQueue(true);
+        lastPlayReported.current = null;
+        await TrackPlayer.play();
+      } finally {
+        saver?.resume(startAt);
+      }
       setQueueVersion((v) => v + 1);
       return true;
     },
@@ -838,6 +823,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   );
 
   const clearQueue = useCallback(async () => {
+    await podcastSaver.current?.save("switch");
     await TrackPlayer.reset();
     queueMeta.current = [];
     activeIndexRef.current = -1;

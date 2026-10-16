@@ -2,6 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 // SDK 54 moved the classic API to expo-file-system/legacy.
 import * as FileSystem from "expo-file-system/legacy";
 import * as Network from "expo-network";
+import { AppState } from "react-native";
 import React, {
   createContext,
   useCallback,
@@ -20,6 +21,7 @@ import { useApi } from "@/state/auth";
 import { getSetting, setSetting, SETTINGS } from "@/state/settings";
 import {
   addEvent,
+  clearPodcastUpTo,
   emptyBuffer,
   flush,
   latestPodcastPosition,
@@ -75,6 +77,10 @@ interface DownloadContextValue {
   bufferOffline: (event: BufferedEvent) => void;
   /** The latest position of a podcast episode kept while offline, or null. */
   podcastPositionFor: (episodeId: string) => number | null;
+  /** Drop a buffered podcast save taken at or before `atMs` (a newer one reached the server). */
+  clearBufferedPodcast: (episodeId: string, atMs: number) => void;
+  /** Send the offline buffer now if anything is in it (never throws). */
+  flushBuffered: () => Promise<void>;
 }
 
 const DownloadContext = createContext<DownloadContextValue | null>(null);
@@ -159,19 +165,51 @@ export function DownloadProvider({ children }: { children: React.ReactNode }): R
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Sends the buffer. Before, it only ran on an offline->online edge seen by a
+  // 10 s JS poll, so a save that failed while the phone counted as online (a
+  // token refresh or a dropped request) sat in the buffer, and the next time
+  // the network blinked it was sent and moved the server back to that old
+  // place. Now it also runs when the app comes to the front and after a live
+  // podcast save, each podcast save carries the time it was taken (the server
+  // ignores one older than what it has), and a newer save that reached the
+  // server clears the buffered one.
+  const flushing = useRef(false);
   const doFlush = useCallback(async () => {
-    const next = await flush(bufferRef.current, async (event) => {
-      if (event.kind === "progress") {
-        await reportProgress(api, event.mediaFileId, event.positionSec, event.durationSec);
-      } else if (event.kind === "podcast_progress") {
-        await reportPodcastProgress(api, event.episodeId, event.positionSec, event.durationSec);
-      } else {
-        await postTrackPlay(api, event.trackId, event.msPlayed, event.completed);
+    if (flushing.current || bufferRef.current.events.length === 0) return;
+    flushing.current = true;
+    try {
+      const snapshot = bufferRef.current;
+      const unsent = await flush(snapshot, async (event) => {
+        if (event.kind === "progress") {
+          await reportProgress(api, event.mediaFileId, event.positionSec, event.durationSec);
+        } else if (event.kind === "podcast_progress") {
+          await reportPodcastProgress(api, event.episodeId, event.positionSec, event.durationSec, {
+            recordedAtMs: event.at,
+            client: "phone-buffer",
+          });
+        } else {
+          await postTrackPlay(api, event.trackId, event.msPlayed, event.completed);
+        }
+      });
+      // Keep what failed, plus anything buffered while this ran.
+      let next = unsent;
+      for (const e of bufferRef.current.events) {
+        if (!snapshot.events.includes(e)) next = addEvent(next, e);
       }
-    });
-    bufferRef.current = next;
-    await AsyncStorage.setItem(BUFFER_KEY, JSON.stringify(next)).catch(() => {});
+      bufferRef.current = next;
+      await AsyncStorage.setItem(BUFFER_KEY, JSON.stringify(next)).catch(() => {});
+    } finally {
+      flushing.current = false;
+    }
   }, [api]);
+
+  // Coming back to the front is a good time to send anything that was kept.
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (s) => {
+      if (s === "active") void doFlush().catch(() => {});
+    });
+    return () => sub.remove();
+  }, [doFlush]);
 
   // Drive the queue: whenever state changes and nothing is downloading, start the
   // next queued item.
@@ -339,6 +377,15 @@ export function DownloadProvider({ children }: { children: React.ReactNode }): R
     [],
   );
 
+  const clearBufferedPodcast = useCallback((episodeId: string, atMs: number) => {
+    const next = clearPodcastUpTo(bufferRef.current, episodeId, atMs);
+    if (next === bufferRef.current) return;
+    bufferRef.current = next;
+    void AsyncStorage.setItem(BUFFER_KEY, JSON.stringify(next)).catch(() => {});
+  }, []);
+
+  const flushBuffered = useCallback(() => doFlush().catch(() => {}), [doFlush]);
+
   const value = useMemo<DownloadContextValue>(
     () => ({
       state,
@@ -355,8 +402,10 @@ export function DownloadProvider({ children }: { children: React.ReactNode }): R
       localPathFor,
       bufferOffline,
       podcastPositionFor,
+      clearBufferedPodcast,
+      flushBuffered,
     }),
-    [state, online, enqueue, enqueueMany, itemFor, cancel, retry, remove, setLimitMb, isDownloaded, localPathFor, bufferOffline, podcastPositionFor],
+    [state, online, enqueue, enqueueMany, itemFor, cancel, retry, remove, setLimitMb, isDownloaded, localPathFor, bufferOffline, podcastPositionFor, clearBufferedPodcast, flushBuffered],
   );
 
   return <DownloadContext.Provider value={value}>{children}</DownloadContext.Provider>;

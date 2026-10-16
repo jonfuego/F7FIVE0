@@ -794,7 +794,8 @@ export function MiniPlayer() {
       if (podcastEpisodeId) {
         void apiPut<PodcastProgress>(
           `/api/library/podcasts/episodes/${podcastEpisodeId}/progress`,
-          { position_sec: Math.floor(position), duration_sec: dur },
+          // recorded_at_ms: the server ignores a save older than the one it has.
+          { position_sec: Math.floor(position), duration_sec: dur, recorded_at_ms: Date.now(), client: "web" },
         ).catch(() => {
           // best-effort; the next save or pause tries again
         });
