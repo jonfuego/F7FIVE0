@@ -113,11 +113,23 @@ $DbUser = "f7five0"
 # ---------------------------------------------------------------------------
 # Output helpers
 # ---------------------------------------------------------------------------
+# Every step line carries the clock time, and the step before it reports how
+# long it took, so a slow install or update shows where the time went.
 $script:StepNo = 0
+$script:RunStart = Get-Date
+$script:StepStart = $null
+function Close-StepTiming {
+    if ($script:StepStart) {
+        $secs = [int]((Get-Date) - $script:StepStart).TotalSeconds
+        Write-Host ("    (step {0} took {1} s)" -f $script:StepNo, $secs) -ForegroundColor DarkGray
+    }
+}
 function Step([string]$msg) {
+    Close-StepTiming
     $script:StepNo++
+    $script:StepStart = Get-Date
     Write-Host ""
-    Write-Host ("[{0}] {1}" -f $script:StepNo, $msg) -ForegroundColor Cyan
+    Write-Host ("[{0}] {1}  ({2})" -f $script:StepNo, $msg, $script:StepStart.ToString("HH:mm:ss")) -ForegroundColor Cyan
 }
 # Info / Ok / Warn / Fail, Download, Invoke-Winget, Set-PrivateAcl,
 # Set-EnvKey, Install-Svc, and friends live in common.ps1 (shared with
@@ -294,7 +306,16 @@ if ($ServiceUser) {
     $svcSid = Get-ServiceAccountSid
     if ($svcSid) { $script:KeepServiceAccount = $true; Info "keeping the Windows account the services run as" }
 }
-Set-InstallAcl $InstallDir $svcSid
+# The short owner walk is only for a folder an earlier Setup already locked:
+# its owner is Administrators, which a standard user cannot set.
+$aclLocked = $false
+if ($IsUpgrade) {
+    try {
+        $ownerSid = (Get-Acl $InstallDir).GetOwner([System.Security.Principal.SecurityIdentifier]).Value
+        $aclLocked = ($ownerSid -eq "S-1-5-32-544")
+    } catch { $aclLocked = $false }
+}
+Set-InstallAcl $InstallDir $svcSid -Upgrade:$aclLocked
 Ok "only administrators can change F7FIVE0's files"
 # Let Users read Setup's own install log without elevation. Set-InstallAcl just
 # reset the logs folder, so grant the log file now (and again at the end once
@@ -1080,6 +1101,9 @@ $apiUp = Wait-Http "http://127.0.0.1:$ApiPort/api/health" 90
 $webUp = Wait-Http "http://127.0.0.1:$WebPort/login" 90
 if ($apiUp) { Ok "API is up" } else { Warn "API did not answer yet. Check $LogsDir\F7FIVE0-API.err.log" }
 if ($webUp) { Ok "web app is up" } else { Warn "web app did not answer yet. Check $LogsDir\F7FIVE0-Web.err.log" }
+Close-StepTiming
+$script:StepStart = $null
+Write-Host ("    (setup took {0} s in all)" -f [int]((Get-Date) - $script:RunStart).TotalSeconds) -ForegroundColor DarkGray
 
 # ---------------------------------------------------------------------------
 # Summary (console, and logs\setup-summary.txt for the wizard's last page)

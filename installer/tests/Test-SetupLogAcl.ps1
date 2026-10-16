@@ -79,6 +79,22 @@ try {
     Check "re-run: logs folder still lists for Users, no (OI)/(CI)" (($usersText2 -match "BUILTIN\\Users") -and -not ($usersText2 -match "\(OI\)") -and -not ($usersText2 -match "\(CI\)"))
     Check "re-run: install log still readable by Users" ($logAcl2 -match "BUILTIN\\Users:\(R\)")
     Check "re-run: service err.log still private" (-not ($svcAcl2 -match "BUILTIN\\Users"))
+
+    # --- upgrade path: the short owner walk keeps the same result ---
+    $codeDir = Join-Path $root "backend"
+    New-Item -ItemType Directory -Path $codeDir | Out-Null
+    $codeFile = Join-Path $codeDir "x.py"
+    "code" | Out-File -FilePath $codeFile -Encoding ascii
+    Set-InstallAcl $root $null -Upgrade
+    Grant-SetupLogRead $installLog
+    $logAcl3 = (& icacls $installLog) -join "`n"
+    $svcAcl3 = (& icacls $serviceLog) -join "`n"
+    $codeOwner = (Get-Acl $codeFile).GetOwner([System.Security.Principal.SecurityIdentifier]).Value
+    $rootOwner = (Get-Acl $root).GetOwner([System.Security.Principal.SecurityIdentifier]).Value
+    Check "upgrade: install log still readable by Users" ($logAcl3 -match "BUILTIN\\Users:\(R\)")
+    Check "upgrade: service err.log still private" (-not ($svcAcl3 -match "BUILTIN\\Users"))
+    Check "upgrade: code file owned by Administrators" ($codeOwner -eq "S-1-5-32-544")
+    Check "upgrade: install root owned by Administrators" ($rootOwner -eq "S-1-5-32-544")
 }
 finally {
     try { & icacls $root /reset /T /C /Q | Out-Null } catch { }
