@@ -1,8 +1,9 @@
 /** react-native-track-player playback service. Registered in index.js via
  * TrackPlayer.registerPlaybackService. Handles lock-screen / notification /
  * headset remote controls and audio interruptions (headphone unplug, calls). */
-import TrackPlayer, { Event } from "react-native-track-player";
+import TrackPlayer, { Event, State } from "react-native-track-player";
 import { skipBack, skipForward } from "./longform";
+import { podcastSaverBridge } from "./podcastProgress";
 import { trackPlayerController } from "./playerController";
 
 // Uniform player controller (item 8c) over the audio service. The remote
@@ -38,6 +39,21 @@ export async function PlaybackService(): Promise<void> {
   TrackPlayer.addEventListener(Event.RemoteJumpForward, async () => {
     const p = await TrackPlayer.getProgress();
     await TrackPlayer.seekTo(skipForward(p.position, p.duration));
+  });
+
+  // Podcast place: the native player sends PlaybackProgressUpdated every 15 s
+  // in podcast mode (setup.ts) and PlaybackState on every change, from this
+  // service, so the saves do not depend on a JS timer or a React render. The
+  // saver (podcastProgress.ts) does nothing unless an episode is loaded.
+  TrackPlayer.addEventListener(Event.PlaybackProgressUpdated, () => {
+    void podcastSaverBridge.save("tick");
+  });
+  // Stopped is left out on purpose: it comes from reset, stop and the app being
+  // closed, when the player may already read 0. A pause from the notification,
+  // headset or car arrives as Paused (RemoteStop pauses, above).
+  TrackPlayer.addEventListener(Event.PlaybackState, (e) => {
+    if (e.state === State.Paused) void podcastSaverBridge.save("pause");
+    else if (e.state === State.Ended) void podcastSaverBridge.save("end");
   });
 
   // Interruptions: pause on headphone unplug / audio-becoming-noisy and on a

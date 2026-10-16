@@ -378,6 +378,32 @@ def _progress_row(db: Session, user: User, ep: PodcastEpisode) -> PodcastEpisode
     return row
 
 
+# A device clock running ahead is held to this much past the server's clock, so
+# one wrong clock cannot lock every other save out.
+PROGRESS_FUTURE_SLACK_SEC = 120
+
+
+def _as_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    if dt is None:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def _recorded_at(body: PodcastProgressIn, now: datetime) -> datetime:
+    """When the device took the position, held to at most a little past now.
+    A save without one counts as taken now (older apps)."""
+    if body.recorded_at_ms is None:
+        return now
+    try:
+        at = datetime.fromtimestamp(body.recorded_at_ms / 1000, tz=timezone.utc)
+    except (OverflowError, OSError, ValueError):
+        return now
+    latest = now.timestamp() + PROGRESS_FUTURE_SLACK_SEC
+    if at.timestamp() > latest:
+        return datetime.fromtimestamp(latest, tz=timezone.utc)
+    return at
+
+
 @router.put("/episodes/{id}/progress", response_model=PodcastProgressOut)
 def put_progress(
     id: uuid.UUID,
@@ -387,11 +413,32 @@ def put_progress(
 ) -> PodcastProgressOut:
     """Save the caller's position. The episode counts as played once the
     position is within 30 s of the end or past 95 percent, whichever comes
-    first; listening again from earlier makes it in progress again."""
+    first; listening again from earlier makes it in progress again.
+
+    A save taken before the one already stored (by `recorded_at_ms`) is
+    ignored and answers the stored position, so a late retry or an offline
+    replay never moves the place back. Each save writes one log line."""
     ep = _get_episode(db, id)
     row = _progress_row(db, user, ep)
+    now = _now()
+    recorded = _recorded_at(body, now)
+    stored = _as_utc(row.client_recorded_at)
+    age = (now - recorded).total_seconds()
+    if stored is not None and recorded < stored:
+        log.info(
+            "podcast_progress ignored user=%s episode=%s pos=%d stored_pos=%d client=%s age_s=%.0f behind_s=%.0f",
+            user.id, ep.id, body.position_sec, row.position_sec, body.client or "-", age,
+            (stored - recorded).total_seconds(),
+        )
+        # The row already existed (it has a stored time), so nothing to undo.
+        return _progress_out(row)
+    log.info(
+        "podcast_progress saved user=%s episode=%s pos=%d prev_pos=%d dur=%s client=%s age_s=%.0f",
+        user.id, ep.id, body.position_sec, row.position_sec or 0, body.duration_sec, body.client or "-", age,
+    )
     duration = body.duration_sec or ep.duration_sec or row.duration_sec
     row.position_sec = body.position_sec
+    row.client_recorded_at = recorded
     row.duration_sec = duration
     if longform.is_played(body.position_sec, duration):
         row.played_at = row.played_at or _now()
@@ -413,6 +460,8 @@ def mark_played(
     row = _progress_row(db, user, ep)
     row.played_at = _now()
     row.updated_at = _now()
+    # A by-hand mark wins over any position saved before it.
+    row.client_recorded_at = _now()
     db.commit()
     return _progress_out(row)
 
@@ -429,6 +478,7 @@ def mark_unplayed(
     row.played_at = None
     row.position_sec = 0
     row.updated_at = _now()
+    row.client_recorded_at = _now()
     db.commit()
     return _progress_out(row)
 

@@ -31,9 +31,9 @@ function optionsFor(m: PlayerMode) {
       android: ANDROID,
       forwardJumpInterval: SKIP_FORWARD_SEC,
       backwardJumpInterval: SKIP_BACK_SEC,
-      // The native player emits PlaybackProgressUpdated every 15 s; PlayerProvider
-      // saves the episode's place on it, so a throttled JS timer (screen off)
-      // does not stop the saves.
+      // The native player emits PlaybackProgressUpdated every 15 s; the playback
+      // service (service.ts) saves the episode's place on it, so a throttled JS
+      // timer (screen off) does not stop the saves.
       progressUpdateEventInterval: PODCAST_PROGRESS_EVENT_SEC,
       capabilities: [
         Capability.Play,

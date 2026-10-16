@@ -139,3 +139,93 @@ def test_speed_is_a_per_user_view_pref(api, db_session):
     assert api.as_user(make_user(db_session)).get("/api/view-prefs").json()["prefs"].get("podcast_speed") is None
 
 
+
+
+# ---------------------------------------------------------------------------
+# Late saves never move the place back
+# ---------------------------------------------------------------------------
+def _ms(dt: datetime) -> int:
+    return int(dt.timestamp() * 1000)
+
+
+def test_a_save_taken_before_the_stored_one_is_ignored(api, db_session, caplog):
+    a = make_user(db_session)
+    pod = make_podcast(db_session)
+    ep = make_episode(db_session, pod, duration=7200)
+    now = datetime.now(timezone.utc)
+    url = f"/api/podcasts/episodes/{ep.id}/progress"
+    r = api.as_user(a).put(url, json={"position_sec": 2400, "recorded_at_ms": _ms(now), "client": "phone-tick"})
+    assert r.json()["position_sec"] == 2400
+    # A buffered save from 17 minutes earlier arrives late.
+    caplog.set_level("INFO", logger="f7five0.api.podcasts")
+    late = now.timestamp() - 17 * 60
+    r = api.as_user(a).put(url, json={
+        "position_sec": 1380, "recorded_at_ms": int(late * 1000), "client": "phone-buffer",
+    })
+    assert r.status_code == 200
+    assert r.json()["position_sec"] == 2400
+    db_session.expire_all()
+    assert db_session.get(PodcastEpisodeProgress, (a.id, ep.id)).position_sec == 2400
+    assert any("podcast_progress ignored" in m and "client=phone-buffer" in m for m in caplog.messages)
+
+
+def test_a_newer_save_wins_even_when_it_rewinds(api, db_session):
+    a = make_user(db_session)
+    pod = make_podcast(db_session)
+    ep = make_episode(db_session, pod, duration=7200)
+    now = datetime.now(timezone.utc)
+    url = f"/api/podcasts/episodes/{ep.id}/progress"
+    api.as_user(a).put(url, json={"position_sec": 2400, "recorded_at_ms": _ms(now) - 30_000})
+    r = api.as_user(a).put(url, json={"position_sec": 2385, "recorded_at_ms": _ms(now)})
+    assert r.json()["position_sec"] == 2385
+
+
+def test_a_save_without_a_time_counts_as_now(api, db_session):
+    a = make_user(db_session)
+    pod = make_podcast(db_session)
+    ep = make_episode(db_session, pod, duration=7200)
+    url = f"/api/podcasts/episodes/{ep.id}/progress"
+    now = datetime.now(timezone.utc)
+    api.as_user(a).put(url, json={"position_sec": 600, "recorded_at_ms": _ms(now) - 60_000})
+    r = api.as_user(a).put(url, json={"position_sec": 300})
+    assert r.json()["position_sec"] == 300
+    # And a later timed save from before that is ignored.
+    r = api.as_user(a).put(url, json={"position_sec": 900, "recorded_at_ms": _ms(now) - 30_000})
+    assert r.json()["position_sec"] == 300
+
+
+def test_a_clock_far_ahead_cannot_lock_out_later_saves(api, db_session):
+    a = make_user(db_session)
+    pod = make_podcast(db_session)
+    ep = make_episode(db_session, pod, duration=7200)
+    url = f"/api/podcasts/episodes/{ep.id}/progress"
+    now = datetime.now(timezone.utc)
+    api.as_user(a).put(url, json={"position_sec": 100, "recorded_at_ms": _ms(now) + 24 * 3600 * 1000})
+    row = db_session.get(PodcastEpisodeProgress, (a.id, ep.id))
+    db_session.refresh(row)
+    held = row.client_recorded_at if row.client_recorded_at.tzinfo else row.client_recorded_at.replace(tzinfo=timezone.utc)
+    assert (held - now).total_seconds() <= 125
+    # A save from 3 minutes on (a correct clock) is accepted.
+    r = api.as_user(a).put(url, json={"position_sec": 280, "recorded_at_ms": _ms(now) + 180_000})
+    assert r.json()["position_sec"] == 280
+
+
+def test_marking_unplayed_beats_an_older_save(api, db_session):
+    a = make_user(db_session)
+    pod = make_podcast(db_session)
+    ep = make_episode(db_session, pod, duration=7200)
+    url = f"/api/podcasts/episodes/{ep.id}/progress"
+    now = datetime.now(timezone.utc)
+    api.as_user(a).put(url, json={"position_sec": 500, "recorded_at_ms": _ms(now) - 120_000})
+    api.as_user(a).delete(f"/api/podcasts/episodes/{ep.id}/played")
+    r = api.as_user(a).put(url, json={"position_sec": 520, "recorded_at_ms": _ms(now) - 60_000})
+    assert r.json()["position_sec"] == 0
+
+
+def test_client_label_is_checked(api, db_session):
+    a = make_user(db_session)
+    pod = make_podcast(db_session)
+    ep = make_episode(db_session, pod, duration=7200)
+    url = f"/api/podcasts/episodes/{ep.id}/progress"
+    r = api.as_user(a).put(url, json={"position_sec": 5, "client": "bad label; drop"})
+    assert r.status_code == 422

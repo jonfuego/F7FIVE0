@@ -122,4 +122,9 @@ class PodcastEpisodeProgress(Base):
         onupdate=lambda: datetime.now(timezone.utc),
     )
 
+    # When the device took the saved position (its own clock), so a save that
+    # arrives late (an offline buffer replay, a retry) cannot replace a newer
+    # one. Null for rows written before 0029 and by clients that do not send it.
+    client_recorded_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
     __table_args__ = (Index("ix_podcast_progress_user_updated", "user_id", "updated_at"),)

@@ -97,13 +97,17 @@ export async function fetchPodcastDownloadUrl(
   return { url: s.url, container: s.container };
 }
 
-/** Save the caller's position. Fire-and-forget from the sync loop; the server
- * decides played (within 30 s of the end or past 95 percent). */
+/** Save the caller's position; the server decides played (within 30 s of the
+ * end or past 95 percent). `recordedAtMs` is when the position was read: the
+ * server ignores a save older than the one it has, so a late retry or an
+ * offline replay never moves the place back. `client` names the path that sent
+ * it, for the server log. */
 export async function reportPodcastProgress(
   api: ApiClient,
   episodeId: string,
   positionSec: number,
   durationSec?: number,
+  opts: { recordedAtMs?: number; client?: string } = {},
 ): Promise<void> {
   await api.request(`/api/podcasts/episodes/${encodeURIComponent(episodeId)}/progress`, {
     method: "PUT",
@@ -111,6 +115,8 @@ export async function reportPodcastProgress(
     body: JSON.stringify({
       position_sec: Math.max(0, Math.floor(positionSec)),
       duration_sec: durationSec && durationSec >= 1 ? Math.floor(durationSec) : undefined,
+      recorded_at_ms: opts.recordedAtMs !== undefined ? Math.floor(opts.recordedAtMs) : undefined,
+      client: opts.client,
     }),
   });
 }

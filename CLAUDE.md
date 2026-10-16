@@ -313,7 +313,18 @@ INSTALL.md for the operator view.
   per-user view pref `podcast_speed` (0.5 to 3.0). Progress is per user:
   `PUT /api/podcasts/episodes/{id}/progress` every 15 s while playing and on pause
   and end, buffered offline on the phone (`flushBuffer.ts`, one entry per
-  episode). Feed refresh: a scheduler job every `PODCAST_REFRESH_MINUTES` (60)
+  episode). Every save carries `recorded_at_ms` (when the device read the
+  position) and a `client` label; the server keeps it as
+  `client_recorded_at` (migration 0029), ignores a save taken before the stored
+  one (a late retry or an offline replay never moves the place back; a clock
+  more than 120 s ahead is held to now + 120 s), and logs one
+  `podcast_progress saved|ignored` line per save. Marking played or unplayed
+  also stamps it. On the phone the saves come from the playback service
+  (`player/service.ts` native events through `podcastProgress.ts`
+  `podcastSaverBridge`), never a React effect or the `useProgress` hook, and only
+  for the episode the native player has loaded; a save that reaches the server
+  clears older buffered saves for that episode, and the buffer also sends when
+  the app comes to the front. Feed refresh: a scheduler job every `PODCAST_REFRESH_MINUTES` (60)
   for shows with a subscriber, conditional GET (`ETag` / `Last-Modified`), upsert
   by guid (enclosure URL when there is none), a failed fetch keeps the old
   episodes and sets `last_error`; its state is `app_settings`

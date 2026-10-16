@@ -54,12 +54,28 @@ export function addEvent(buffer: FlushBuffer, event: BufferedEvent): FlushBuffer
     return { events: [...rest, event] };
   }
   if (event.kind === "podcast_progress") {
+    const existing = buffer.events.find(
+      (e): e is PodcastProgressEvent => e.kind === "podcast_progress" && e.episodeId === event.episodeId,
+    );
+    // Keep whichever was taken last: a late-arriving older save must not
+    // replace a newer one.
+    if (existing && existing.at > event.at) return buffer;
     const rest = buffer.events.filter(
       (e) => !(e.kind === "podcast_progress" && e.episodeId === event.episodeId),
     );
     return { events: [...rest, event] };
   }
   return { events: [...buffer.events, event] };
+}
+
+/** Drop the buffered save for an episode when it was taken at or before
+ * `atMs`: a newer save has reached the server, so sending the buffered one
+ * later would only be refused (or, on an older server, move the place back). */
+export function clearPodcastUpTo(buffer: FlushBuffer, episodeId: string, atMs: number): FlushBuffer {
+  const events = buffer.events.filter(
+    (e) => !(e.kind === "podcast_progress" && e.episodeId === episodeId && e.at <= atMs),
+  );
+  return events.length === buffer.events.length ? buffer : { events };
 }
 
 /** The latest buffered position for an episode, or null. Offline play resumes
