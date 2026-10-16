@@ -11,7 +11,8 @@
 // the new version comes up, and goes back to the old one if it doesn't. This
 // card polls the run, and keeps polling while the services restart.
 //
-// Release notes are plain text from GitHub: never rendered as HTML.
+// Release notes are Markdown from GitHub. lib/release-notes.ts reads the small
+// part the notes use into data rendered as React elements: never as HTML.
 
 "use client";
 
@@ -20,9 +21,10 @@ import { apiGet, apiPut, apiPost, refreshSession, ApiError } from "@/lib/client-
 import type { UpdateRun, UpdatesStatus } from "@/lib/types";
 import { resetUpdateBadge } from "@/lib/update-badge";
 import {
-  UPDATE_STEPS, blockedText, checkedAgo, encodePasswordHeader, formatBytes,
+  UPDATE_STEPS, blockedText, checkedAgo, encodePasswordHeader, formatBytes, offlineView,
   phaseChipLabel, phaseLabel, runSummary, stepIndex, upToDateMessages, updateErrorText,
 } from "@/lib/updates";
+import { parseReleaseNotes, type Inline } from "@/lib/release-notes";
 
 type DismissedOut = { run_id: string | null };
 
@@ -39,6 +41,8 @@ export function UpdatesSection() {
   const [run, setRun] = useState<UpdateRun | null>(null);
   const [dismissedRun, setDismissedRun] = useState<string | null>(null);
   const [lostContact, setLostContact] = useState(false);
+  // When this page last lost contact during an update (null while in touch).
+  const [lostSince, setLostSince] = useState<number | null>(null);
   const [checking, setChecking] = useState(false);
   const [checkedNow, setCheckedNow] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -108,9 +112,13 @@ export function UpdatesSection() {
         const next = await apiGet<UpdateRun>("/api/admin/updates/run");
         if (cancelled) return;
         setLostContact(false);
+        setLostSince(null);
         setRun(next);
       } catch {
-        if (!cancelled) setLostContact(true);
+        if (!cancelled) {
+          setLostContact(true);
+          setLostSince((t) => t ?? Date.now());
+        }
       }
     };
     const id = window.setInterval(tick, 2000);
@@ -295,9 +303,7 @@ export function UpdatesSection() {
           {status.update_available && status.notes ? (
             <div>
               <h3 className="text-sm font-medium text-neutral-200">What&apos;s new in {status.latest_version}</h3>
-              <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap rounded-md border border-neutral-800 bg-neutral-950 p-3 font-sans text-xs text-neutral-300">
-                {status.notes}
-              </pre>
+              <ReleaseNotes notes={status.notes} />
             </div>
           ) : null}
 
@@ -308,7 +314,7 @@ export function UpdatesSection() {
           ) : null}
 
           {showRun && run ? (
-            <RunPanel run={run} lostContact={lostContact} onDismiss={() => run.id && dismissRun(run.id)} />
+            <RunPanel run={run} lostContact={lostContact} lostSince={lostSince} onDismiss={() => run.id && dismissRun(run.id)} />
           ) : null}
 
           {!active ? (
@@ -453,8 +459,28 @@ function Fact({ label, value, hint, testId }: { label: string; value: string; hi
   );
 }
 
-function RunPanel({ run, lostContact, onDismiss }: { run: UpdateRun; lostContact: boolean; onDismiss: () => void }) {
-  const current = stepIndex(run.phase);
+function RunPanel({
+  run,
+  lostContact,
+  lostSince,
+  onDismiss,
+}: {
+  run: UpdateRun;
+  lostContact: boolean;
+  lostSince: number | null;
+  onDismiss: () => void;
+}) {
+  // Tick once a second while offline so the timer moves.
+  const [now, setNow] = useState(() => Date.now());
+  const offlineActive = lostContact && run.active && lostSince !== null;
+  useEffect(() => {
+    if (!offlineActive) return;
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [offlineActive]);
+  const offline = lostContact ? offlineView(run, lostSince, now) : null;
+  const shownPhase = offline?.phase ?? run.phase;
+  const current = stepIndex(shownPhase);
   const finished = !run.active;
   const summary = runSummary(run);
   const tone =
@@ -472,7 +498,7 @@ function RunPanel({ run, lostContact, onDismiss }: { run: UpdateRun; lostContact
   return (
     <div className={`rounded-md border p-4 text-sm ${tone}`} aria-live="polite" data-testid="update-run">
       <div className="flex items-baseline justify-between gap-3">
-        <p className="font-medium text-neutral-100">{phaseLabel(run.phase)}</p>
+        <p className="font-medium text-neutral-100">{phaseLabel(shownPhase)}</p>
         {run.to_version ? (
           <p className="text-xs text-neutral-500">
             {run.from_version ?? "?"} → {run.to_version}
@@ -495,7 +521,7 @@ function RunPanel({ run, lostContact, onDismiss }: { run: UpdateRun; lostContact
         </ol>
       ) : null}
 
-      {run.active && run.step ? <p className="mt-3 text-neutral-300">{run.step}</p> : null}
+      {run.active && run.step && !offline ? <p className="mt-3 text-neutral-300">{run.step}</p> : null}
       {pct !== null ? (
         <div className="mt-2">
           <div className="h-1.5 w-full overflow-hidden rounded bg-neutral-800">
@@ -507,7 +533,17 @@ function RunPanel({ run, lostContact, onDismiss }: { run: UpdateRun; lostContact
         </div>
       ) : null}
 
-      {lostContact && run.active ? (
+      {offline ? (
+        <div className="mt-3 space-y-2">
+          <p className="text-neutral-300" data-testid="update-offline">
+            {offline.message}
+          </p>
+          <div className="h-1 w-full overflow-hidden rounded bg-neutral-800" aria-hidden="true">
+            <div className="h-full w-1/3 animate-pulse bg-neutral-400" />
+          </div>
+          {offline.slowHint ? <p className="text-xs text-neutral-500">{offline.slowHint}</p> : null}
+        </div>
+      ) : lostContact && run.active ? (
         <p className="mt-3 text-neutral-400">
           F7FIVE0 is restarting, so this page can&apos;t reach it for a moment. It keeps trying by itself.
         </p>
@@ -545,6 +581,62 @@ function RunPanel({ run, lostContact, onDismiss }: { run: UpdateRun; lostContact
           </button>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function InlineText({ parts }: { parts: Inline[] }) {
+  return (
+    <>
+      {parts.map((p, i) => {
+        if (p.kind === "bold") return <strong key={i} className="font-semibold text-neutral-100">{p.text}</strong>;
+        if (p.kind === "code") return <code key={i} className="rounded bg-neutral-800 px-1 font-mono text-[11px]">{p.text}</code>;
+        if (p.kind === "link") {
+          return (
+            <a key={i} href={p.href} target="_blank" rel="noopener noreferrer" className="underline hover:text-neutral-100">
+              {p.text}
+            </a>
+          );
+        }
+        return <span key={i}>{p.text}</span>;
+      })}
+    </>
+  );
+}
+
+function ReleaseNotes({ notes }: { notes: string }) {
+  const blocks = parseReleaseNotes(notes);
+  return (
+    <div
+      className="mt-2 max-h-56 space-y-2 overflow-auto rounded-md border border-neutral-800 bg-neutral-950 p-3 text-xs leading-relaxed text-neutral-300"
+      data-testid="release-notes"
+    >
+      {blocks.map((b, i) => {
+        if (b.kind === "heading") {
+          return (
+            <p key={i} className="text-sm font-medium text-neutral-100">
+              <InlineText parts={b.content} />
+            </p>
+          );
+        }
+        if (b.kind === "list") {
+          const Tag = b.ordered ? "ol" : "ul";
+          return (
+            <Tag key={i} className={`space-y-1 pl-5 ${b.ordered ? "list-decimal" : "list-disc"}`}>
+              {b.items.map((item, j) => (
+                <li key={j}>
+                  <InlineText parts={item} />
+                </li>
+              ))}
+            </Tag>
+          );
+        }
+        return (
+          <p key={i}>
+            <InlineText parts={b.content} />
+          </p>
+        );
+      })}
     </div>
   );
 }
