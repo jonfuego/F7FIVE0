@@ -169,3 +169,67 @@ export function runSummary(run: { phase: string; from_version: string | null; to
   if (run.phase === "failed") return "The update didn't finish.";
   return null;
 }
+
+/** "0:42", "4:05", "1:02:10". */
+export function formatElapsed(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  const ss = String(s).padStart(2, "0");
+  if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${ss}`;
+  return `${m}:${ss}`;
+}
+
+// The updater stops the API and web app right after it checks the Setup (to
+// back up the database) and starts them again only when Setup is done. While
+// they are down this page can't read the run, so the last phase it saw is
+// usually "Starting the updater" even though the work has moved on.
+const OFFLINE_FROM = new Set<string>(["queued", "downloading", "verifying", "backup", "installing"]);
+
+/** After this long offline, the card also says where the update log is. */
+export const OFFLINE_SLOW_MS = 15 * 60 * 1000;
+
+export type OfflineView = {
+  /** Phase to show on the strip and as the title. */
+  phase: UpdatePhase;
+  /** The line under the strip. */
+  message: string;
+  /** Extra hint once it has been offline a long time, else null. */
+  slowHint: string | null;
+};
+
+/**
+ * What the run card shows while F7FIVE0 can't be reached during an update, or
+ * null when it can (or no update is running). Losing contact means the
+ * services are stopped, which only happens from the backup step on, so the
+ * strip moves to Install (Setup is by far the longest step) and a timer counts
+ * the time offline.
+ */
+export function offlineView(
+  run: { phase: string; active: boolean; id?: string | null },
+  lostSince: number | null,
+  now: number = Date.now(),
+): OfflineView | null {
+  if (!run.active || lostSince === null) return null;
+  const elapsed = formatElapsed(now - lostSince);
+  if (run.phase === "health_check" || run.phase === "rolling_back") {
+    return {
+      phase: run.phase as UpdatePhase,
+      message: `F7FIVE0 is restarting. Offline for ${elapsed}. This page keeps checking by itself.`,
+      slowHint: null,
+    };
+  }
+  if (!OFFLINE_FROM.has(run.phase)) return null;
+  const slow = now - lostSince >= OFFLINE_SLOW_MS;
+  const log = run.id ? `logs\\update-${run.id}.log` : "logs folder";
+  return {
+    phase: "installing",
+    message:
+      `F7FIVE0 is offline while Setup installs the new version. This takes a few minutes. ` +
+      `Offline for ${elapsed}. This page keeps checking and shows the result when F7FIVE0 is back.`,
+    slowHint: slow
+      ? `This is taking longer than usual. On the server, the update log is in the F7FIVE0 install folder, ${log}.`
+      : null,
+  };
+}

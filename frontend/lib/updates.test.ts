@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import {
   UPDATE_STEPS, blockedText, checkedAgo, encodePasswordHeader, formatBytes,
   UP_TO_DATE, isActivePhase, phaseChipLabel, phaseLabel, runSummary, stepIndex,
-  updateErrorText, upToDateMessages,
+  updateErrorText, upToDateMessages, formatElapsed, offlineView, OFFLINE_SLOW_MS,
 } from "./updates.ts";
 
 test("active phases are the ones that need polling", () => {
@@ -129,4 +129,39 @@ test("a newer version and a failed check never say up to date", () => {
   assert.equal(occurrences(newer), 0);
   const failed = upToDateMessages({ latestVersion: "1.0.5", updateAvailable: false, checkError: "offline", checkedNow: true });
   assert.equal(failed.notice, null);
+});
+
+test("formatElapsed reads like a clock", () => {
+  assert.equal(formatElapsed(0), "0:00");
+  assert.equal(formatElapsed(42_000), "0:42");
+  assert.equal(formatElapsed(245_000), "4:05");
+  assert.equal(formatElapsed(3_730_000), "1:02:10");
+  assert.equal(formatElapsed(-5), "0:00");
+});
+
+test("offlineView is null while the page can reach F7FIVE0", () => {
+  assert.equal(offlineView({ phase: "queued", active: true }, null, 1000), null);
+  assert.equal(offlineView({ phase: "done", active: false }, 0, 1000), null);
+});
+
+test("offlineView moves a stale Starting step to Install and counts the time", () => {
+  const v = offlineView({ phase: "queued", active: true, id: "abc" }, 0, 125_000);
+  assert.ok(v);
+  assert.equal(v.phase, "installing");
+  assert.equal(stepIndex(v.phase), 3);
+  assert.match(v.message, /Offline for 2:05/);
+  assert.equal(v.slowHint, null);
+  for (const p of ["downloading", "verifying", "backup", "installing"]) {
+    assert.equal(offlineView({ phase: p, active: true }, 0, 1)?.phase, "installing", p);
+  }
+});
+
+test("offlineView keeps the health check and rollback phases", () => {
+  assert.equal(offlineView({ phase: "health_check", active: true }, 0, 1)?.phase, "health_check");
+  assert.equal(offlineView({ phase: "rolling_back", active: true }, 0, 1)?.phase, "rolling_back");
+});
+
+test("offlineView points at the update log after 15 minutes", () => {
+  const v = offlineView({ phase: "installing", active: true, id: "abc" }, 0, OFFLINE_SLOW_MS);
+  assert.match(v?.slowHint ?? "", /logs\\update-abc\.log/);
 });
