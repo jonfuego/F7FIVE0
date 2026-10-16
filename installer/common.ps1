@@ -174,9 +174,29 @@ function Get-ServiceAccountSid {
 # service account (when there is one) modify. Code folders lose any explicit
 # entries so a folder made before setup can't keep extra rights. Files that
 # hold secrets (.env, data\remote-access) get their own ACLs afterwards.
-function Set-InstallAcl([string]$root, [string]$serviceSid) {
+#
+# -Upgrade: the owner walk skips data\ and logs\. On a new install a folder
+# made before Setup may hold files some other user owns, so the walk covers
+# everything. On an upgrade those two folders were already locked by the last
+# Setup (only Administrators, SYSTEM and the service account can create files
+# there), and they hold the art copies, the transcode cache and the update
+# backups, so walking them file by file made every update take minutes.
+function Set-InstallAcl([string]$root, [string]$serviceSid, [switch]$Upgrade) {
     $admins = "*S-1-5-32-544"
-    & icacls $root /setowner $admins /T /C /Q | Out-Null
+    if ($Upgrade) {
+        & icacls $root /setowner $admins /C /Q | Out-Null
+        foreach ($item in Get-ChildItem $root -Force) {
+            if ($item.PSIsContainer -and @("data", "logs") -contains $item.Name) {
+                & icacls $item.FullName /setowner $admins /C /Q | Out-Null
+            } elseif ($item.PSIsContainer) {
+                & icacls $item.FullName /setowner $admins /T /C /Q | Out-Null
+            } else {
+                & icacls $item.FullName /setowner $admins /C /Q | Out-Null
+            }
+        }
+    } else {
+        & icacls $root /setowner $admins /T /C /Q | Out-Null
+    }
     & icacls $root /reset /C /Q | Out-Null
     & icacls $root /inheritance:r /grant:r "${admins}:(OI)(CI)F" "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-545:(OI)(CI)RX" /C /Q | Out-Null
     if ($LASTEXITCODE -ne 0) { Fail "could not set permissions on $root (icacls $LASTEXITCODE)" }

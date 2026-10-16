@@ -41,6 +41,10 @@ INSTALL.md for the operator view.
   grants Users read on `install-*.log` and `setup-summary.txt` so a non-elevated
   user can read them; service logs (`F7FIVE0-*.out/err.log`) stay private because
   the folder grant does not inherit to files.
+  On an upgrade (the root is already owned by Administrators) `Set-InstallAcl
+  -Upgrade` sets the owner on `data\` and `logs\` themselves only, not on every
+  file inside: the art copies and transcode cache can make that walk slow.
+  Every install step prints its clock time and how long it took.
 - The stream gateway runs one uvicorn worker (in-process transcoder
   registry). It validates the HMAC signature before any DB lookup.
 - Session-bound signed URLs (SEC-P1-2). Stream, HLS, art, subtitle, and
