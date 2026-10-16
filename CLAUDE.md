@@ -343,6 +343,20 @@ INSTALL.md for the operator view.
   react-native-track-player to jump back 15 s / forward 30 s while an episode
   plays (`player/setup.ts::setPlayerMode`) and never pushes an episode to the
   shared music queue.
+- Audio saved while it plays (phone): `mobile/src/download/autoCache.ts` (pure
+  policy) and `DownloadProvider` (files under `autocache/`, list in AsyncStorage
+  `mh:autocache`, its own one-at-a-time loop apart from Downloads). Every podcast
+  episode played from the server is saved, and a music queue saves the playing
+  track and the next two. Once an episode's file is saved the player switches to
+  it at the current place (the podcast saver is suspended across the switch); a
+  later queue track is swapped for its file; the playing music track is never
+  switched. Saved copies are not Downloads: the Download button keeps one for good
+  and moves the saved file instead of fetching it again. A saved episode goes once
+  it counts as played, anything goes 7 days after it was last played, nothing goes
+  while the player has it loaded (`setAudioInUse`), and saving pauses below 1 GB
+  free. On by default; the switch and the list are on Account > Downloads
+  ("Saved while playing"), setting `autoCacheAudio`. `localPathFor` returns a
+  download, else a saved copy.
 - Auth events: `auth_events.event` is `String(64)` and PostgreSQL enforces it
   (SQLite does not, so a long event passed every test and answered HTTP 500 on
   Admin > Users > Disable). Every event string is built in

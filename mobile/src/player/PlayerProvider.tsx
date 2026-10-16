@@ -46,9 +46,10 @@ import { getApiBase } from "@/state/config";
 import { getSetting, setSetting, SETTINGS } from "@/state/settings";
 import { useApi } from "@/state/auth";
 import { useViewPref } from "@/state/viewPrefs";
-import { clampSpeed, isSpeed, skipBack, skipForward } from "./longform";
+import { clampSpeed, isPlayed, isSpeed, skipBack, skipForward } from "./longform";
 import { ProgressSyncer } from "./progressSync";
 import { PodcastProgressSaver, podcastSaverBridge } from "./podcastProgress";
+import { musicLookahead } from "@/download/autoCache";
 import { setPlayerMode, setupPlayer } from "./setup";
 
 interface QueueMeta {
@@ -280,6 +281,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       isPlaying: async () => (await TrackPlayer.getPlaybackState()).state === State.Playing,
       online: () => downloadsRef.current.online,
       send: async (save) => {
+        if (isPlayed(save.positionSec, save.durationSec)) downloadsRef.current.markAudioPlayed(save.episodeId);
         await reportPodcastProgress(api, save.episodeId, save.positionSec, save.durationSec, {
           recordedAtMs: save.recordedAtMs,
           client: save.client,
@@ -287,14 +289,16 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         // The server answered: send anything kept from earlier too.
         void downloadsRef.current.flushBuffered();
       },
-      buffer: (save) =>
+      buffer: (save) => {
+        if (isPlayed(save.positionSec, save.durationSec)) downloadsRef.current.markAudioPlayed(save.episodeId);
         downloadsRef.current.bufferOffline({
           kind: "podcast_progress",
           episodeId: save.episodeId,
           positionSec: save.positionSec,
           durationSec: save.durationSec,
           at: save.recordedAtMs,
-        }),
+        });
+      },
       clearBuffered: (episodeId, atMs) => downloadsRef.current.clearBufferedPodcast(episodeId, atMs),
     });
     podcastSaver.current = saver;
@@ -304,6 +308,79 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       podcastSaver.current = null;
     };
   }, [api]);
+
+  // ---- Audio saved while it plays (download/autoCache.ts) -------------------
+  /** Save the playing music track and the next two, and tell the cache what is
+   * loaded so it is never removed mid-play. */
+  const cacheMusicAround = useCallback(() => {
+    const idx = activeIndexRef.current;
+    const metas = queueMeta.current;
+    const current = idx >= 0 ? metas[idx] : undefined;
+    downloadsRef.current.setAudioInUse(current ? [current.mediaFileId] : []);
+    if (!current || current.kind === "podcast") return;
+    downloadsRef.current.cacheAudio(
+      musicLookahead(metas, idx)
+        .filter((m) => m.kind !== "podcast")
+        .map((m) => ({
+          id: m.mediaFileId,
+          kind: "track" as const,
+          title: m.title,
+          meta: {
+            trackId: m.trackId ?? null,
+            artist: m.artist ?? null,
+            album: m.album ?? null,
+            albumId: m.albumId ?? null,
+            coverPath: m.artPath ?? null,
+            durationSec: m.durationSec ?? null,
+          },
+        })),
+    );
+  }, []);
+
+  // When a save finishes, play from the phone. The episode that is playing
+  // switches to the file at its current place (so losing service does not stop
+  // it); a music track later in the queue is swapped for its file. The playing
+  // music track is left alone (a switch mid-song would be heard).
+  useEffect(() => {
+    return downloadsRef.current.onAudioCached((id, localPath) => {
+      void (async () => {
+        const idx = activeIndexRef.current;
+        const metas = queueMeta.current;
+        const current = idx >= 0 ? metas[idx] : undefined;
+        try {
+          if (podcastModeRef.current && current?.kind === "podcast" && (current.episodeId ?? current.mediaFileId) === id) {
+            const active = await TrackPlayer.getActiveTrack();
+            if (!active || active.id !== id || !/^https?:/i.test(String(active.url))) return;
+            const saver = podcastSaver.current;
+            saver?.suspend();
+            let at = 0;
+            try {
+              const p = await TrackPlayer.getProgress();
+              at = p.position;
+              const wasPlaying = (await TrackPlayer.getPlaybackState()).state === State.Playing;
+              await TrackPlayer.load({ ...active, url: localPath });
+              if (at > 0) await TrackPlayer.seekTo(at);
+              if (wasPlaying) await TrackPlayer.play();
+            } finally {
+              saver?.resume(at);
+            }
+            return;
+          }
+          if (podcastModeRef.current) return;
+          const queue = await TrackPlayer.getQueue();
+          for (let i = idx + 1; i < metas.length && i < queue.length; i++) {
+            if (metas[i].mediaFileId !== id) continue;
+            const t = queue[i];
+            if (!t || !/^https?:/i.test(String(t.url))) continue;
+            await TrackPlayer.remove(i);
+            await TrackPlayer.add({ ...t, url: localPath }, i);
+          }
+        } catch {
+          // Playback carries on from the server.
+        }
+      })();
+    });
+  }, []);
 
   // Keep refs the syncer reads without re-creating it.
   const progressRef = useRef(progress);
@@ -472,10 +549,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       activeIndexRef.current = idx;
       void applyLoudness();
       syncer.current?.flush();
+      cacheMusicAround();
       void pushQueue();
     });
     return () => sub.remove();
-  }, [api, pushQueue, applyLoudness]);
+  }, [api, pushQueue, applyLoudness, cacheMusicAround]);
 
   // An episode's place on pause, stop and end is saved by the playback service
   // (service.ts) through the podcast saver; see the note at the syncer.
@@ -594,10 +672,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       await TrackPlayer.play();
       void applyLoudness();
       syncer.current?.flush();
+      cacheMusicAround();
       setQueueVersion((v) => v + 1);
       void pushQueue();
     },
-    [api, pushQueue, applyLoudness, leavePodcastMode],
+    [api, pushQueue, applyLoudness, leavePodcastMode, cacheMusicAround],
   );
 
   const playEpisode = useCallback(
@@ -680,6 +759,24 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       } finally {
         saver?.resume(startAt);
       }
+      // Save the episode to the phone as it plays (it switches to the file
+      // once saved), and keep it while it is loaded. Asking again for one
+      // already saved keeps it another 7 days.
+      downloadsRef.current.setAudioInUse([ep.id]);
+      downloadsRef.current.cacheAudio([{
+        id: ep.id,
+        kind: "podcast",
+        title: ep.title,
+        meta: {
+          episodeId: ep.id,
+          podcastId: ep.podcastId ?? null,
+          artist: ep.showTitle,
+          album: ep.showTitle,
+          coverPath: coverPath ?? null,
+          durationSec: ep.durationSec ?? null,
+          group: ep.showTitle,
+        },
+      }]);
       setQueueVersion((v) => v + 1);
       return true;
     },
