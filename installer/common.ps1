@@ -239,6 +239,27 @@ function Grant-SetupLogRead([string]$path) {
     & icacls $path /grant:r "*S-1-5-32-545:(R)" /C /Q | Out-Null
 }
 
+# The shape of a DuckDNS token (a lowercase GUID). Used to check a token typed
+# into Admin > Remote access and one read back out of an old scheduled task.
+$DuckPattern = '^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$'
+
+# Pure parser for the old F7FIVE0-DuckDNS scheduled task. Its action arguments
+# held the update URL:
+#   ... 'https://www.duckdns.org/update?domains=<sub>&token=<token>&ip=' ...
+# Returns an object with Domain (subdomain only) and Token, or $null when the
+# text has no usable domain or the token does not look like a DuckDNS token.
+# It never writes the token anywhere: the caller decides what to do with it.
+function Get-DuckDnsFromTaskArgs([string]$argText) {
+    if (-not $argText) { return $null }
+    $m = [regex]::Match($argText, 'domains=([A-Za-z0-9][A-Za-z0-9-]{0,61})&token=([A-Za-z0-9-]+)')
+    if (-not $m.Success) { return $null }
+    $domain = $m.Groups[1].Value.ToLower()
+    $token = $m.Groups[2].Value.ToLower()
+    if ($domain.EndsWith("-")) { return $null }
+    if ($token -notmatch $DuckPattern) { return $null }
+    return [pscustomobject]@{ Domain = $domain; Token = $token }
+}
+
 function Get-EnvValue([string]$key) {
     if (-not (Test-Path $EnvFile)) { return "" }
     foreach ($line in Get-Content $EnvFile) {

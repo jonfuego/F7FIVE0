@@ -23,6 +23,10 @@ from app.services import app_settings, artist_art_autofill as autofill
 from app.services import art as art_service
 from app.services import scan_library
 from app.services.artist_art_autofill import autofill_artist_art
+# Imported at module load, before the fixture swaps httpx.Client: this module
+# imports fastapi.testclient, whose TestClient subclasses httpx.Client and fails
+# when that name is a plain function.
+from tests.podcast_helpers import install_dns
 
 
 def _png(color=(200, 30, 30)) -> bytes:
@@ -100,7 +104,6 @@ def web(monkeypatch, tmp_path, db_session):
     monkeypatch.setattr(settings, "audiodb_api_key", "")
     monkeypatch.setattr(settings, "artist_art_autofill_enabled", True)
     # The SSRF guard does a real DNS lookup; the mocked hosts are fixed.
-    from tests.podcast_helpers import install_dns
     install_dns(monkeypatch)
     return fake
 

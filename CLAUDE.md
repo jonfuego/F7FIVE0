@@ -408,8 +408,8 @@ INSTALL.md for the operator view.
   httpx logs request URLs at INFO, so `app/log_redact.py` `install()` runs right
   after `logging.basicConfig` in `main.py`, `stream.py` and every CLI command.
   It holds `httpx` and `httpcore` at WARNING and puts `RedactApiKeyFilter` on
-  the root handler, which rewrites `api_key=<value>` to `api_key=***` in every
-  record (message, arguments and traceback text). A new entry point must call
+  the root handler, which rewrites `api_key=<value>` and `token=<value>` (the
+  DuckDNS update URL) to `***` in every record (message, arguments and traceback text). A new entry point must call
   `install()`; never log a URL or request that carries a key some other way.
 - Scanner-imported art uses `source_kind` `local` or `tmdb`; admin-set art
   (`upload`, `url`, ...) is never overwritten. Weak automatic art (`frame`,
@@ -565,12 +565,29 @@ INSTALL.md for the operator view.
   says "already configured to route to your tunnel <id>" without moving it).
   The pure decisions live in `installer/tunnel-logic.ps1` with Pester tests.
   The other methods are a dashboard tunnel token (same service) and Caddy
-  (`F7FIVE0-Proxy`, automatic HTTPS, optional DuckDNS refresh task). Never
+  (`F7FIVE0-Proxy`, automatic HTTPS, optional DuckDNS name). Never
   offer plain-HTTP port forwarding. The result lands in `.env` as `PUBLIC_URL`;
   the helper restarts API and Web, and clients read it from
   `/api/client/features`.
   `install.ps1 -RemoteAccess <method>` and `remote-access.ps1 -Method` are the
   console (advanced / recovery) paths.
+  DuckDNS is refreshed by the API, never by a scheduled task: a hidden
+  PowerShell window calling a web URL every 5 minutes is what Defender flagged as
+  `Trojan:Win32/Commando.A!ml`, and the task kept the token in plain text.
+  `Setup-PortForward` does one update in-process, then saves `DUCKDNS_DOMAIN`
+  (subdomain only) and `DUCKDNS_TOKEN` to the private `.env` with `Set-EnvKey`
+  (every other method, and off, writes both blank; a rerun for the same name with
+  no new token keeps the saved one). The scheduler job `duckdns_refresh` (every 5
+  minutes, first run 20 s after boot) exists only when both are set and calls
+  `services/duckdns.py`, which sends the User-Agent, treats a body of `OK` as
+  success and stores `{checked_at, ok, error}` in `app_settings` `duckdns_status`.
+  It never logs the URL or token and keeps exception text out of the status.
+  Never add a `Register-ScheduledTask`, `Start-Process` or any new script host
+  for this. `Disable-Other` still removes an old `F7FIVE0-DuckDNS` task, and
+  `install.ps1` migrates one on upgrade: `Get-DuckDnsFromTaskArgs` (`common.ps1`,
+  tested by `installer\tests\duckdns-migrate.ps1`) reads the domain and token out
+  of the task arguments, they go to `.env` only where blank, `.env` gets
+  `Set-PrivateAcl` again, then the task is unregistered. The token is never printed.
 - Updates: Admin > Updates updates the server from the latest GitHub release
   or an uploaded Setup (`backend/app/services/updates.py`,
   `installer/update.ps1`). Setup records the installed version in
