@@ -381,12 +381,17 @@ export function DownloadProvider({ children }: { children: React.ReactNode }): R
     if (!next) return;
     cacheRunning.current = true;
     const id = next.id;
-    cacheDispatch({ type: "start", id });
     void (async () => {
       let target: string | null = null;
+      // Short of space: skip before "start", so the entry stays queued and no
+      // try is used up. The next change to the list or the network retries it.
+      const free = await FileSystem.getFreeDiskStorageAsync().catch(() => Number.MAX_SAFE_INTEGER);
+      if (free < CACHE_MIN_FREE_BYTES) {
+        cacheRunning.current = false;
+        return;
+      }
+      cacheDispatch({ type: "start", id });
       try {
-        const free = await FileSystem.getFreeDiskStorageAsync().catch(() => Number.MAX_SAFE_INTEGER);
-        if (free < CACHE_MIN_FREE_BYTES) throw new Error("low_space");
         const signed =
           next.kind === "podcast" ? await fetchPodcastDownloadUrl(api, id) : await fetchDownloadUrl(api, id);
         target = CACHE_DIR + localFileName(encodeURIComponent(id), next.meta?.container ?? signed.container);
