@@ -52,11 +52,14 @@ export const MIN_TICK_GAP_MS = 7_500;
 /** For this long after an episode starts, a tick that reads well short of the
  * place it was started at is not saved (the seek may not have landed yet). */
 export const START_GUARD_MS = 60_000;
+/** For this long after an episode starts, a pause that reads well short of it
+ * is not saved either: a late Paused event from loading, not the listener. */
+export const START_PAUSE_GUARD_MS = 10_000;
 
 export class PodcastProgressSaver {
   private lastSaveAt = 0;
   private suspended = false;
-  private startGuard: { atSec: number; untilMs: number } | null = null;
+  private startGuard: { atSec: number; sinceMs: number } | null = null;
   private readonly now: () => number;
 
   constructor(private readonly deps: PodcastSaverDeps) {
@@ -71,11 +74,12 @@ export class PodcastProgressSaver {
 
   /** Saves allowed again. `startedAtSec` is the place the episode was started
    * at: for a minute, a tick that reads more than 30 s short of it is not saved,
-   * so a seek that has not landed cannot replace the saved place with ~0. A
-   * pause still saves (the listener may have gone back on purpose). */
+   * so a seek that has not landed cannot replace the saved place with ~0; for
+   * the first 10 s a pause is held to the same rule. After that a pause always
+   * saves (the listener may have gone back on purpose). */
   resume(startedAtSec = 0): void {
     this.suspended = false;
-    this.startGuard = startedAtSec > 30 ? { atSec: startedAtSec, untilMs: this.now() + START_GUARD_MS } : null;
+    this.startGuard = startedAtSec > 30 ? { atSec: startedAtSec, sinceMs: this.now() } : null;
   }
 
   /** Save the loaded episode's place. Returns the save made, or null when
@@ -95,8 +99,12 @@ export class PodcastProgressSaver {
       if (reason === "tick" && !(await this.deps.isPlaying())) return null;
       const p = await this.deps.progress();
       const guard = this.startGuard;
-      if (guard && this.now() >= guard.untilMs) this.startGuard = null;
-      else if (guard && reason === "tick" && p.position < guard.atSec - 30) return null;
+      const sinceStart = guard ? this.now() - guard.sinceMs : 0;
+      if (guard && sinceStart >= START_GUARD_MS) this.startGuard = null;
+      else if (guard && p.position < guard.atSec - 30) {
+        if (reason === "tick") return null;
+        if (reason === "pause" && sinceStart < START_PAUSE_GUARD_MS) return null;
+      }
       const duration = p.duration > 0 ? p.duration : ep.durationSec ?? 0;
       const position = reason === "end" && duration > 0 ? duration : p.position;
       const save: PodcastSave = {

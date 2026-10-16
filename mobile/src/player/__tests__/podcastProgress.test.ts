@@ -1,4 +1,4 @@
-import { MIN_TICK_GAP_MS, PodcastProgressSaver, podcastSaverBridge, type PodcastSave, type PodcastSaverDeps } from "../podcastProgress";
+import { MIN_TICK_GAP_MS, START_PAUSE_GUARD_MS, PodcastProgressSaver, podcastSaverBridge, type PodcastSave, type PodcastSaverDeps } from "../podcastProgress";
 
 function setup(over: Partial<PodcastSaverDeps> = {}) {
   let clock = 1_000_000;
@@ -107,14 +107,16 @@ describe("PodcastProgressSaver", () => {
 });
 
 describe("PodcastProgressSaver start guard", () => {
-  it("for a minute, a tick well short of the start place is not saved; a pause is", async () => {
+  it("for a minute, a tick well short of the start place is not saved; a later pause is", async () => {
     const t = setup();
     t.saver.resume(2400);
     t.state.position = 12; // the seek has not landed
     expect(await t.saver.save("tick")).toBeNull();
+    expect(await t.saver.save("pause")).toBeNull(); // a late Paused from loading
     t.state.position = 2410;
     t.advance(MIN_TICK_GAP_MS);
     expect((await t.saver.save("tick"))?.positionSec).toBe(2410);
+    t.advance(START_PAUSE_GUARD_MS);
     t.state.position = 0; // the listener went back to the start on purpose
     expect((await t.saver.save("pause"))?.positionSec).toBe(0);
   });

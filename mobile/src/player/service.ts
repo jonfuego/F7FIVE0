@@ -48,8 +48,11 @@ export async function PlaybackService(): Promise<void> {
   TrackPlayer.addEventListener(Event.PlaybackProgressUpdated, () => {
     void podcastSaverBridge.save("tick");
   });
+  // Stopped is left out on purpose: it comes from reset, stop and the app being
+  // closed, when the player may already read 0. A pause from the notification,
+  // headset or car arrives as Paused (RemoteStop pauses, above).
   TrackPlayer.addEventListener(Event.PlaybackState, (e) => {
-    if (e.state === State.Paused || e.state === State.Stopped) void podcastSaverBridge.save("pause");
+    if (e.state === State.Paused) void podcastSaverBridge.save("pause");
     else if (e.state === State.Ended) void podcastSaverBridge.save("end");
   });
 
