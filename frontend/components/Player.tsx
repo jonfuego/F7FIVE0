@@ -37,20 +37,29 @@
 // hidden for those modes.
 //
 // Cast: when the Cast SDK is loaded and a session is active, the Player
-// pauses local playback, sends the same signed stream URL to the
-// receiver, and shows a "Casting to <device>" overlay. On session end
-// it seeks the local video to the remote position and resumes. The
-// launcher button lives in the overlay next to the gear icon. During
-// a cast session the gear is hidden because hls.js is still attached
-// locally but not playing.
+// pauses local playback, mints a separate stream for the receiver
+// (/api/stream/start with purpose "cast": its own encode and one rung, so
+// the receiver and this tab never share or kill each other's jobs), loads
+// that on the receiver, stops hls.js from fetching, and shows a "Casting
+// to <device>" overlay. On session end it seeks the local video to the
+// receiver's last position and resumes loading. The launcher button lives
+// in the overlay next to the gear icon. During a cast session the gear is
+// hidden because hls.js is still attached locally but not loading.
 
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type HlsType from "hls.js";
 import type { Level } from "hls.js";
-import { apiPut } from "@/lib/client-api";
-import type { MediaMarker, Progress, StreamStart } from "@/lib/types";
+import { apiPost, apiPut } from "@/lib/client-api";
+import type { MediaMarker, Progress, StreamStart, StreamStartRequest } from "@/lib/types";
+import {
+  castDurationSec,
+  castMintBody,
+  castStartTime,
+  localResumeSec,
+  timelineBase,
+} from "@/lib/cast-handoff";
 import CastButton from "./CastButton";
 import type { QualityControlData } from "./QualityMenu";
 import { useCast } from "@/lib/cast";
@@ -162,6 +171,18 @@ export function Player({
     castRef.current = cast;
   }, [cast]);
 
+  // The stream minted for the receiver (purpose "cast"): set once the receiver
+  // has loaded it, cleared when the session ends. While it is set the local
+  // hls.js is stopped, so this tab fetches nothing and cannot start a second
+  // encode alongside the receiver's.
+  const castStreamRef = useRef<StreamStart | null>(null);
+  // The receiver's last reported place, kept because the remote player resets
+  // its clock as the session ends, before the transition effect below runs.
+  const lastCastTimeRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (cast.isConnected && cast.currentTime > 0) lastCastTimeRef.current = cast.currentTime;
+  }, [cast.isConnected, cast.currentTime]);
+
   // Cast session transition handler. Fires on every cast.isConnected
   // flip and orchestrates the bridge between local and remote playback.
   const wasConnectedRef = useRef(false);
@@ -174,51 +195,69 @@ export function Player({
     wasConnectedRef.current = nowConnected;
 
     if (nowConnected && !wasConnected) {
-      // Starting to cast. Pause local playback at whatever position it's
-      // at and hand the same signed URL to the receiver with startTime
-      // set to the current local position. The HMAC already covers
-      // `t=<bucket>` so we send exactly what the backend signed; the
-      // receiver's `startTime` is a client-side seek, not a new signing.
-      const startAt = isFinite(video.currentTime) && video.currentTime > 0
-        ? video.currentTime
-        : (initialResume ?? 0);
+      // Starting to cast. Pause local playback, then mint a separate stream
+      // for the receiver (purpose "cast": its own encode and a single rung) at
+      // the current source second. Handing it this tab's own stream URL made
+      // the receiver and this tab fight over one set of encodes. Local loading
+      // stops only once the receiver has the new stream; if minting or the
+      // load fails, local playback carries on.
+      const localBase = timelineBase(stream);
+      const startAt =
+        isFinite(video.currentTime) && video.currentTime > 0
+          ? localBase + video.currentTime
+          : (initialResume ?? localBase);
+      lastCastTimeRef.current = null;
       try { video.pause(); } catch { /* ignore */ }
 
-      const absoluteUrl = toAbsolute(stream.url);
-      void cast
-        .loadMedia({
-          contentUrl: absoluteUrl,
-          contentType: castContentTypeFor(stream.mode),
-          title: stream.title ?? undefined,
-          posterUrl: posterUrl,
-          startTime: startAt > 0 ? startAt : undefined,
-          durationSec: stream.duration_sec ?? undefined,
-        })
-        .catch((err: unknown) => {
+      void (async () => {
+        try {
+          const cs = await apiPost<StreamStart>(
+            "/api/stream/start",
+            castMintBody(stream.media_file_id, startAt) satisfies StreamStartRequest,
+          );
+          await cast.loadMedia({
+            contentUrl: toAbsolute(cs.url),
+            contentType: castContentTypeFor(cs.mode),
+            title: cs.title ?? stream.title ?? undefined,
+            posterUrl: posterUrl,
+            startTime: castStartTime(startAt, cs),
+            durationSec: castDurationSec(stream.duration_sec, cs) ?? undefined,
+          });
+          if (!castRef.current.isConnected) return;
+          castStreamRef.current = cs;
+          try { hlsRef.current?.stopLoad(); } catch { /* ignore */ }
+        } catch (err: unknown) {
           const message = err instanceof Error ? err.message : String(err);
           onError?.(`Cast failed: ${message}`);
           // Try to recover local playback so the user isn't stranded.
           try { void video.play(); } catch { /* ignore */ }
-        });
-    } else if (!nowConnected && wasConnected) {
-      // Cast session ended. Seek local video to wherever the receiver
-      // left off and resume. Browsers sometimes reject play() without a
-      // user gesture if the tab was backgrounded; swallow the rejection
-      // and let the user hit play manually if needed.
-      const resumeAt = cast.currentTime;
-      try {
-        if (resumeAt > 0 && isFinite(video.duration) && video.duration > 0) {
-          video.currentTime = resumeAt;
         }
-      } catch { /* ignore */ }
+      })();
+    } else if (!nowConnected && wasConnected) {
+      // Cast session ended. If the receiver had a stream, resume locally at its
+      // last place (mapped onto this stream's clock); otherwise carry on from
+      // the local position. Browsers sometimes reject play() without a user
+      // gesture if the tab was backgrounded; swallow the rejection and let the
+      // user hit play manually if needed.
+      const cs = castStreamRef.current;
+      castStreamRef.current = null;
+      if (cs) {
+        const resumeAt = localResumeSec(lastCastTimeRef.current, cs, stream, video.currentTime);
+        lastCastTimeRef.current = null;
+        try {
+          if (resumeAt > 0 && isFinite(video.duration) && video.duration > 0) {
+            video.currentTime = resumeAt;
+          }
+        } catch { /* ignore */ }
+        try { hlsRef.current?.startLoad(resumeAt > 0 ? resumeAt : -1); } catch { /* ignore */ }
+      }
       try {
         const p = video.play();
         if (p && typeof p.catch === "function") p.catch(() => { /* ignore */ });
       } catch { /* ignore */ }
     }
-    // cast.currentTime is read only in the transition branch, but it's
-    // most accurate on the tick the session actually ends, so we leave
-    // it out of deps. The transition is driven by isConnected.
+    // The receiver's time is tracked in lastCastTimeRef, so cast.currentTime
+    // stays out of deps. The transition is driven by isConnected.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cast.isConnected, stream, onError, posterUrl, initialResume]);
 
@@ -311,7 +350,9 @@ export function Player({
           }
           setUserLevel(start);
           setLoadedLevel(start >= 0 ? start : instance.currentLevel);
-          instance.startLoad();
+          // A receiver has its own stream: stay stopped; the disconnect path
+          // restarts loading.
+          if (!castStreamRef.current) instance.startLoad();
         });
         instance.on(Hls.Events.LEVEL_SWITCHED, (_event, data) => {
           if (disposed) return;
@@ -395,11 +436,13 @@ export function Player({
         ? (stream.timeline_offset_sec ?? stream.offset_sec ?? 0)
         : 0;
 
-    function send(streamPosition: number, durationHint?: number | null) {
+    function send(streamPosition: number, durationHint?: number | null, clockBase: number = base) {
       // Fire-and-forget. If the write fails we'll catch up on the next tick.
-      const position = base + streamPosition;
+      // `clockBase` is the source second the position's stream clock starts at:
+      // this stream's, or the receiver's cast stream's while casting.
+      const position = clockBase + streamPosition;
       const duration =
-        base > 0 && stream.duration_sec
+        clockBase > 0 && stream.duration_sec
           ? Math.floor(stream.duration_sec)
           : durationHint != null && durationHint > 0
             ? Math.floor(durationHint)
@@ -421,10 +464,13 @@ export function Player({
       // The HMAC payload is uid:mid:exp:offset_bucket and does not cover the
       // path, so the keepalive URL is the signed stream URL with its pathname
       // swapped to the keepalive route. Direct-play has no session to keep.
-      if (!(stream.mode === "hls")) return;
+      // While casting it is the receiver's stream that needs the ping; this
+      // tab's own stream is not being read.
+      const live = castStreamRef.current ?? stream;
+      if (!(live.mode === "hls")) return;
       if (typeof window === "undefined") return;
       try {
-        const u = new URL(stream.url, window.location.origin);
+        const u = new URL(live.url, window.location.origin);
         u.pathname = `/stream/keepalive/${stream.media_file_id}`;
         void fetch(u.toString(), { method: "GET", cache: "no-store" }).catch(() => { /* ignore */ });
       } catch {
@@ -438,7 +484,11 @@ export function Player({
       const c = castRef.current;
       if (c.isConnected) {
         if (c.currentTime > 0) {
-          send(c.currentTime, c.duration > 0 ? c.duration : stream.duration_sec);
+          send(
+            c.currentTime,
+            c.duration > 0 ? c.duration : stream.duration_sec,
+            castStreamRef.current ? timelineBase(castStreamRef.current) : base,
+          );
         }
         return;
       }
@@ -467,7 +517,11 @@ export function Player({
       // the receiver's time over the local video's (which is paused).
       const c = castRef.current;
       if (c.isConnected && c.currentTime > 0) {
-        send(c.currentTime, c.duration > 0 ? c.duration : stream.duration_sec);
+        send(
+          c.currentTime,
+          c.duration > 0 ? c.duration : stream.duration_sec,
+          castStreamRef.current ? timelineBase(castStreamRef.current) : base,
+        );
       } else if (video && !isNaN(video.currentTime) && video.currentTime > 0) {
         send(video.currentTime);
       }

@@ -14,3 +14,13 @@ export function useCast() {
     stopCasting: async (): Promise<void> => {},
   };
 }
+
+export function useCastReceiver() {
+  return {
+    deviceName: null as string | null,
+    streamPosition: null as number | null,
+    play: async (): Promise<void> => {},
+    pause: async (): Promise<void> => {},
+    seek: async (_streamSec: number): Promise<void> => {},
+  };
+}

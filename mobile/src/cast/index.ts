@@ -1,3 +1,4 @@
 export { CastButton } from "./CastButton";
-export { useCast } from "./useCast";
+export { useCast, useCastReceiver } from "./useCast";
 export * from "./payloads";
+export * from "./castHandoff";
