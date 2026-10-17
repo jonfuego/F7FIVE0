@@ -751,7 +751,7 @@ INSTALL.md for the operator view.
   events, play history).
 - `app/admin/layout.tsx` checks the admin role once (members get "This area is
   limited to administrators") and wraps every admin page in `AuthShell`;
-  subpages also get the section list (`components/admin/AdminSectionList.tsx`,
+  subpages also get the section list (defined in that file,
   `aria-current` on the current area). Pages read the signed-in admin with
   `useAdminMe()`.
 - The pure rules live in `frontend/lib/admin-dashboard.ts` (no React, no `@/`
