@@ -12,10 +12,14 @@ Two entry points:
     full_sync(db)                — run everything in order. Used by the scheduler.
     refresh_movie/series/artist  — single-record refreshes. Used by webhooks.
 
-All DB work goes through the caller's Session. Callers commit. Enrichment
-jobs are not scheduled while the sync runs: the ids are collected on
-`SyncStats` and the caller hands them to `schedule_pending_enrichment` after
-its commit, so a job never runs before the row it enriches is visible.
+All DB work goes through the caller's Session. `full_sync` saves as it goes
+(every BATCH_SIZE items, and at least every PROGRESS_EVERY_SEC seconds), the way
+the folder scan does, so rows show up in the library while an app syncs and a
+failure partway loses only the open batch. The other entry points leave the
+commit to the caller. Enrichment jobs are not scheduled while the sync runs: the
+ids are collected on `SyncStats` and the caller hands them to
+`schedule_pending_enrichment` after its commit, so a job never runs before the
+row it enriches is visible.
 """
 from __future__ import annotations
 
@@ -60,6 +64,14 @@ _RESCAN_POLL_TIMEOUT_SEC = 60.0
 # so we give it more headroom than RescanSeries.
 _MANUAL_IMPORT_POLL_TIMEOUT_SEC = 180.0
 
+# `full_sync` commits after this many items of one app (a movie, a series, an
+# artist), and writes Admin's progress then. Same size as the folder scan's
+# batch. Never more than 50 per commit.
+BATCH_SIZE = 25
+# A slow item (a big series on a cold NAS) must not leave Admin silent: save and
+# report at least this often while an app runs.
+PROGRESS_EVERY_SEC = 5.0
+
 
 @dataclass
 class SyncStats:
@@ -71,6 +83,8 @@ class SyncStats:
     tracks_upserted: int = 0
     files_upserted: int = 0
     files_probed: int = 0
+    # Files that ended this run in the `ready` state (probed now or already ready).
+    files_ready: int = 0
     files_missing: int = 0
     files_pruned: int = 0
     # Paths an *arr app reported outside the library folders: never probed,
@@ -81,6 +95,8 @@ class SyncStats:
     pending_movies: list = field(default_factory=list)
     pending_artists: list = field(default_factory=list)
     pending_albums: list = field(default_factory=list)
+    # The running app's progress reporter, set by full_sync (None outside it).
+    progress: Any = field(default=None, repr=False)
 
     def log_summary(self) -> None:
         log.info(
@@ -124,20 +140,111 @@ def _synced_count(app: str, stats: SyncStats) -> int:
     }[app]
 
 
+class _AppProgress:
+    """Saves and reports one app's sync as it goes.
+
+    The app's loop calls `begin(total)` once it knows how many items it has,
+    then `item_done()` after each one. Every BATCH_SIZE items (or
+    PROGRESS_EVERY_SEC seconds) it commits the session and then reports, so what
+    Admin shows is never ahead of what the library holds. `rollback()` drops
+    the open batch after a failure and says how far the saved part got."""
+
+    def __init__(self, db: Session, stats: SyncStats, app: str, on_progress) -> None:
+        self.db = db
+        self.stats = stats
+        self.app = app
+        self.on_progress = on_progress
+        self.total = 0
+        self.done = 0
+        self._last = time.monotonic()
+        self._base = self._tally()
+        self._saved = self.counts(0)
+        self._marks = self._pending_marks()
+
+    def _tally(self) -> dict:
+        s = self.stats
+        return {
+            "synced": _synced_count(self.app, s), "errors": s.errors, "ready": s.files_ready,
+            "missing": s.files_missing, "refused": s.files_refused,
+        }
+
+    def counts(self, done: int) -> dict:
+        """What has happened since this app started, with `done` items saved."""
+        now = self._tally()
+        out = {k: now[k] - self._base[k] for k in now}
+        out.update(done=done, total=max(self.total, done))
+        return out
+
+    def _pending_marks(self) -> tuple:
+        s = self.stats
+        return (len(s.pending_movies), len(s.pending_artists), len(s.pending_albums))
+
+    def _report(self, state: str, counts: dict, error: Optional[str] = None) -> None:
+        if self.on_progress is not None:
+            self.on_progress(self.app, state, counts["synced"], counts["errors"], error, counts)
+
+    def begin(self, total: int) -> None:
+        self.total = total
+        self._report("running", self.counts(0))
+
+    def item_done(self) -> None:
+        self.done += 1
+        if self.done % BATCH_SIZE == 0 or time.monotonic() - self._last >= PROGRESS_EVERY_SEC:
+            self.save()
+
+    def save(self) -> None:
+        self.db.commit()
+        self._last = time.monotonic()
+        self._saved = self.counts(self.done)
+        self._marks = self._pending_marks()
+        self._report("running", self._saved)
+
+    def finish(self) -> dict:
+        """The app ran to the end: commit the last batch and return its counts."""
+        self.db.commit()
+        self.total = max(self.total, self.done)
+        return self.counts(self.done)
+
+    def rollback(self) -> dict:
+        """The app failed: drop the open batch and return what was saved."""
+        self.db.rollback()
+        s = self.stats
+        del s.pending_movies[self._marks[0]:]
+        del s.pending_artists[self._marks[1]:]
+        del s.pending_albums[self._marks[2]:]
+        counts = dict(self._saved)
+        counts["errors"] += 1
+        return counts
+
+
+def _tick(stats: SyncStats) -> None:
+    """One item of the running app is done (no-op outside full_sync)."""
+    if stats.progress is not None:
+        stats.progress.item_done()
+
+
+def _begin_app(stats: SyncStats, total: int) -> None:
+    if stats.progress is not None:
+        stats.progress.begin(total)
+
+
 def full_sync(
     db: Session,
     only: Optional[list] = None,
-    on_progress: Optional[Callable[[str, str, int, int, Optional[str]], None]] = None,
+    on_progress: Optional[Callable[..., None]] = None,
 ) -> SyncStats:
     """Run a full pass across the *arr services. Returns aggregate stats.
 
-    Each service runs in its own sub-transaction via db.begin_nested() so that
-    a flush error in one (e.g. Sonarr) does not poison the session and kill
-    the others. The outer caller still commits the successful work.
+    Each app saves as it goes: the session is committed every BATCH_SIZE items
+    (see _AppProgress), so rows show up while it runs. If an app raises, its open
+    batch is rolled back, the batches before it stay, and the next app still
+    runs (a failure in one, e.g. Sonarr, does not stop the others).
 
     `only` limits the pass to the named apps (still skipping any that has no
-    key). `on_progress(app, state, synced, errors, error)` is told when each
-    app starts ("running") and ends ("done" or "failed"), for Admin's status.
+    key). `on_progress(app, state, synced, errors, error, counts)` is told when
+    each app starts ("running"), after every saved batch, and when it ends
+    ("done" or "failed"), for Admin's status. `counts` has done, total, ready,
+    missing, refused and errors; `done` is the items saved.
     """
     stats = SyncStats()
     for label, runner in (
@@ -149,22 +256,25 @@ def full_sync(
             continue
         if not arr_settings.configured(label):
             continue
-        before_errors = stats.errors
-        before_synced = _synced_count(label, stats)
+        progress = _AppProgress(db, stats, label, on_progress)
+        stats.progress = progress
         if on_progress is not None:
-            on_progress(label, "running", 0, 0, None)
+            on_progress(label, "running", 0, 0, None, progress.counts(0))
         error = None
         try:
-            with db.begin_nested():
-                runner(db, stats)
+            runner(db, stats)
+            counts = progress.finish()
         except Exception as exc:
             log.exception("%s sync failed", label)
             stats.errors += 1
             error = f"{label} sync failed: {exc}"
+            counts = progress.rollback()
+        finally:
+            stats.progress = None
         if on_progress is not None:
             on_progress(
                 label, "failed" if error else "done",
-                _synced_count(label, stats) - before_synced, stats.errors - before_errors, error,
+                counts["synced"], counts["errors"], error, counts,
             )
     stats.log_summary()
     return stats
@@ -210,8 +320,11 @@ def _resolve_requests(db: Session, kind: str, external_id) -> None:
 
 
 def _sync_radarr(db: Session, rc: RadarrClient, stats: SyncStats) -> None:
-    for payload in rc.list_movies():
+    movies = rc.list_movies()
+    _begin_app(stats, len(movies))
+    for payload in movies:
         _upsert_movie(db, payload, stats, throttle=True)
+        _tick(stats)
     db.flush()
 
 
@@ -300,10 +413,12 @@ def _upsert_movie(
 # ---------------------------------------------------------------------------
 def _sync_sonarr(db: Session, sc: SonarrClient, stats: SyncStats) -> None:
     series_list = sc.list_series()
+    _begin_app(stats, len(series_list))
     for s_payload in series_list:
         series = _upsert_series(db, s_payload, stats, throttle=True)
         sonarr_series_id = s_payload.get("id")
         if sonarr_series_id is None:
+            _tick(stats)
             continue
         episodes = sc.list_episodes(sonarr_series_id)
         episode_files = sc.list_episode_files(sonarr_series_id)
@@ -327,6 +442,7 @@ def _sync_sonarr(db: Session, sc: SonarrClient, stats: SyncStats) -> None:
                 db.flush()
             _upsert_episode(db, series, ep_payload, files_by_id, stats)
         db.flush()
+        _tick(stats)
 
 
 def _upsert_series(
@@ -455,10 +571,13 @@ def _upsert_episode(
 # Lidarr
 # ---------------------------------------------------------------------------
 def _sync_lidarr(db: Session, lc: LidarrClient, stats: SyncStats) -> None:
-    for a_payload in lc.list_artists():
+    artists = lc.list_artists()
+    _begin_app(stats, len(artists))
+    for a_payload in artists:
         artist = _upsert_artist(db, a_payload, stats, throttle=True)
         lidarr_artist_id = a_payload.get("id")
         if lidarr_artist_id is None:
+            _tick(stats)
             continue
 
         track_files = lc.list_track_files(lidarr_artist_id)
@@ -474,6 +593,7 @@ def _sync_lidarr(db: Session, lc: LidarrClient, stats: SyncStats) -> None:
             for trk_payload in tracks:
                 _upsert_track(db, album, trk_payload, files_by_id, stats)
         db.flush()
+        _tick(stats)
 
 
 def _upsert_artist(
@@ -722,6 +842,8 @@ def _upsert_media_file(
     # Probe when we haven't yet, or when the file isn't in 'ready' state.
     if mf.scan_state != ScanState.ready or mf.probed_at is None:
         _probe_and_update(db, mf, stats)
+    if mf.scan_state == ScanState.ready:
+        stats.files_ready += 1
 
     # Drop stale siblings. Sonarr/Radarr/Lidarr each hold exactly one current
     # file per item, so any other MediaFile with the same (kind, ref_id) at a
