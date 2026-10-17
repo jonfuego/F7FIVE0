@@ -739,6 +739,28 @@ INSTALL.md for the operator view.
   first 24 posters load eager and the wall's links do not prefetch. Art rules
   above are unchanged.
 - Admin-only account creation. No self-serve sign-up.
+- Phone now playing comes from the active track's own fields, never from
+  `activeIndexRef` / `queueMeta` (`mobile/src/player/PlayerProvider.tsx`). Every
+  Track given to react-native-track-player carries `mediaFileId`, `trackId`,
+  `albumId`, `artistId`, `artPath`, `kind`, `episodeId`, `podcastId` and
+  `durationSec` (`songEntry`, `playEpisode`), and the pure
+  `nowPlayingFromTrack(activeTrack)` builds the value the mini player, Now
+  Playing, "Play album next" and the album screen's red row read. The old code
+  took the title from `useActiveTrack()` but the album and art from
+  `queueMeta[activeIndexRef]`, which the async track-changed listener updated
+  later, so everything but the title was one track behind. `activeIndexRef` is
+  set from the `PlaybackActiveTrackChanged` event's `index` as the first
+  statement of the listener, before any await, and the play report for the track
+  left uses the event's `lastTrack` / `lastPosition`. Queue edits that need a
+  slot (`playNext`) ask `TrackPlayer.getActiveTrackIndex()` when they run.
+  `queueMeta` stays only for the Queue panel and the server queue sync, kept
+  parallel to the native queue on every edit. Play starts the tapped track first
+  (`queueLoad.ts::loadQueueInStages`: sign one, reset, add, play, then sign and
+  add the rest around it) under a `playToken.ts` token, so the latest tap wins and
+  a second tap on the same list while it starts is ignored; `starting` in the
+  player context drives the busy Play and Shuffle buttons. `togglePlay` asks
+  `getPlaybackState()`, not a React ref. Detail screens use the shared
+  `mobile/src/ui/BackButton.tsx`.
 - Writing style for docs, comments, and commits: plain and direct, no em
   dashes.
 
@@ -811,6 +833,22 @@ is only proven by a real update on a VM: the tests use a stub Setup.
 
 ## Session log
 
+- 2026-10-17 (Code, phone playback fixes, branch `fix/phone-playback-sync`, not
+  merged): six problems on the phone app 1.0.15, four of them one bug. Now playing
+  mixed the active track's title with the previous track's album, art and ids, so
+  "Play album next" queued the wrong album and the album screen's red row sat one
+  track behind. Fixed by putting the meta on each Track and building now playing
+  from the active track alone (see the rule above). Play now signs only the tapped
+  track before it starts, the latest tap wins, and Play / Shuffle show a spinner
+  while starting; `togglePlay` reads the native state. A shared `BackButton` is on
+  the music artist, album, movie, show, season, music-video artist and release and
+  podcast show screens. New tests: `nowPlayingFromTrack`, `queueLoad`, `playToken`.
+  Mobile typecheck clean, jest 449 passed (426 on main), lint 0 errors. A signed
+  1.0.15 APK (versionCode 16, no upload, no tag) was built from the branch for a
+  sideload over the installed one. Not hand tested on a phone: Jon's checks are
+  skipping through the She Wants Revenge album watching art and the red row,
+  "Play album next" from the mini player menu, several fast Play taps, and Back
+  from an artist. Evidence is in the vault `projects\f7five0\smoke\phone-playback-fixes\`.
 - 2026-10-17 (Code, admin dashboard run): `/admin` is now an overview dashboard
   and every settings area has its own page (see the Admin block:
   `app/admin/layout.tsx`, `lib/admin-dashboard.ts`, and the subpage + tile + hash
