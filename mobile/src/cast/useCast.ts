@@ -1,7 +1,9 @@
 import { useCallback } from "react";
 import {
+  useCastDevice,
   useCastSession,
   useRemoteMediaClient,
+  useStreamPosition,
   type MediaLoadRequest,
 } from "react-native-google-cast";
 
@@ -48,4 +50,30 @@ export function useCast() {
   }, [client]);
 
   return { isConnected, client, session, castVideo, castMusicQueue, stopCasting };
+}
+
+/** What the video player needs while a movie plays on the receiver: the device
+ * name, the receiver's own place in the stream (seconds, null when it has
+ * none, and null again once the session ends), and play / pause / seek on the
+ * receiver. Separate from `useCast` so only the player re-renders on the
+ * position tick. */
+export function useCastReceiver() {
+  const client = useRemoteMediaClient();
+  const device = useCastDevice();
+  const streamPosition = useStreamPosition(2);
+
+  const play = useCallback(async (): Promise<void> => {
+    if (client) await client.play();
+  }, [client]);
+  const pause = useCallback(async (): Promise<void> => {
+    if (client) await client.pause();
+  }, [client]);
+  const seek = useCallback(
+    async (streamSec: number): Promise<void> => {
+      if (client) await client.seek({ position: streamSec });
+    },
+    [client],
+  );
+
+  return { deviceName: device?.friendlyName ?? null, streamPosition, play, pause, seek };
 }

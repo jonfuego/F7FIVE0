@@ -21,6 +21,7 @@ import {
 import Video, {
   OnProgressData,
   SelectedTrackType,
+  SelectedVideoTrackType,
   TextTrackType,
   VideoRef,
 } from "react-native-video";
@@ -28,7 +29,17 @@ import type { ISO639_1, SelectedTrack, TextTracks } from "react-native-video";
 
 import { fetchMarkers, fetchMediaStreams, fetchNextEpisode, startStream } from "@/api/media";
 import type { StreamQuality, StreamStart, SubtitleChoice } from "@/api/types";
-import { CastButton, useCast } from "@/cast";
+import {
+  castStartTime,
+  castingLabel,
+  CastButton,
+  isCasting,
+  localResumePosition,
+  receiverAbsPosition,
+  shouldRecoverLocally,
+  useCast,
+  useCastReceiver,
+} from "@/cast";
 import { useDownloads } from "@/download/DownloadProvider";
 import { useApi } from "@/state/auth";
 import { deviceName } from "@/state/config";
@@ -44,6 +55,7 @@ import {
   qualityLabel,
   subtitleLabel,
 } from "./streamChoices";
+import { pinnedVideoTrack, type PinnedTrack } from "./rungPin";
 import { activeMarker, clampSeek, formatClock, hlsBaseOffset, upNextState } from "./transport";
 import { videoController } from "@/player/playerController";
 
@@ -77,6 +89,8 @@ function qualitySettingKey(): string {
 export function VideoPlayer({ mediaFileId, resumeSec = 0, onClose, onPlayNext }: VideoPlayerProps): React.ReactElement {
   const api = useApi();
   const cast = useCast();
+  const receiver = useCastReceiver();
+  const receiverSeek = receiver.seek;
   const downloads = useDownloads();
   const downloadsRef = useRef(downloads);
   downloadsRef.current = downloads;
@@ -102,6 +116,24 @@ export function VideoPlayer({ mediaFileId, resumeSec = 0, onClose, onPlayNext }:
   const [rate, setRate] = useState(1);
   const [upNextDismissed, setUpNextDismissed] = useState(false);
   const advanced = useRef(false);
+  // The cast stream the receiver is playing, set only once the hand-off worked.
+  // While it is set and a session is up, this phone is a remote control: no
+  // local Video is mounted and nothing here fetches the movie.
+  // The one rung the local player holds (see rungPin.ts), read from its tracks
+  // once the stream loads.
+  const [pinned, setPinned] = useState<PinnedTrack | null>(null);
+  const [castStream, setCastStream] = useState<StreamStart | null>(null);
+  const castStreamRef = useRef<StreamStart | null>(null);
+  castStreamRef.current = castStream;
+  const casting = isCasting(cast.isConnected, castStream !== null);
+  const castingRef = useRef(false);
+  castingRef.current = casting;
+  const connectedRef = useRef(false);
+  connectedRef.current = cast.isConnected;
+  // The receiver's last reported place in its stream. The session (and with it
+  // the position hook) is gone by the time we learn it ended, so keep the last
+  // good value.
+  const lastReceiverPos = useRef<number | null>(null);
 
   // Picker state.
   const [quality, setQuality] = useState<StreamQuality>("original");
@@ -182,14 +214,17 @@ export function VideoPlayer({ mediaFileId, resumeSec = 0, onClose, onPlayNext }:
   }, [loadUrl, qualityReady]);
 
   // HLS transcodes are reaped after ~90 s without requests (e.g. while paused).
+  // While casting it is the cast stream that needs the ping; the phone's own
+  // stream is not being read, so it is left to expire.
+  const liveStream = casting ? castStream : stream;
   useEffect(() => {
-    if (!stream || stream.mode !== "hls") return;
-    const keepaliveUrl = stream.url.replace(/\/stream\/hls\/[^?]+/, `/stream/keepalive/${mediaFileId}`);
+    if (!liveStream || liveStream.mode !== "hls") return;
+    const keepaliveUrl = liveStream.url.replace(/\/stream\/hls\/[^?]+/, `/stream/keepalive/${mediaFileId}`);
     const timer = setInterval(() => {
       void fetch(keepaliveUrl, { method: "GET" }).catch(() => undefined);
     }, 30_000);
     return () => clearInterval(timer);
-  }, [stream, mediaFileId]);
+  }, [liveStream, mediaFileId]);
 
   const scheduleHide = useCallback(() => {
     if (hideTimer.current) clearTimeout(hideTimer.current);
@@ -244,15 +279,25 @@ export function VideoPlayer({ mediaFileId, resumeSec = 0, onClose, onPlayNext }:
     [api, mediaFileId, base, stream],
   );
 
-  /** Seek to an absolute source second (re-based for HLS resumes). */
+  /** Seek to an absolute source second (re-based for HLS resumes). While
+   * casting the receiver does the seeking, inside its own stream. */
   const seekAbs = useCallback(
     (absSec: number) => {
+      const cs = castStreamRef.current;
+      if (castingRef.current && cs) {
+        const csBase = cs.mode === "hls" ? cs.timeline_offset_sec ?? 0 : 0;
+        const target = clampSeek(absSec, duration, csBase);
+        positionRef.current = target;
+        setPosition(target);
+        void receiverSeek(target - csBase).catch(() => undefined);
+        return;
+      }
       const target = clampSeek(absSec, duration, base);
       positionRef.current = target;
       setPosition(target);
       ref.current?.seek(target - base);
     },
-    [duration, base],
+    [duration, base, receiverSeek],
   );
 
   // Uniform player controller (item 8c). Groundwork so a future watch-together
@@ -294,9 +339,11 @@ export function VideoPlayer({ mediaFileId, resumeSec = 0, onClose, onPlayNext }:
   }, [upNext.show, upNext.secondsLeft, upNextDismissed, advance]);
 
   // Cast hand-off. When a receiver connects, mint a fresh signed URL with
-  // purpose:"cast" (the receiver fetches it itself from the server) and
-  // load it, carrying the current position over, then pause local playback. On
-  // disconnect, resume locally at wherever the receiver left off.
+  // purpose:"cast" (the server gives it its own encode and a single rung, so it
+  // never fights the phone's own stream) and load it, carrying the current
+  // position over. Once the receiver has it, the local Video is unmounted. If
+  // the hand-off fails the phone keeps playing. On disconnect, resume locally
+  // at wherever the receiver left off.
   const castedRef = useRef(false);
   const castVideoNow = useCallback(async () => {
     try {
@@ -312,27 +359,61 @@ export function VideoPlayer({ mediaFileId, resumeSec = 0, onClose, onPlayNext }:
         mode: s.mode,
         title: s.title ?? stream?.title ?? undefined,
         artUrl: s.art_url ?? undefined,
-        startPositionSec: at,
+        startPositionSec: castStartTime(at, s.mode, s.timeline_offset_sec),
         isMovie: true,
       });
-      if (ok) setPaused(true);
+      if (ok && connectedRef.current) {
+        lastReceiverPos.current = null;
+        setPaused(false);
+        setCastStream(s);
+      }
     } catch {
       // Keep playing locally if the hand-off fails.
     }
   }, [api, mediaFileId, pickedAudio, subtitle, quality, cast, stream]);
+
+  // Track the receiver's place so it survives the session ending.
+  useEffect(() => {
+    if (!casting || !castStream) return;
+    const abs = receiverAbsPosition(receiver.streamPosition, castStream.mode, castStream.timeline_offset_sec);
+    if (abs === null) return;
+    lastReceiverPos.current = receiver.streamPosition;
+    positionRef.current = abs;
+    setPosition(abs);
+  }, [casting, castStream, receiver.streamPosition]);
 
   useEffect(() => {
     if (cast.isConnected && !castedRef.current) {
       castedRef.current = true;
       void castVideoNow();
     } else if (!cast.isConnected && castedRef.current) {
-      // Session ended: resume local playback where the receiver was.
       castedRef.current = false;
-      setPaused(false);
+      const cs = castStreamRef.current;
+      if (cs) {
+        // Session ended while the receiver had the movie: pick up locally at
+        // the receiver's last place (the phone's own place if it never
+        // reported one), then re-sign so the local stream starts there.
+        const abs = localResumePosition(
+          receiverAbsPosition(lastReceiverPos.current, cs.mode, cs.timeline_offset_sec),
+          positionRef.current,
+          duration,
+        );
+        lastReceiverPos.current = null;
+        positionRef.current = abs;
+        setPosition(abs);
+        recovered.current = false;
+        setCastStream(null);
+        setStream(null);
+        setPaused(false);
+        void loadUrl();
+      }
     }
-  }, [cast.isConnected, castVideoNow]);
+  }, [cast.isConnected, castVideoNow, duration, loadUrl]);
 
   const onError = useCallback(async () => {
+    // A receiver has the movie: a stray local error must not start another
+    // stream (it used to, mid-cast).
+    if (!shouldRecoverLocally(castingRef.current)) return;
     if (recovered.current) {
       setError("Playback failed.");
       return;
@@ -418,28 +499,43 @@ export function VideoPlayer({ mediaFileId, resumeSec = 0, onClose, onPlayNext }:
 
   return (
     <Pressable style={styles.fill} onPress={toggleControls}>
-      <Video
-        ref={ref}
-        source={{ uri: stream.url }}
-        style={styles.fill}
-        resizeMode="contain"
-        paused={paused}
-        onProgress={onProgress}
-        onError={onError}
-        onLoad={(d) => {
-          if (d.duration > 0) setSeekable(d.duration);
-          const rel = positionRef.current - base;
-          if (rel > 0) ref.current?.seek(rel);
-        }}
-        onEnd={advance}
-        rate={rate}
-        progressUpdateInterval={1000}
-        enterPictureInPictureOnLeave
-        controls={false}
-        playInBackground={false}
-        textTracks={textTracks.length > 0 ? textTracks : undefined}
-        selectedTextTrack={selectedTextTrack}
-      />
+      {casting ? (
+        <View style={styles.castPanel} accessibilityLabel={castingLabel(receiver.deviceName)}>
+          <Text style={styles.castLabel}>{castingLabel(receiver.deviceName)}</Text>
+          <Text style={styles.castTitle} numberOfLines={2}>
+            {stream.title ?? castStream?.title ?? ""}
+          </Text>
+        </View>
+      ) : (
+        <Video
+          ref={ref}
+          source={{ uri: stream.url }}
+          style={styles.fill}
+          resizeMode="contain"
+          paused={paused}
+          onProgress={onProgress}
+          onError={onError}
+          selectedVideoTrack={
+            stream.mode === "hls" && pinned
+              ? { type: SelectedVideoTrackType.RESOLUTION, value: pinned.value }
+              : undefined
+          }
+          onLoad={(d) => {
+            if (stream.mode === "hls") setPinned(pinnedVideoTrack(d.videoTracks));
+            if (d.duration > 0) setSeekable(d.duration);
+            const rel = positionRef.current - base;
+            if (rel > 0) ref.current?.seek(rel);
+          }}
+          onEnd={advance}
+          rate={rate}
+          progressUpdateInterval={1000}
+          enterPictureInPictureOnLeave
+          controls={false}
+          playInBackground={false}
+          textTracks={textTracks.length > 0 ? textTracks : undefined}
+          selectedTextTrack={selectedTextTrack}
+        />
+      )}
       {controlsVisible ? (
         <View style={styles.overlay} pointerEvents="box-none">
           <View style={styles.topBar}>
@@ -471,6 +567,9 @@ export function VideoPlayer({ mediaFileId, resumeSec = 0, onClose, onPlayNext }:
             <IconButton
               icon={paused ? Play : Pause}
               onPress={() => {
+                if (castingRef.current) {
+                  void (pausedRef.current ? receiver.play() : receiver.pause()).catch(() => undefined);
+                }
                 setPaused((p) => !p);
                 scheduleHide();
               }}
@@ -662,6 +761,16 @@ export function VideoPlayer({ mediaFileId, resumeSec = 0, onClose, onPlayNext }:
 const styles = StyleSheet.create({
   fill: { flex: 1, backgroundColor: "#000" },
   center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#000", gap: spacing.md },
+  castPanel: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#000",
+    gap: spacing.sm,
+    paddingHorizontal: spacing.lg,
+  },
+  castLabel: { ...typography.heading, fontFamily: fonts.display, fontSize: 24, color: "#fff", textAlign: "center" },
+  castTitle: { color: "#fff", opacity: 0.7, fontSize: 16, textAlign: "center" },
   overlay: { ...StyleSheet.absoluteFillObject, justifyContent: "space-between" },
   topBar: {
     flexDirection: "row",

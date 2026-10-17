@@ -286,6 +286,9 @@ export interface StreamStart {
   /** Effective track-options token the server signed into the URL
    * (e.g. "a2-q720"); null when default tracks at source quality. */
   track_opts?: string | null;
+  /** Where the HLS encode begins in the source (second 0 of the stream == this
+   * source second). 0 for direct play. */
+  timeline_offset_sec?: number | null;
 }
 
 /** One entry in the cross-device queue (PUT/GET /api/queue). Extra UI fields
