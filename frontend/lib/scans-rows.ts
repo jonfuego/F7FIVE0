@@ -72,6 +72,11 @@ export type ArrAppStatusLike = {
   missing?: number;
   refused?: number;
   updated_at?: string;
+  /** The drive letter ("N:") most of the missing files are on, when the service
+   *  cannot open it, and how many of them. Sent by the backend only when that
+   *  drive holds at least half of the missing files. */
+  missing_drive?: string;
+  missing_drive_count?: number;
 };
 
 /** GET /api/admin/library/arr-sync. */
@@ -129,7 +134,11 @@ export type ScanRow = {
   /** Why the button is off; null when it is on. */
   disabledReason: string | null;
   action: ScanAction;
+  /** A line under the row that says why files are missing and where to fix it. */
+  hint: ScanHint | null;
 };
+
+export type ScanHint = { text: string; linkLabel: string; href: string };
 
 const APP_ORDER: ArrApp[] = ["radarr", "sonarr", "lidarr"];
 const APP_LABEL: Record<ArrApp, string> = { radarr: "Radarr", sonarr: "Sonarr", lidarr: "Lidarr" };
@@ -220,6 +229,7 @@ function folderRow(id: FolderLibraryId, label: string, inputs: ScanInputs): Scan
     when: state === "running" || !lib ? "" : whenText(folder?.finished_at ?? null, now),
     canStart: disabledReason === null, disabledReason,
     action: { kind: "folder", library: id },
+    hint: null,
   };
 }
 
@@ -248,11 +258,34 @@ function count(n: number): string {
   return n.toLocaleString("en-US");
 }
 
-/** ", 2,662 missing, 3 errors, 1 refused": only the counts that are not zero. */
+/** The drive the service cannot see, when it holds at least half of the app's
+ *  missing files. */
+function unseenDrive(entry: ArrAppStatusLike | undefined): { drive: string; count: number } | null {
+  if (!entry?.missing_drive || !entry.missing_drive_count || !entry.missing) return null;
+  if (entry.missing_drive_count * 2 < entry.missing) return null;
+  return { drive: entry.missing_drive, count: entry.missing_drive_count };
+}
+
+/** "2,662 files on N:, a drive letter the F7FIVE0 service can't see." plus a link
+ *  to where a path mapping is added. null when there is nothing to say. */
+function driveHint(entry: ArrAppStatusLike | undefined): ScanHint | null {
+  const d = unseenDrive(entry);
+  if (!d) return null;
+  return {
+    text: `${count(d.count)} files on ${d.drive}, a drive letter the F7FIVE0 service can't see.`,
+    linkLabel: "Add a path mapping",
+    href: "/admin/library-folders",
+  };
+}
+
+/** ", 2,662 missing on N:, 3 errors, 1 refused": only the counts that are not zero. */
 function arrCountsTail(entry: ArrAppStatusLike | undefined): string {
   if (!entry) return "";
   const parts: string[] = [];
-  if (entry.missing) parts.push(`${count(entry.missing)} missing`);
+  if (entry.missing) {
+    const d = unseenDrive(entry);
+    parts.push(`${count(entry.missing)} missing${d ? ` on ${d.drive}` : ""}`);
+  }
   if (entry.errors) parts.push(plural(entry.errors, "error", "errors"));
   if (entry.refused) parts.push(`${count(entry.refused)} refused`);
   return parts.length ? `, ${parts.join(", ")}` : "";
@@ -304,6 +337,7 @@ function arrAppRow(id: FolderLibraryId, label: string, app: ArrApp, inputs: Scan
     when: !running && entry ? whenText(arr?.finished_at ?? null, now) : "",
     canStart: disabledReason === null, disabledReason,
     action: { kind: "arr", apps: [app] },
+    hint: driveHint(entry),
   };
 }
 
@@ -347,6 +381,7 @@ function musicVideosRow(inputs: ScanInputs): ScanRow {
     when: !running && mv ? whenText(mv.finished_at, now) : "",
     canStart: disabledReason === null, disabledReason,
     action: { kind: "music_videos" },
+    hint: null,
   };
 }
 
@@ -388,6 +423,7 @@ function podcastFeedsRow(inputs: ScanInputs): ScanRow {
     when: !running && pr ? whenText(pr.finished_at, now) : "",
     canStart: disabledReason === null, disabledReason,
     action: { kind: "podcast_refresh" },
+    hint: null,
   };
 }
 

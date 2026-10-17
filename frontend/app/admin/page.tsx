@@ -46,6 +46,7 @@ export default function AdminOverviewPage() {
       scanRows: scans ? buildScanRows({ ...scanInputs(scans), now }) : null,
       updates: state.updates.data,
       remote: state.remote.data,
+      arrRoots: state.arrRoots.data?.roots ?? null,
     });
   }, [state, now]);
 

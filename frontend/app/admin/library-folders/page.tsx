@@ -4,6 +4,7 @@
 
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import { LibraryFoldersSection } from "../LibraryFoldersSection";
+import { PathMappingsSection } from "../PathMappingsSection";
 
 export default function LibraryFoldersPage() {
   return (
@@ -12,6 +13,7 @@ export default function LibraryFoldersPage() {
         Choose where each library lives, and sign in to a NAS the server can&apos;t open on its own.
       </AdminPageHeader>
       <LibraryFoldersSection />
+      <PathMappingsSection />
     </>
   );
 }

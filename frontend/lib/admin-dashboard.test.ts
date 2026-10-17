@@ -175,6 +175,23 @@ test("needs attention: remote access set up but not reachable", () => {
   assert.deepEqual(off, []);
 });
 
+test("needs attention: an *arr root folder the service cannot open (B2.5)", () => {
+  const roots = [
+    { app: "radarr", label: "Radarr", path: "N:\\Movies", translated: "N:\\Movies", mapped: false, reachable: false, drive: "N:" },
+    { app: "sonarr", label: "Sonarr", path: "\\\\nas\\TV", translated: "\\\\nas\\TV", mapped: false, reachable: true, drive: null },
+    { app: "lidarr", label: "Lidarr", path: "D:\\Music", translated: "D:\\Music", mapped: false, reachable: false, drive: null },
+  ];
+  const items = buildAttentionItems({ ...quiet, arrRoots: roots });
+  assert.equal(items.length, 2, "the reachable one adds nothing");
+  assert.equal(items[0].kind, "root");
+  assert.equal(items[0].text, "Radarr's folder N:\\Movies is on drive N:, which the F7FIVE0 service can't see");
+  assert.equal(items[0].linkLabel, "Add a path mapping");
+  assert.equal(items[0].href, "/admin/library-folders");
+  assert.equal(items[1].text, "Lidarr's folder D:\\Music can't be opened by the F7FIVE0 service");
+  assert.deepEqual(buildAttentionItems({ ...quiet, arrRoots: null }), []);
+  assert.deepEqual(buildAttentionItems({ ...quiet, arrRoots: roots.filter((r) => r.reachable) }), []);
+});
+
 test("needs attention: nothing wrong, or nothing loaded, gives no items", () => {
   assert.deepEqual(buildAttentionItems(quiet), []);
   assert.deepEqual(
@@ -197,8 +214,9 @@ test("needs attention: items come in a fixed order", () => {
     scanRows: rows,
     updates: { ...(quiet.updates as UpdatesLike), latest_version: "1.0.15", update_available: true },
     remote: { public_url: "https://x", method: "tailscale", reachable: false },
+    arrRoots: [{ app: "radarr", label: "Radarr", path: "N:\\M", translated: "N:\\M", mapped: false, reachable: false, drive: "N:" }],
   });
-  assert.deepEqual(items.map((i) => i.kind), ["reminder", "transcode", "scan", "update", "remote"]);
+  assert.deepEqual(items.map((i) => i.kind), ["reminder", "transcode", "scan", "root", "update", "remote"]);
 });
 
 test("meter: 89 percent is normal, 90 percent warns", () => {

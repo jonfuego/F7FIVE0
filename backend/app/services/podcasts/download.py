@@ -243,7 +243,7 @@ def _roots(db: Session) -> list[Path]:
         if not folder:
             continue
         roots.append(Path(folder))
-        translated = translate_path(folder)
+        translated = translate_path(folder, db)
         if translated and translated != folder:
             roots.append(Path(translated))
     return roots

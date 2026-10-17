@@ -585,7 +585,7 @@ def _probe(mf: MediaFile, stats: FolderScanStats) -> None:
 
 def _mark_missing_under(db: Session, kind: MediaKind, root: str, seen: set[str], stats: FolderScanStats) -> None:
     """Flip rows under `root` that were not seen this pass to `missing`."""
-    prefix = (translate_path(root) or root).rstrip("\\/")
+    prefix = (translate_path(root, db) or root).rstrip("\\/")
     rows = db.scalars(select(MediaFile).where(MediaFile.kind == kind)).all()
     for mf in rows:
         p = mf.path or ""

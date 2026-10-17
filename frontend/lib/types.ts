@@ -761,3 +761,30 @@ export type PodcastProgress = {
 
 export type PodcastOpmlResult = { added: number; already: number; failed: number };
 
+
+// ---- Path mappings (Admin > Library folders) ----------------------------------------
+export type PathMapping = { src: string; dst: string };
+
+export type PathMappings = {
+  mappings: PathMapping[];
+  /** Rules from PATH_REWRITE_RULES in .env: shown, not editable. */
+  env_rules: PathMapping[];
+  /** Set by a save: stored paths rewritten, and rows merged. */
+  rewritten: number;
+  merged: number;
+};
+
+export type ArrRoot = {
+  app: string;
+  label: string;
+  path: string;
+  translated: string;
+  mapped: boolean;
+  reachable: boolean;
+  drive: string | null;
+};
+
+export type ArrRoots = {
+  roots: ArrRoot[];
+  errors: { app: string; label: string; error: string }[];
+};

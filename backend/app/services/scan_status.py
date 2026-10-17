@@ -313,6 +313,9 @@ def arr_set_app(db: Session, name: str, state: str, synced: int = 0, errors: int
     if counts is not None:
         for key in ARR_COUNT_KEYS:
             entry[key] = int(counts.get(key, 0))
+        if counts.get("missing_drive"):
+            entry["missing_drive"] = str(counts["missing_drive"])
+            entry["missing_drive_count"] = int(counts.get("missing_drive_count", 0))
         entry["updated_at"] = _now()
     current["apps"][name] = entry
     if state == "running":

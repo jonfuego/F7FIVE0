@@ -487,3 +487,34 @@ test("Scan all still starts every configured app without the *arr sync row (B1.4
   assert.deepEqual(plan.arrApps, ["radarr", "sonarr", "lidarr"]);
   assert.ok(plan.rowIds.every((id) => (id as string) !== "arr"));
 });
+
+// -- a drive the service cannot see (B2.6) ------------------------------------------
+test("a drive that holds at least half of the missing files is named, with a link (B2.6)", () => {
+  const entry = {
+    state: "done", synced: 2707, errors: 0, done: 2707, total: 2707, ready: 45, missing: 2662, refused: 0,
+    missing_drive: "N:", missing_drive_count: 2662,
+  };
+  const arr: ArrSyncLike = { state: "idle", finished_at: "2026-10-11T11:30:00Z", current_app: null, apps: { radarr: entry }, last_error: null };
+  const movies = row(buildScanRows(inputs({ apps: ALL_APPS, arr })), "movies");
+  assert.match(movies.result, /2,662 missing on N:/);
+  assert.deepEqual(movies.hint, {
+    text: "2,662 files on N:, a drive letter the F7FIVE0 service can't see.",
+    linkLabel: "Add a path mapping",
+    href: "/admin/library-folders",
+  });
+});
+
+test("exactly half counts, under half does not, and an app with no drive has no hint", () => {
+  const make = (missing: number, onDrive: number | undefined): ArrSyncLike => ({
+    state: "idle", finished_at: "2026-10-11T11:30:00Z", current_app: null, last_error: null,
+    apps: { radarr: { state: "done", synced: 10, errors: 0, missing, ...(onDrive ? { missing_drive: "N:", missing_drive_count: onDrive } : {}) } },
+  });
+  const hintOf = (arr: ArrSyncLike) => row(buildScanRows(inputs({ apps: ALL_APPS, arr })), "movies").hint;
+  assert.ok(hintOf(make(10, 5)), "5 of 10 is at least half");
+  assert.equal(hintOf(make(10, 4)), null, "4 of 10 is not");
+  assert.equal(hintOf(make(10, undefined)), null);
+  const plain = row(buildScanRows(inputs({ apps: ALL_APPS, arr: make(10, 4) })), "movies");
+  assert.equal(plain.result, "10 movies synced, 10 missing");
+  // Folder rows never carry a hint.
+  assert.ok(buildScanRows(inputs()).every((r) => r.hint === null));
+});

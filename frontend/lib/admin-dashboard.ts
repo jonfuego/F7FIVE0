@@ -184,7 +184,19 @@ export type RemoteLike = {
   reachable: boolean | null;
 };
 
-export type AttentionKind = "reminder" | "transcode" | "scan" | "update" | "remote";
+/** One *arr root folder, from GET /api/admin/path-mappings/arr-roots. */
+export type ArrRootLike = {
+  app: string;
+  label: string;
+  path: string;
+  translated: string;
+  mapped: boolean;
+  reachable: boolean;
+  /** The drive letter the service cannot see, when that is why it is unreachable. */
+  drive: string | null;
+};
+
+export type AttentionKind = "reminder" | "transcode" | "scan" | "root" | "update" | "remote";
 
 export type AttentionItem = {
   /** Stable key for React. */
@@ -204,6 +216,8 @@ export type AttentionInputs = {
   scanRows: ScanRow[] | null;
   updates: UpdatesLike | null;
   remote: RemoteLike | null;
+  /** The *arr apps' root folders; leave out (or null) when not loaded. */
+  arrRoots?: ArrRootLike[] | null;
 };
 
 /** The "Streaming now" panel is on the overview, so a slow-stream item links to
@@ -218,8 +232,8 @@ function slowTranscodeText(t: TranscodeLike): string {
 }
 
 /** Everything that needs the admin's eye, in this order: reminders, slow
- *  streams, scans that failed, an update ready to install, remote access that
- *  can't be reached. Empty when all is well. A source that did not load (null)
+ *  streams, scans that failed, *arr folders the service can't open, an update
+ *  ready to install, remote access that can't be reached. Empty when all is well. A source that did not load (null)
  *  adds nothing. */
 export function buildAttentionItems(inputs: AttentionInputs): AttentionItem[] {
   const items: AttentionItem[] = [];
@@ -260,6 +274,20 @@ export function buildAttentionItems(inputs: AttentionInputs): AttentionItem[] {
         href: "/admin/scans",
       });
     }
+  }
+
+  for (const root of inputs.arrRoots ?? []) {
+    if (root.reachable) continue;
+    items.push({
+      id: `root:${root.app}:${root.path}`,
+      kind: "root",
+      text: root.drive
+        ? `${root.label}'s folder ${root.path} is on drive ${root.drive}, which the F7FIVE0 service can't see`
+        : `${root.label}'s folder ${root.path} can't be opened by the F7FIVE0 service`,
+      detail: null,
+      linkLabel: "Add a path mapping",
+      href: "/admin/library-folders",
+    });
   }
 
   const upd = inputs.updates;

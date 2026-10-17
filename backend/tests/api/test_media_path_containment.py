@@ -248,7 +248,7 @@ def test_translated_path_inside_roots_is_allowed(db_session, roots, monkeypatch)
     real.write_bytes(b"x")
     monkeypatch.setattr(
         media_paths, "translate_path",
-        lambda p: str(lib) + p[2:] if p and p[:2].lower() == "z:" else p,
+        lambda p, db=None: str(lib) + p[2:] if p and p[:2].lower() == "z:" else p,
     )
     _t, mf = _track_file(db_session, Path("Z:/a.flac"))
     assert media_paths.resolve_contained_media_path(db_session, mf) == real.resolve()
@@ -261,7 +261,7 @@ def test_translated_path_that_lands_outside_is_refused(db_session, roots, monkey
     _lib, out = roots
     monkeypatch.setattr(
         media_paths, "translate_path",
-        lambda p: str(out) + p[2:] if p and p[:2].lower() == "z:" else p,
+        lambda p, db=None: str(out) + p[2:] if p and p[:2].lower() == "z:" else p,
     )
     with pytest.raises(HTTPException) as ei:
         media_paths.resolve_contained_media_path(db_session, "Z:/a.flac")
