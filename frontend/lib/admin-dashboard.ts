@@ -70,6 +70,15 @@ export function adminRedirectForHash(hash: string | null | undefined): string | 
   return target === ADMIN_HOME ? null : target;
 }
 
+/** An in-app link that may still carry an old anchor ("/admin#metadata", which
+ *  the backend's reminders send) comes back as the subpage it lives on now.
+ *  Anything else is returned unchanged. */
+export function resolveAdminHref(href: string): string {
+  const hit = /^\/admin#(.+)$/.exec(href);
+  if (!hit) return href;
+  return adminRedirectForHash(hit[1]) ?? href;
+}
+
 /** Which area a pathname belongs to ("/admin/users" and "/admin/users/x" are
  *  both Users), or null on the overview and anywhere else. */
 export function currentAreaId(pathname: string | null | undefined): AdminAreaId | null {
@@ -222,7 +231,7 @@ export function buildAttentionItems(inputs: AttentionInputs): AttentionItem[] {
       text: r.title,
       detail: r.body || null,
       linkLabel: r.action_label,
-      href: r.action_href,
+      href: resolveAdminHref(r.action_href),
     });
   }
 

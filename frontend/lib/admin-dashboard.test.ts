@@ -5,6 +5,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   ADMIN_AREAS,
   ADMIN_HASH_MAP,
@@ -17,6 +18,7 @@ import {
   meterState,
   relativeTime,
   remoteTile,
+  resolveAdminHref,
   settingsTiles,
   storageMeters,
   streamLines,
@@ -114,7 +116,16 @@ test("needs attention: reminders become items with their own link", () => {
   assert.equal(items[0].text, "Add a TMDB key");
   assert.equal(items[0].detail, "Posters and details need one.");
   assert.equal(items[0].linkLabel, "Add key");
-  assert.equal(items[0].href, "/admin#metadata");
+  // The backend still says /admin#metadata; the item links straight to the subpage.
+  assert.equal(items[0].href, "/admin/metadata");
+});
+
+test("resolveAdminHref: old anchors become subpages, everything else is left alone", () => {
+  assert.equal(resolveAdminHref("/admin#metadata"), "/admin/metadata");
+  assert.equal(resolveAdminHref("/admin#library-folders"), "/admin/library-folders");
+  assert.equal(resolveAdminHref("/admin#health"), "/admin#health");
+  assert.equal(resolveAdminHref("/admin/updates"), "/admin/updates");
+  assert.equal(resolveAdminHref("/account"), "/account");
 });
 
 test("needs attention: a failed scan", () => {
@@ -468,4 +479,11 @@ test("relative time", () => {
   assert.equal(relativeTime("2026-10-15T12:00:00Z", NOW), "2 days ago");
   assert.equal(relativeTime(null, NOW), "never");
   assert.equal(relativeTime("garbage", NOW), "a while ago");
+});
+
+test("settings grid source lists every area's href (no drift from ADMIN_AREAS)", () => {
+  const src = readFileSync(new URL("../components/admin/SettingsGrid.tsx", import.meta.url), "utf8");
+  for (const area of ADMIN_AREAS) {
+    assert.ok(src.includes(`href: "${area.href}"`), area.href);
+  }
 });
