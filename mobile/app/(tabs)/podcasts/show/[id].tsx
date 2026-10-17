@@ -1,5 +1,4 @@
-import { useLocalSearchParams, useRouter } from "expo-router";
-import { ChevronLeft } from "lucide-react-native";
+import { useLocalSearchParams } from "expo-router";
 import React, { useMemo, useState } from "react";
 import { Alert, FlatList, Pressable, StyleSheet, Switch, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -20,7 +19,7 @@ import { useApi } from "@/state/auth";
 import { colors, MIN_TOUCH, radius, spacing, typography } from "@/state/theme";
 import { Artwork } from "@/ui/Artwork";
 import { ChipBar } from "@/ui/ChipBar";
-import { IconButton } from "@/ui/IconButton";
+import { BackButton } from "@/ui/BackButton";
 import { PodcastEpisodeRow as EpisodeRowView } from "@/ui/PodcastEpisodeRow";
 import { filterEpisodes, type EpisodeFilter } from "@/ui/podcastState";
 import { QueryState } from "@/ui/QueryState";
@@ -43,12 +42,11 @@ function messageFor(e: unknown): string {
  * saved to the server, and can be marked played. */
 export default function PodcastShowScreen(): React.ReactElement {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const router = useRouter();
   const query = usePodcast(id);
   return (
     <SafeAreaView style={styles.safe} edges={["top", "left", "right"]}>
       <View style={styles.top}>
-        <IconButton icon={ChevronLeft} onPress={() => router.back()} accessibilityLabel="Back" />
+        <BackButton fallback="/podcasts" />
       </View>
       <QueryState
         isLoading={query.isLoading}

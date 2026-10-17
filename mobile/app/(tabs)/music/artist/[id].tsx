@@ -9,6 +9,7 @@ import { usePlayer } from "@/player/PlayerProvider";
 import { useApi } from "@/state/auth";
 import { colors, fonts, MIN_TOUCH, radius, spacing, typography } from "@/state/theme";
 import { Artwork } from "@/ui/Artwork";
+import { BackButton } from "@/ui/BackButton";
 import { Icon } from "@/ui/Icon";
 import { QueryState } from "@/ui/QueryState";
 import { Screen } from "@/ui/Screen";
@@ -36,7 +37,7 @@ export default function ArtistDetailScreen(): React.ReactElement {
   };
 
   return (
-    <Screen title="Artist">
+    <Screen title="Artist" right={<BackButton fallback="/music" />}>
       <QueryState
         isLoading={artist.isLoading}
         isError={artist.isError}
