@@ -808,3 +808,28 @@ Installer changes: parse-check with
 under Windows PowerShell 5.1 (`powershell.exe`, not `pwsh`), and do a real run
 on a clean Windows VM before tagging a release. Self-update (Admin > Updates)
 is only proven by a real update on a VM: the tests use a stub Setup.
+
+## Session log
+
+- 2026-10-17 (Code, admin dashboard run): `/admin` is now an overview dashboard
+  and every settings area has its own page (see the Admin block:
+  `app/admin/layout.tsx`, `lib/admin-dashboard.ts`, and the subpage + tile + hash
+  rule). Merged `--no-ff` to `main`, in order: `feat/admin-dashboard`;
+  `fix/arr-sync-progress` (the *arr sync saves 25 items at a time and reports
+  done of total, the separate "*arr sync" Scans row is gone);
+  `fix/path-mappings` (Admin > Library folders > Path mappings, no restart, stored
+  paths rewritten in place so watch history stays, unreachable *arr folders
+  flagged, the Scans row names a drive the service cannot see);
+  `fix/setup-path-mappings` (Setup writes `PATH_REWRITE_RULES` for *arr drive
+  letters); `fix/continue-rail-label` (Home rail is "Continue"). A phone-header
+  CSS fix rode along with the dashboard because the 390 px screenshot was 499 px
+  wide before it. Checks on main `467284c`: pytest 1166 passed, web build and
+  lint ok (0 errors), web tests 354, mobile typecheck and jest 426, installer
+  Pester 74, download-verify and update-verify ok. Logs, screenshots and the
+  four repro notes are in the vault `projects\f7five0\smoke\admin-dashboard\`.
+  Nothing hand tested on a real install: Jon's checks are Sync now with counts
+  during the run, adding the `N:` mapping in Admin with the `.env` line removed,
+  Setup on a VM with a mapped drive and a Radarr key in `.env`, and Home on web
+  and phone. Follow-ups: the TV rail and the PWA shortcut still say "Continue
+  Watching"; the "Birmingham (Board Mix)" card has no art; the dock-over-page
+  screenshot is unconfirmed.
