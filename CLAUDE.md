@@ -86,6 +86,27 @@ INSTALL.md for the operator view.
   Radarr, Sonarr or Lidarr before the first probe, never probes or stores a path
   outside the roots, and counts it in `SyncStats.files_refused`.
 - HLS playlists are rewritten so every URI carries the signed query.
+- Cast stream identity. A Cast receiver gets its own stream, never the sender's.
+  `POST /api/stream/start` with `purpose: "cast"` adds a `c` part to the
+  track-options token (`services/track_opts.py`, grammar `a<N>-s<N>-q<H>-c`), only
+  when the start is a transcoded video (direct play and audio need no separate
+  encode). The token is already in the HMAC payload, the transcode registry key,
+  the cache dir (`{variant}_{o}`) and `_signed_query`, so a cast URL and a play URL
+  for the same file sign, key and cache apart, and a URL without `c` signs exactly
+  as before. `TrackOpts.empty` ignores the marker (it never changes ffmpeg's argv).
+  `transcoder._opts_without_quality` keeps it, so the sibling kill in
+  `get_or_start` never reaches across purposes (a quality switch inside one
+  purpose still replaces its old encode), and `stream._variants_for` gives a cast
+  stream ONE rung (the highest within the `q` ceiling) even with NVENC on: the
+  receiver's player hops rungs on its own, and each hop used to kill the encode
+  something else was still reading. Senders must mint a separate stream for the
+  receiver and stop their own: the phone unmounts its `Video` while casting
+  (`VideoPlayer.tsx`, pure rules in `mobile/src/cast/castHandoff.ts`; its own
+  HLS playback is pinned to one rung by `video/rungPin.ts`), the web player
+  stops hls.js loading (`components/Player.tsx`, `lib/cast-handoff.ts`). Both
+  resume on disconnect at the receiver's last position mapped onto their own
+  stream clock (an HLS stream's clock starts at its 10 s bucket). Never hand a
+  receiver the sender's own stream URL.
 - Tokens never reach the browser. Browser calls go through the Next BFF
   routes (`/api/session|library|stream|admin|art|requests/*`).
 - Single origin: `frontend/proxy.ts` (formerly middleware) proxies `/stream/*` to the stream
