@@ -1,7 +1,7 @@
-import { useLocalSearchParams, useRouter } from "expo-router";
-import { ArrowLeft, Ellipsis, Play, Shuffle } from "lucide-react-native";
+import { useLocalSearchParams } from "expo-router";
+import { Ellipsis, Play, Shuffle } from "lucide-react-native";
 import React, { useEffect, useRef, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View, RefreshControl } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View, RefreshControl } from "react-native";
 
 import { fetchAutoPlaylistById, useAlbum } from "@/api/queries";
 import type { SongRow } from "@/api/types";
@@ -14,8 +14,8 @@ import { useApi } from "@/state/auth";
 import { colors, fonts, MIN_TOUCH, spacing, typography } from "@/state/theme";
 import { AlbumTileMenu } from "@/ui/AlbumTileMenu";
 import { Artwork } from "@/ui/Artwork";
+import { BackButton } from "@/ui/BackButton";
 import { Icon } from "@/ui/Icon";
-import { IconButton } from "@/ui/IconButton";
 import { QueryState } from "@/ui/QueryState";
 import { Screen } from "@/ui/Screen";
 import { TrackRow } from "@/ui/TrackRow";
@@ -32,9 +32,8 @@ function shuffled<T>(arr: T[]): T[] {
 export default function AlbumDetailScreen(): React.ReactElement {
   const { id } = useLocalSearchParams<{ id: string }>();
   const album = useAlbum(id ?? "");
-  const router = useRouter();
   const api = useApi();
-  const { playSongs, playNext, addToQueue, nowPlaying } = usePlayer();
+  const { playSongs, playNext, addToQueue, nowPlaying, starting } = usePlayer();
   const { state: downloads, enqueueMany } = useDownloads();
   const [menuOpen, setMenuOpen] = useState(false);
   // Confirmation after Download is tapped; clears itself after a few seconds.
@@ -52,14 +51,10 @@ export default function AlbumDetailScreen(): React.ReactElement {
     noticeTimer.current = setTimeout(() => setNotice(null), 5000);
   };
 
-  // Same Back as the season screen. The hardware/gesture back is expo-router's
-  // own; this covers a screen opened with no history (deep link).
-  const back = () => (router.canGoBack() ? router.back() : router.replace("/music"));
-
   return (
     <Screen
       title="Album"
-      right={<IconButton icon={ArrowLeft} accessibilityLabel="Back" onPress={back} />}
+      right={<BackButton fallback="/music" />}
     >
       <QueryState
         isLoading={album.isLoading}
@@ -112,19 +107,31 @@ export default function AlbumDetailScreen(): React.ReactElement {
                   <Pressable
                     accessibilityRole="button"
                     accessibilityLabel="Play album"
+                    accessibilityState={{ disabled: starting, busy: starting }}
+                    disabled={starting}
                     onPress={() => playSongs(songs, 0)}
-                    style={({ pressed }) => [styles.shuffleBtn, pressed && styles.pressed]}
+                    style={({ pressed }) => [styles.shuffleBtn, (pressed || starting) && styles.pressed]}
                   >
-                    <Icon icon={Play} size={18} color={colors.background} fill />
+                    {starting ? (
+                      <ActivityIndicator size="small" color={colors.background} />
+                    ) : (
+                      <Icon icon={Play} size={18} color={colors.background} fill />
+                    )}
                     <Text style={styles.shuffleText}>Play</Text>
                   </Pressable>
                   <Pressable
                     accessibilityRole="button"
                     accessibilityLabel="Shuffle album"
+                    accessibilityState={{ disabled: starting, busy: starting }}
+                    disabled={starting}
                     onPress={() => playSongs(shuffled(songs), 0)}
-                    style={({ pressed }) => [styles.shuffleBtn, pressed && styles.pressed]}
+                    style={({ pressed }) => [styles.shuffleBtn, (pressed || starting) && styles.pressed]}
                   >
-                    <Icon icon={Shuffle} size={18} color={colors.background} />
+                    {starting ? (
+                      <ActivityIndicator size="small" color={colors.background} />
+                    ) : (
+                      <Icon icon={Shuffle} size={18} color={colors.background} />
+                    )}
                     <Text style={styles.shuffleText}>Shuffle</Text>
                   </Pressable>
                   <Pressable

@@ -12,6 +12,7 @@ import { Artwork } from "@/ui/Artwork";
 import { Backdrop } from "@/ui/Backdrop";
 import { DownloadButton } from "@/ui/DownloadButton";
 import { QueryState } from "@/ui/QueryState";
+import { BackButton } from "@/ui/BackButton";
 import { Screen } from "@/ui/Screen";
 
 function formatTime(sec: number): string {
@@ -40,7 +41,7 @@ export default function MovieDetailScreen(): React.ReactElement {
   };
 
   return (
-    <Screen title="Movie" padded={false}>
+    <Screen title="Movie" padded={false} right={<BackButton fallback="/movies" />}>
       <QueryState
         isLoading={movie.isLoading}
         isError={movie.isError}

@@ -4,6 +4,7 @@ import React from "react";
 import { useMusicVideoArtist } from "@/api/queries";
 import { QueryState } from "@/ui/QueryState";
 import { RefreshableGrid } from "@/ui/RefreshableGrid";
+import { BackButton } from "@/ui/BackButton";
 import { Screen } from "@/ui/Screen";
 import { Tile } from "@/ui/Tile";
 
@@ -14,7 +15,7 @@ export default function MusicVideoArtistScreen(): React.ReactElement {
   const artist = useMusicVideoArtist(id ?? "");
 
   return (
-    <Screen title={artist.data?.name ?? "Music Videos"}>
+    <Screen title={artist.data?.name ?? "Music Videos"} right={<BackButton fallback="/movies" />}>
       <QueryState
         isLoading={artist.isLoading}
         isError={artist.isError}

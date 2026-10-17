@@ -16,6 +16,7 @@ import { DownloadButton } from "@/ui/DownloadButton";
 import { EpisodeFileMenu } from "@/ui/EpisodeFileMenu";
 import { Icon } from "@/ui/Icon";
 import { QueryState } from "@/ui/QueryState";
+import { BackButton } from "@/ui/BackButton";
 import { Screen } from "@/ui/Screen";
 import { groupSeasons, seasonRoute, seasonTitle } from "@/ui/seasons";
 
@@ -78,7 +79,7 @@ export default function ShowDetailScreen(): React.ReactElement {
   const episodes = seasons.find(([n]) => n === current)?.[1] ?? [];
 
   return (
-    <Screen title="Show">
+    <Screen title="Show" right={<BackButton fallback="/movies" />}>
       <QueryState
         isLoading={series.isLoading}
         isError={series.isError}

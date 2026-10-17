@@ -6,6 +6,7 @@ import { useMusicVideoRelease } from "@/api/queries";
 import { colors, spacing, typography } from "@/state/theme";
 import { Artwork } from "@/ui/Artwork";
 import { QueryState } from "@/ui/QueryState";
+import { BackButton } from "@/ui/BackButton";
 import { Screen } from "@/ui/Screen";
 import { TrackRow } from "@/ui/TrackRow";
 
@@ -16,7 +17,7 @@ export default function MusicVideoReleaseScreen(): React.ReactElement {
   const release = useMusicVideoRelease(id ?? "");
 
   return (
-    <Screen title="Music Videos">
+    <Screen title="Music Videos" right={<BackButton fallback="/movies" />}>
       <QueryState
         isLoading={release.isLoading}
         isError={release.isError}

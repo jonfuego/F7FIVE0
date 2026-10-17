@@ -1,12 +1,11 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { ArrowLeft } from "lucide-react-native";
 import React, { useMemo } from "react";
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { useSeries } from "@/api/queries";
 import { colors, MIN_TOUCH, spacing, typography } from "@/state/theme";
 import { EpisodeFileMenu } from "@/ui/EpisodeFileMenu";
-import { IconButton } from "@/ui/IconButton";
+import { BackButton } from "@/ui/BackButton";
 import { QueryState } from "@/ui/QueryState";
 import { Screen } from "@/ui/Screen";
 import { episodesForSeason, parseSeason, seasonTitle } from "@/ui/seasons";
@@ -23,12 +22,11 @@ export default function SeasonScreen(): React.ReactElement {
     () => (series.data && season !== null ? episodesForSeason(series.data.episodes, season) : []),
     [series.data, season],
   );
-  const back = () => (router.canGoBack() ? router.back() : router.replace(`/movies/show/${id}`));
 
   return (
     <Screen
       title={season !== null ? seasonTitle(season) : "Season"}
-      right={<IconButton icon={ArrowLeft} accessibilityLabel="Back" onPress={back} />}
+      right={<BackButton fallback={`/movies/show/${id}`} />}
     >
       <QueryState
         isLoading={series.isLoading}
