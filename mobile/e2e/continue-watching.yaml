@@ -7,8 +7,8 @@ name: continue-watching
     timeout: 20000
 - tapOn: "Home"
 - extendedWaitUntil:
-    visible: "Continue Watching"
+    visible: "Continue"
     timeout: 20000
-- assertVisible: "Continue Watching"
+- assertVisible: "Continue"
 - assertVisible: "Recent Arrivals"
 - takeScreenshot: 10-continue-watching

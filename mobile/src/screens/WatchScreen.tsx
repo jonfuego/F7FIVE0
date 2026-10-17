@@ -11,7 +11,7 @@ import { QueryState } from "@/ui/QueryState";
 
 /** Full-screen video player route. `id` is the media file id to play. `resume`
  * is an explicit start position in seconds (`resume=0` = from the beginning);
- * without it the saved progress is used, like Plex (Continue Watching, On Deck,
+ * without it the saved progress is used, like Plex (the Continue rail, On Deck,
  * episode rows and Up Next all resume where you left off). Up Next replaces
  * this route with the next episode's media file (keyed so the player remounts). */
 export default function WatchScreen(): React.ReactElement {

@@ -1,5 +1,5 @@
 // Home — the marquee. Hero featured film + three rails:
-// Continue Watching, Recent Arrivals, Mixes preview. Hero pulls
+// Continue, Recent Arrivals, Mixes preview. Hero pulls
 // whatever /api/library/recent surfaces first per the design spec.
 
 "use client";
@@ -181,10 +181,11 @@ export default function Home() {
         <HeroEmpty message={heroEmptyMessage(isAdmin)} />
       )}
 
-      {/* Continue Watching / Listening disappear entirely when empty; an
-          empty rail at the top of the page is just noise. */}
+      {/* Continue / Continue Listening disappear entirely when empty; an
+          empty rail at the top of the page is just noise. The first one holds
+          movies, shows and music videos, so it has no single See all page. */}
       {continueVideo && continueVideo.length > 0 ? (
-        <Row title="Continue Watching" seeAllHref="/movies" variant="continue">
+        <Row title="Continue" variant="continue">
           {continueVideo.map((item) => (
             <ContinueWatchingCard key={item.media_file_id} item={item} />
           ))}
@@ -300,7 +301,7 @@ function progressBarFromMap(
 ): number | undefined {
   // Recent endpoint doesn't surface media_file_ids in this response, so
   // a per-tile progress bar would require a separate lookup. Skipped on
-  // the recent rail; the dedicated Continue Watching rail above already
+  // the recent rail; the dedicated Continue rail above already
   // covers in-progress titles.
   void _progress;
   return undefined;
