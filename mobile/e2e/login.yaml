@@ -21,9 +21,9 @@ name: login
 - extendedWaitUntil:
     visible: "Home"
     timeout: 30000
-# Home's first rail. (On Deck / Continue Watching can push the lower rails
+# Home's first rail. (On Deck / Continue can push the lower rails
 # such as Albums below the fold, so don't wait on those.)
 - extendedWaitUntil:
-    visible: "Continue Watching"
+    visible: "Continue"
     timeout: 30000
 - takeScreenshot: 02-home

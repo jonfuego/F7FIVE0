@@ -83,7 +83,7 @@ export default function HomeScreen(): React.ReactElement {
           </>
         ) : null}
 
-        <Text style={styles.rail}>Continue Watching</Text>
+        <Text style={styles.rail}>Continue</Text>
         <QueryState
           isLoading={cont.isLoading}
           isError={cont.isError}
