@@ -258,23 +258,23 @@ export function UpdatesSection() {
   return (
     <div>
       <div className="flex items-baseline justify-between gap-3">
-        <p className="text-xs text-neutral-500">
+        <p className="text-xs text-ink-3">
           F7FIVE0 checks GitHub once a day. Updating the server also updates the phone app it hands out.
         </p>
         <button
           type="button"
           onClick={() => void checkNow()}
           disabled={checking || active}
-          className="shrink-0 rounded-md border border-neutral-700 px-3 py-1.5 text-xs font-medium text-neutral-100 hover:border-neutral-400 disabled:opacity-50"
+          className="shrink-0 rounded-md border border-line-strong px-3 py-1.5 text-xs font-medium text-ink hover:border-ink-2 disabled:opacity-50"
         >
           {checking ? "Checking…" : "Check now"}
         </button>
       </div>
 
       {loadError ? (
-        <div className="mt-4 rounded-md border border-red-900/60 bg-red-950/40 px-4 py-3 text-sm text-red-200">{loadError}</div>
+        <div className="mt-4 rounded-md border border-line bg-hive-tint px-4 py-3 text-sm text-hive-text">{loadError}</div>
       ) : status === null ? (
-        <div className="mt-4 h-24 animate-pulse rounded-md bg-neutral-900" />
+        <div className="mt-4 h-24 animate-pulse rounded-md bg-surface-2" />
       ) : (
         <div className="mt-4 space-y-4">
           <dl className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
@@ -298,17 +298,17 @@ export function UpdatesSection() {
               The last check didn&apos;t work: {status.check_error}
             </div>
           ) : null}
-          {upToDate?.notice ? <p className="text-sm text-neutral-300">{upToDate.notice}</p> : null}
+          {upToDate?.notice ? <p className="text-sm text-ink-2">{upToDate.notice}</p> : null}
 
           {status.update_available && status.notes ? (
             <div>
-              <h3 className="text-sm font-medium text-neutral-200">What&apos;s new in {status.latest_version}</h3>
+              <h3 className="text-sm font-medium text-ink">What&apos;s new in {status.latest_version}</h3>
               <ReleaseNotes notes={status.notes} />
             </div>
           ) : null}
 
           {actionError ? (
-            <div className="rounded-md border border-red-900/60 bg-red-950/40 px-4 py-3 text-sm text-red-200" role="alert">
+            <div className="rounded-md border border-line bg-hive-tint px-4 py-3 text-sm text-hive-text" role="alert">
               {actionError}
             </div>
           ) : null}
@@ -321,15 +321,15 @@ export function UpdatesSection() {
             <div className="space-y-3">
               {status.update_available ? (
                 <div className="space-y-2">
-                  {blocked ? <p className="text-sm text-neutral-400">{blocked}</p> : null}
+                  {blocked ? <p className="text-sm text-ink-2">{blocked}</p> : null}
                   {!status.rollback_ready ? (
-                    <p className="text-sm text-neutral-400">
+                    <p className="text-sm text-ink-2">
                       This server has no saved copy of the Setup that is installed now, so it couldn&apos;t go back
                       if an update failed. Run the new Setup by hand once; it keeps a copy for next time.
                     </p>
                   ) : null}
                   {confirming ? (
-                    <div className="rounded-md border border-neutral-700 bg-neutral-950 p-4 text-sm text-neutral-300">
+                    <div className="rounded-md border border-line-strong bg-surface-1 p-4 text-sm text-ink-2">
                       <p>
                         F7FIVE0 will stop for a few minutes, back up the database, install version{" "}
                         {status.latest_version}, and check that it comes up. If it doesn&apos;t, it goes back to{" "}
@@ -340,14 +340,14 @@ export function UpdatesSection() {
                           type="button"
                           onClick={() => void startUpdate()}
                           disabled={busy}
-                          className="rounded-md bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-950 hover:bg-white disabled:opacity-50"
+                          className="rounded-md bg-ink px-4 py-2 text-sm font-medium text-bg hover:bg-ink-2 disabled:opacity-50"
                         >
                           {busy ? "Starting…" : "Update now"}
                         </button>
                         <button
                           type="button"
                           onClick={() => setConfirming(false)}
-                          className="rounded-md border border-neutral-700 px-4 py-2 text-sm text-neutral-200 hover:border-neutral-400"
+                          className="rounded-md border border-line-strong px-4 py-2 text-sm text-ink hover:border-ink-2"
                         >
                           Cancel
                         </button>
@@ -358,7 +358,7 @@ export function UpdatesSection() {
                       type="button"
                       onClick={() => setConfirming(true)}
                       disabled={!canUpdate}
-                      className="rounded-md bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-950 hover:bg-white disabled:opacity-50"
+                      className="rounded-md bg-ink px-4 py-2 text-sm font-medium text-bg hover:bg-ink-2 disabled:opacity-50"
                     >
                       Update to v{status.latest_version}
                     </button>
@@ -368,8 +368,8 @@ export function UpdatesSection() {
 
               <div>
                 {uploadOpen ? (
-                  <form onSubmit={(e) => void upload(e)} className="space-y-3 rounded-md border border-neutral-800 p-4">
-                    <p className="text-sm text-neutral-300">
+                  <form onSubmit={(e) => void upload(e)} className="space-y-3 rounded-md border border-line p-4">
+                    <p className="text-sm text-ink-2">
                       Upload a F7FIVE0 Setup (a Setup .exe from a GitHub release). It is installed only if it is
                       exactly a published release
                       {status.signer_configured ? " or carries the F7FIVE0 signature" : ""}
@@ -380,30 +380,30 @@ export function UpdatesSection() {
                         : ""}
                     </p>
                     <label className="block text-sm">
-                      <span className="text-neutral-300">Setup file</span>
+                      <span className="text-ink-2">Setup file</span>
                       <input
                         type="file"
                         accept=".exe"
                         onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-                        className="mt-1 block w-full text-sm text-neutral-300"
+                        className="mt-1 block w-full text-sm text-ink-2"
                       />
-                      <span className="mt-1 block text-xs text-neutral-500">Up to {status.max_setup_mb} MB.</span>
+                      <span className="mt-1 block text-xs text-ink-3">Up to {status.max_setup_mb} MB.</span>
                     </label>
                     <label className="block text-sm">
-                      <span className="text-neutral-300">Your admin password</span>
+                      <span className="text-ink-2">Your admin password</span>
                       <input
                         type="password"
                         autoComplete="current-password"
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
-                        className="mt-1 w-full rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 font-sans text-sm text-neutral-100"
+                        className="mt-1 w-full rounded-md border border-line-strong bg-surface-1 px-3 py-2 font-sans text-sm text-ink"
                       />
-                      <span className="mt-1 block text-xs text-neutral-500">
+                      <span className="mt-1 block text-xs text-ink-3">
                         Asked again every time, because an update changes the whole server.
                       </span>
                     </label>
                     {uploadPct !== null ? (
-                      <p className="text-xs text-neutral-400">
+                      <p className="text-xs text-ink-2">
                         {uploadPct < 100 ? `Sending the file: ${uploadPct}%` : "Checking the file against the published release…"}
                       </p>
                     ) : null}
@@ -411,7 +411,7 @@ export function UpdatesSection() {
                       <button
                         type="submit"
                         disabled={busy}
-                        className="rounded-md bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-950 hover:bg-white disabled:opacity-50"
+                        className="rounded-md bg-ink px-4 py-2 text-sm font-medium text-bg hover:bg-ink-2 disabled:opacity-50"
                       >
                         {busy ? "Working…" : "Upload and update"}
                       </button>
@@ -423,7 +423,7 @@ export function UpdatesSection() {
                           setPassword("");
                           setActionError(null);
                         }}
-                        className="rounded-md border border-neutral-700 px-4 py-2 text-sm text-neutral-200 hover:border-neutral-400 disabled:opacity-50"
+                        className="rounded-md border border-line-strong px-4 py-2 text-sm text-ink hover:border-ink-2 disabled:opacity-50"
                       >
                         Cancel
                       </button>
@@ -433,7 +433,7 @@ export function UpdatesSection() {
                   <button
                     type="button"
                     onClick={() => setUploadOpen(true)}
-                    className="text-sm text-neutral-400 underline-offset-2 hover:text-neutral-100 hover:underline"
+                    className="text-sm text-ink-2 underline-offset-2 hover:text-ink hover:underline"
                   >
                     Upload a Setup
                   </button>
@@ -450,10 +450,10 @@ export function UpdatesSection() {
 function Fact({ label, value, hint, testId }: { label: string; value: string; hint?: string; testId: string }) {
   return (
     <div>
-      <dt className="text-xs uppercase tracking-wide text-neutral-500">{label}</dt>
-      <dd className="mt-0.5 text-neutral-100" data-testid={testId}>
+      <dt className="text-xs uppercase tracking-wide text-ink-3">{label}</dt>
+      <dd className="mt-0.5 text-ink" data-testid={testId}>
         {value}
-        {hint ? <span className="ml-2 text-xs text-neutral-500">{hint}</span> : null}
+        {hint ? <span className="ml-2 text-xs text-ink-3">{hint}</span> : null}
       </dd>
     </div>
   );
@@ -485,10 +485,10 @@ function RunPanel({
   const summary = runSummary(run);
   const tone =
     run.phase === "done"
-      ? "border-emerald-900/60 bg-emerald-950/30"
+      ? "border-line bg-surface-2"
       : run.phase === "failed" || run.phase === "rolled_back"
-        ? "border-red-900/60 bg-red-950/40"
-        : "border-neutral-700 bg-neutral-950";
+        ? "border-line bg-hive-tint"
+        : "border-line-strong bg-surface-1";
   const problem = run.phase === "failed" || run.phase === "rolled_back" ? run.error ?? updateErrorText(run.error_code) : null;
   const pct =
     run.phase === "downloading" && run.total_bytes && run.downloaded_bytes !== null
@@ -498,21 +498,21 @@ function RunPanel({
   return (
     <div className={`rounded-md border p-4 text-sm ${tone}`} aria-live="polite" data-testid="update-run">
       <div className="flex items-baseline justify-between gap-3">
-        <p className="font-medium text-neutral-100">{phaseLabel(shownPhase)}</p>
+        <p className="font-medium text-ink">{phaseLabel(shownPhase)}</p>
         {run.to_version ? (
-          <p className="text-xs text-neutral-500">
+          <p className="text-xs text-ink-3">
             {run.from_version ?? "?"} → {run.to_version}
           </p>
         ) : null}
       </div>
 
       {current >= 0 ? (
-        <ol className="mt-3 grid grid-cols-5 gap-1 text-[11px] text-neutral-500">
+        <ol className="mt-3 grid grid-cols-5 gap-1 text-[11px] text-ink-3">
           {UPDATE_STEPS.map((s, i) => (
             <li
               key={s}
               className={`rounded px-1.5 py-1 text-center ${
-                i < current ? "bg-neutral-800 text-neutral-300" : i === current ? "bg-neutral-100 font-medium text-neutral-950" : "bg-neutral-900"
+                i < current ? "bg-surface-3 text-ink-2" : i === current ? "bg-ink font-medium text-bg" : "bg-surface-2"
               }`}
             >
               {phaseChipLabel(s)}
@@ -521,13 +521,13 @@ function RunPanel({
         </ol>
       ) : null}
 
-      {run.active && run.step && !offline ? <p className="mt-3 text-neutral-300">{run.step}</p> : null}
+      {run.active && run.step && !offline ? <p className="mt-3 text-ink-2">{run.step}</p> : null}
       {pct !== null ? (
         <div className="mt-2">
-          <div className="h-1.5 w-full overflow-hidden rounded bg-neutral-800">
-            <div className="h-full bg-neutral-200" style={{ width: `${pct}%` }} />
+          <div className="h-1.5 w-full overflow-hidden rounded bg-surface-3">
+            <div className="h-full bg-ink-2" style={{ width: `${pct}%` }} />
           </div>
-          <p className="mt-1 text-xs text-neutral-500">
+          <p className="mt-1 text-xs text-ink-3">
             {formatBytes(run.downloaded_bytes)} of {formatBytes(run.total_bytes)}
           </p>
         </div>
@@ -535,27 +535,27 @@ function RunPanel({
 
       {offline ? (
         <div className="mt-3 space-y-2">
-          <p className="text-neutral-300" data-testid="update-offline">
+          <p className="text-ink-2" data-testid="update-offline">
             {offline.message}
           </p>
-          <div className="h-1 w-full overflow-hidden rounded bg-neutral-800" aria-hidden="true">
-            <div className="h-full w-1/3 animate-pulse bg-neutral-400" />
+          <div className="h-1 w-full overflow-hidden rounded bg-surface-3" aria-hidden="true">
+            <div className="h-full w-1/3 animate-pulse bg-ink-2" />
           </div>
-          {offline.slowHint ? <p className="text-xs text-neutral-500">{offline.slowHint}</p> : null}
+          {offline.slowHint ? <p className="text-xs text-ink-3">{offline.slowHint}</p> : null}
         </div>
       ) : lostContact && run.active ? (
-        <p className="mt-3 text-neutral-400">
+        <p className="mt-3 text-ink-2">
           F7FIVE0 is restarting, so this page can&apos;t reach it for a moment. It keeps trying by itself.
         </p>
       ) : null}
 
-      {summary ? <p className="mt-3 text-neutral-200">{summary}</p> : null}
-      {problem ? <p className="mt-2 text-red-200">{problem}</p> : null}
+      {summary ? <p className="mt-3 text-ink">{summary}</p> : null}
+      {problem ? <p className="mt-2 text-hive-text">{problem}</p> : null}
 
       {run.log.length > 0 ? (
         <details className="mt-3">
-          <summary className="cursor-pointer text-xs text-neutral-500 hover:text-neutral-300">Details</summary>
-          <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded bg-neutral-950 p-2 font-mono text-[11px] text-neutral-400">
+          <summary className="cursor-pointer text-xs text-ink-3 hover:text-ink">Details</summary>
+          <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded bg-surface-1 p-2 font-mono text-[11px] text-ink-2">
             {run.log.join("\n")}
           </pre>
         </details>
@@ -567,7 +567,7 @@ function RunPanel({
             <button
               type="button"
               onClick={() => window.location.reload()}
-              className="rounded-md bg-neutral-100 px-3 py-1.5 text-xs font-medium text-neutral-950 hover:bg-white"
+              className="rounded-md bg-ink px-3 py-1.5 text-xs font-medium text-bg hover:bg-ink-2"
             >
               Reload this page
             </button>
@@ -575,7 +575,7 @@ function RunPanel({
           <button
             type="button"
             onClick={onDismiss}
-            className="rounded-md border border-neutral-700 px-3 py-1.5 text-xs text-neutral-200 hover:border-neutral-400"
+            className="rounded-md border border-line-strong px-3 py-1.5 text-xs text-ink hover:border-ink-2"
           >
             Dismiss
           </button>
@@ -589,11 +589,11 @@ function InlineText({ parts }: { parts: Inline[] }) {
   return (
     <>
       {parts.map((p, i) => {
-        if (p.kind === "bold") return <strong key={i} className="font-semibold text-neutral-100">{p.text}</strong>;
-        if (p.kind === "code") return <code key={i} className="rounded bg-neutral-800 px-1 font-mono text-[11px]">{p.text}</code>;
+        if (p.kind === "bold") return <strong key={i} className="font-semibold text-ink">{p.text}</strong>;
+        if (p.kind === "code") return <code key={i} className="rounded bg-surface-3 px-1 font-mono text-[11px]">{p.text}</code>;
         if (p.kind === "link") {
           return (
-            <a key={i} href={p.href} target="_blank" rel="noopener noreferrer" className="underline hover:text-neutral-100">
+            <a key={i} href={p.href} target="_blank" rel="noopener noreferrer" className="underline hover:text-ink">
               {p.text}
             </a>
           );
@@ -608,13 +608,13 @@ function ReleaseNotes({ notes }: { notes: string }) {
   const blocks = parseReleaseNotes(notes);
   return (
     <div
-      className="mt-2 max-h-56 space-y-2 overflow-auto rounded-md border border-neutral-800 bg-neutral-950 p-3 text-xs leading-relaxed text-neutral-300"
+      className="mt-2 max-h-56 space-y-2 overflow-auto rounded-md border border-line bg-surface-1 p-3 text-xs leading-relaxed text-ink-2"
       data-testid="release-notes"
     >
       {blocks.map((b, i) => {
         if (b.kind === "heading") {
           return (
-            <p key={i} className="text-sm font-medium text-neutral-100">
+            <p key={i} className="text-sm font-medium text-ink">
               <InlineText parts={b.content} />
             </p>
           );

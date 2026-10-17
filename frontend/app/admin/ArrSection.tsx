@@ -52,15 +52,15 @@ export function ArrSection() {
 
   return (
     <div id="arr" className="scroll-mt-24">
-      <p className="text-xs text-neutral-500">
+      <p className="text-xs text-ink-3">
         Radarr, Sonarr and Lidarr are optional. They manage your movies, TV shows and music, and Radarr and Sonarr
         also switch on Requests. Changes apply right away; no restart. Values saved here win over the ones from Setup
         (.env).
       </p>
 
-      {loadError ? <p className="mt-4 text-xs text-red-400">{loadError}</p> : null}
+      {loadError ? <p className="mt-4 text-xs text-hive-text">{loadError}</p> : null}
       {!data && !loadError ? (
-        <div className="mt-4 h-16 animate-pulse rounded-lg bg-neutral-900" />
+        <div className="mt-4 h-16 animate-pulse rounded-lg bg-surface-2" />
       ) : null}
 
       {data ? (
@@ -182,19 +182,19 @@ function AppCard({ cfg, onSaved }: { cfg: ArrAppSettings; onSaved: (s: ArrSettin
   const noKeyToTest = !key.trim() && !cfg.has_key;
 
   return (
-    <div className="rounded-lg border border-neutral-800 p-4">
-      <h3 className="text-sm font-semibold text-neutral-100">{label}</h3>
-      <p className="mt-1 text-xs text-neutral-400">
+    <div className="rounded-lg border border-line p-4">
+      <h3 className="text-sm font-semibold text-ink">{label}</h3>
+      <p className="mt-1 text-xs text-ink-2">
         Setting a {label} key hands {library} from the folder scan to {label}. Remove the key to go back to the
         folder scan.
       </p>
 
       <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
-        <span className="text-neutral-400">{label} API key:</span>
+        <span className="text-ink-2">{label} API key:</span>
         {cfg.has_key ? (
           <>
-            <span className="font-mono text-neutral-100">{cfg.masked}</span>
-            <span className="text-xs text-neutral-500">
+            <span className="font-mono text-ink">{cfg.masked}</span>
+            <span className="text-xs text-ink-3">
               {cfg.key_source === "env" ? "(from Setup, in .env)" : "(saved here)"}
             </span>
             {cfg.key_source === "admin" ? (
@@ -204,13 +204,13 @@ function AppCard({ cfg, onSaved }: { cfg: ArrAppSettings; onSaved: (s: ArrSettin
             ) : null}
           </>
         ) : (
-          <span className="text-amber-400">not set ({library} use the folder scan)</span>
+          <span className="text-warning">not set ({library} use the folder scan)</span>
         )}
       </div>
 
       <form onSubmit={save} className="mt-3 space-y-3">
         <div className="grid gap-3 sm:grid-cols-2">
-          <label className="block text-xs text-neutral-400">
+          <label className="block text-xs text-ink-2">
             Address
             <input
               value={url}
@@ -225,7 +225,7 @@ function AppCard({ cfg, onSaved }: { cfg: ArrAppSettings; onSaved: (s: ArrSettin
               aria-label={`${label} address`}
             />
           </label>
-          <label className="block text-xs text-neutral-400">
+          <label className="block text-xs text-ink-2">
             API key (from {label} &rsaquo; Settings &rsaquo; General)
             <input
               type="password"
@@ -245,7 +245,7 @@ function AppCard({ cfg, onSaved }: { cfg: ArrAppSettings; onSaved: (s: ArrSettin
 
         {supportsRequests ? (
           <div className="grid gap-3 sm:grid-cols-2">
-            <label className="block text-xs text-neutral-400">
+            <label className="block text-xs text-ink-2">
               Requests: quality profile
               <select
                 value={profile}
@@ -268,7 +268,7 @@ function AppCard({ cfg, onSaved }: { cfg: ArrAppSettings; onSaved: (s: ArrSettin
                 ))}
               </select>
             </label>
-            <label className="block text-xs text-neutral-400">
+            <label className="block text-xs text-ink-2">
               Requests: root folder
               <select
                 value={folder}
@@ -289,15 +289,15 @@ function AppCard({ cfg, onSaved }: { cfg: ArrAppSettings; onSaved: (s: ArrSettin
                 ))}
               </select>
             </label>
-            <p className="text-xs text-neutral-500 sm:col-span-2">
+            <p className="text-xs text-ink-3 sm:col-span-2">
               Approved Requests are added to {label} with this profile and folder. Requests need both.
             </p>
           </div>
         ) : (
-          <p className="text-xs text-neutral-500">Lidarr has no Requests settings.</p>
+          <p className="text-xs text-ink-3">Lidarr has no Requests settings.</p>
         )}
 
-        {options?.error ? <p className="text-xs text-red-400">{options.error}</p> : null}
+        {options?.error ? <p className="text-xs text-hive-text">{options.error}</p> : null}
 
         <div className="flex flex-wrap items-center gap-2">
           <button type="button" onClick={test} disabled={busy !== null || noKeyToTest} className={smallButtonCls}>
@@ -307,7 +307,7 @@ function AppCard({ cfg, onSaved }: { cfg: ArrAppSettings; onSaved: (s: ArrSettin
             {busy === "save" ? "Saving..." : "Save"}
           </button>
           {result ? (
-            <span role="status" className={`text-xs ${result.ok ? "text-emerald-400" : "text-red-400"}`}>
+            <span role="status" className={`text-xs ${result.ok ? "text-positive" : "text-hive-text"}`}>
               {result.message}
             </span>
           ) : null}
@@ -370,9 +370,9 @@ function WebhookBlock() {
   const base = bases[Math.min(baseIndex, Math.max(bases.length - 1, 0))];
 
   return (
-    <div className="rounded-lg border border-neutral-800 p-4">
-      <h3 className="text-sm font-semibold text-neutral-100">Webhooks</h3>
-      <p className="mt-1 text-xs text-neutral-400">
+    <div className="rounded-lg border border-line p-4">
+      <h3 className="text-sm font-semibold text-ink">Webhooks</h3>
+      <p className="mt-1 text-xs text-ink-2">
         Optional. With a webhook, a movie, show or album shows up here seconds after the app imports it, instead of at
         the next sync. In each app open Settings &rsaquo; Connect &rsaquo; Add &rsaquo; Webhook, paste the address,
         set Method to POST, and paste the token as the Password (any user name). Radarr and Sonarr can also send it in
@@ -380,11 +380,11 @@ function WebhookBlock() {
       </p>
 
       {!hook ? (
-        message ? null : <div className="mt-3 h-12 animate-pulse rounded-lg bg-neutral-900" />
+        message ? null : <div className="mt-3 h-12 animate-pulse rounded-lg bg-surface-2" />
       ) : (
         <div className="mt-3 space-y-3">
           <div className="flex flex-wrap items-center gap-2 text-sm">
-            <span className="text-neutral-400">Token:</span>
+            <span className="text-ink-2">Token:</span>
             {hook.has_token ? (
               <>
                 <input
@@ -404,13 +404,13 @@ function WebhookBlock() {
                 <button type="button" className={smallButtonCls} onClick={() => generate(true)} disabled={busy}>
                   Make a new token
                 </button>
-                <span className="text-xs text-neutral-500">
+                <span className="text-xs text-ink-3">
                   {hook.source === "env" ? "(from Setup, in .env)" : "(saved here)"}
                 </span>
               </>
             ) : (
               <>
-                <span className="text-amber-400">not set. Webhooks are refused until there is a token.</span>
+                <span className="text-warning">not set. Webhooks are refused until there is a token.</span>
                 <button type="button" className={primaryButtonCls} onClick={() => generate(false)} disabled={busy}>
                   {busy ? "Making..." : "Generate"}
                 </button>
@@ -419,7 +419,7 @@ function WebhookBlock() {
           </div>
 
           {bases.length > 1 ? (
-            <label className="block text-xs text-neutral-400">
+            <label className="block text-xs text-ink-2">
               Address the apps use to reach this server
               <select
                 value={baseIndex}
@@ -442,7 +442,7 @@ function WebhookBlock() {
                 const full = webhookUrl(base.url, hook.paths[app]);
                 return (
                   <li key={app} className="flex flex-wrap items-center gap-2 text-sm">
-                    <span className="w-16 text-neutral-400">{LIBRARY_APP[app]}</span>
+                    <span className="w-16 text-ink-2">{LIBRARY_APP[app]}</span>
                     <input
                       readOnly
                       value={full}
@@ -459,7 +459,7 @@ function WebhookBlock() {
             </ul>
           ) : null}
           {base && isLoopbackOrigin(base.url) ? (
-            <p className="text-xs text-neutral-500">
+            <p className="text-xs text-ink-3">
               This address only works for apps running on this same PC. Open Admin from this server&apos;s home
               network address to get one the other apps can reach.
             </p>
@@ -468,7 +468,7 @@ function WebhookBlock() {
       )}
 
       {message ? (
-        <p role="status" className={`mt-3 text-xs ${message.ok ? "text-emerald-400" : "text-red-400"}`}>
+        <p role="status" className={`mt-3 text-xs ${message.ok ? "text-positive" : "text-hive-text"}`}>
           {message.text}
         </p>
       ) : null}
@@ -479,10 +479,10 @@ function WebhookBlock() {
 const LIBRARY_APP: Record<ArrAppId, string> = { radarr: "Radarr", sonarr: "Sonarr", lidarr: "Lidarr" };
 
 const inputCls =
-  "w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 outline-none focus:border-neutral-500";
+  "w-full rounded-lg border border-line-strong bg-surface-1 px-3 py-2 text-sm text-ink outline-none focus:border-ink-2";
 
 const primaryButtonCls =
-  "rounded-lg bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-900 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60";
+  "rounded-lg bg-ink px-4 py-2 text-sm font-medium text-bg transition hover:bg-ink-2 disabled:cursor-not-allowed disabled:opacity-60";
 
 const smallButtonCls =
-  "rounded-md border border-neutral-800 px-2.5 py-1 text-xs text-neutral-200 transition hover:border-neutral-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-50";
+  "rounded-md border border-line px-2.5 py-1 text-xs text-ink transition hover:border-ink-3 hover:text-ink disabled:cursor-not-allowed disabled:opacity-50";

@@ -97,21 +97,21 @@ export function MetadataSection() {
 
   return (
     <div id="metadata" ref={ref} className="scroll-mt-24">
-      <p className="text-xs text-neutral-500">
+      <p className="text-xs text-ink-3">
         TMDB supplies posters, backdrops, and descriptions for the movies and shows in your
         folders. The key is free.
       </p>
 
       {!data ? (
-        <div className="mt-4 h-16 animate-pulse rounded-lg bg-neutral-900" />
+        <div className="mt-4 h-16 animate-pulse rounded-lg bg-surface-2" />
       ) : (
         <div className="mt-4 space-y-4">
           <div className="flex flex-wrap items-center gap-3 text-sm">
-            <span className="text-neutral-400">TMDB API key:</span>
+            <span className="text-ink-2">TMDB API key:</span>
             {tmdb?.configured ? (
               <>
-                <span className="font-mono text-neutral-100">{tmdb.masked}</span>
-                <span className="text-xs text-neutral-500">
+                <span className="font-mono text-ink">{tmdb.masked}</span>
+                <span className="text-xs text-ink-3">
                   {tmdb.source === "env" ? "(from Setup)" : "(saved here)"}
                 </span>
                 {!editing ? (
@@ -126,16 +126,16 @@ export function MetadataSection() {
                 ) : null}
               </>
             ) : (
-              <span className="text-amber-400">not set</span>
+              <span className="text-warning">not set</span>
             )}
           </div>
 
           {showForm ? (
             <>
-              <ol className="list-decimal space-y-1 pl-5 text-xs text-neutral-400">
+              <ol className="list-decimal space-y-1 pl-5 text-xs text-ink-2">
                 <li>
                   Make a free account at{" "}
-                  <a href={TMDB_API_PAGE} target="_blank" rel="noreferrer" className="underline hover:text-white">
+                  <a href={TMDB_API_PAGE} target="_blank" rel="noreferrer" className="underline hover:text-ink">
                     themoviedb.org
                   </a>
                   , then open Settings &rsaquo; API.
@@ -183,7 +183,7 @@ export function MetadataSection() {
           ) : null}
 
           {result ? (
-            <p className={`text-xs ${result.ok ? "text-emerald-400" : "text-red-400"}`}>{result.message}</p>
+            <p className={`text-xs ${result.ok ? "text-positive" : "text-hive-text"}`}>{result.message}</p>
           ) : null}
 
           {data.podcastindex ? (
@@ -282,17 +282,17 @@ function PodcastIndexBlock({
   }
 
   return (
-    <div className="space-y-3 border-t border-neutral-800 pt-4" data-testid="podcastindex-block">
-      <p className="text-xs text-neutral-500">
+    <div className="space-y-3 border-t border-line pt-4" data-testid="podcastindex-block">
+      <p className="text-xs text-ink-3">
         Podcast Index is the directory behind podcast search. It is free and optional: with no key,
         search uses Apple&apos;s iTunes directory.
       </p>
       <div className="flex flex-wrap items-center gap-3 text-sm">
-        <span className="text-neutral-400">Podcast Index key:</span>
+        <span className="text-ink-2">Podcast Index key:</span>
         {status.configured ? (
           <>
-            <span className="font-mono text-neutral-100">{status.key_masked}</span>
-            <span className="text-xs text-neutral-500">
+            <span className="font-mono text-ink">{status.key_masked}</span>
+            <span className="text-xs text-ink-3">
               {status.source === "env" ? "(from Setup)" : "(saved here)"}
               {status.secret_set ? ", secret set" : ""}
             </span>
@@ -311,15 +311,15 @@ function PodcastIndexBlock({
             </button>
           </>
         ) : (
-          <span className="text-amber-400">not set (using iTunes)</span>
+          <span className="text-warning">not set (using iTunes)</span>
         )}
       </div>
 
       {showForm ? (
         <>
-          <p className="text-xs text-neutral-400">
+          <p className="text-xs text-ink-2">
             Make a free account at{" "}
-            <a href={PODCASTINDEX_SIGNUP} target="_blank" rel="noreferrer" className="underline hover:text-white">
+            <a href={PODCASTINDEX_SIGNUP} target="_blank" rel="noreferrer" className="underline hover:text-ink">
               api.podcastindex.org
             </a>
             . It emails you an API key and a secret; paste both here.
@@ -375,17 +375,17 @@ function PodcastIndexBlock({
       ) : null}
 
       {result ? (
-        <p className={`text-xs ${result.ok ? "text-emerald-400" : "text-red-400"}`}>{result.message}</p>
+        <p className={`text-xs ${result.ok ? "text-positive" : "text-hive-text"}`}>{result.message}</p>
       ) : null}
     </div>
   );
 }
 
 const inputCls =
-  "w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 outline-none focus:border-neutral-500";
+  "w-full rounded-lg border border-line-strong bg-surface-1 px-3 py-2 text-sm text-ink outline-none focus:border-ink-2";
 
 const primaryButtonCls =
-  "rounded-lg bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-900 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60";
+  "rounded-lg bg-ink px-4 py-2 text-sm font-medium text-bg transition hover:bg-ink-2 disabled:cursor-not-allowed disabled:opacity-60";
 
 const smallButtonCls =
-  "rounded-md border border-neutral-800 px-2.5 py-1 text-xs text-neutral-200 transition hover:border-neutral-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-50";
+  "rounded-md border border-line px-2.5 py-1 text-xs text-ink transition hover:border-ink-3 hover:text-ink disabled:cursor-not-allowed disabled:opacity-50";

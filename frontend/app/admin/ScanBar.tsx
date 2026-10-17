@@ -8,14 +8,14 @@
 export function ScanBar({ percent }: { percent: number }) {
   return (
     <div
-      className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-neutral-800"
+      className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-surface-3"
       role="progressbar"
       aria-valuenow={percent}
       aria-valuemin={0}
       aria-valuemax={100}
     >
       <div
-        className="h-full rounded-full bg-emerald-500 transition-[width] duration-500"
+        className="h-full rounded-full bg-ink-2 transition-[width] duration-500"
         style={{ width: `${percent}%` }}
       />
     </div>
