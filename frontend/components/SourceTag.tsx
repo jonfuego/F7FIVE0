@@ -53,7 +53,7 @@ export function SourceCallouts({ notes }: { notes: string[] }) {
               <>
                 {" "}
                 <Link
-                  href="/admin"
+                  href="/admin/metadata"
                   className="text-hive underline hover:text-hive-hover"
                 >
                   Open Admin

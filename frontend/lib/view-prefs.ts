@@ -6,11 +6,11 @@
 
 export type MixInputs = Record<string, Record<string, string>>;
 
-// The Admin section ids that can be collapsed. The admin page remembers which
-// are folded per user (admin.collapsed). Keep these in sync with the ids the
-// admin page gives its CollapsibleSection headers. "library" is retired (its
-// scans moved to "scans"); it stays in the list so a fold list saved before
-// that is still valid instead of being thrown away.
+// The Admin section ids a saved fold list may hold (admin.collapsed). The Admin
+// no longer folds: every area has its own page (lib/admin-dashboard.ts), so
+// nothing reads this pref any more. The key and its ids stay so a value stored
+// before that still parses instead of being thrown away. "library" is long
+// retired (its scans moved to "scans").
 export const ADMIN_SECTION_IDS = [
   "users", "updates", "remote-access", "library-folders", "scans", "metadata", "arr", "library",
   "audio-analysis", "health", "active-streams", "sessions", "auth-events", "history",
