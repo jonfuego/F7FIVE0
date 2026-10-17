@@ -58,7 +58,7 @@ export default function TvBrowse(): React.ReactElement {
           </>
         ) : null}
 
-        <Text style={styles.rail}>Continue Watching</Text>
+        <Text style={styles.rail}>Continue</Text>
         <QueryState isLoading={cont.isLoading} isError={cont.isError} data={cont.data} onRetry={cont.refetch} isEmpty={(d) => d.length === 0} emptyTitle="Nothing in progress">
           {(items) => (
             <ScrollView horizontal contentContainerStyle={styles.row}>

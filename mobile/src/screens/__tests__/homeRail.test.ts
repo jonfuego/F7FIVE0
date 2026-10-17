@@ -12,3 +12,13 @@ describe("Home continue rail", () => {
     expect(source).toMatch(/<Text style=\{styles\.rail\}>Continue<\/Text>/);
   });
 });
+
+// The Android TV Home rail holds the same mixed items, so it follows the phone.
+const tvSource = readFileSync(join(__dirname, "..", "..", "..", "app-tv", "browse.tv.tsx"), "utf8");
+
+describe("TV continue rail", () => {
+  it("is titled Continue, not Continue Watching", () => {
+    expect(tvSource).not.toMatch(/>Continue Watching</);
+    expect(tvSource).toMatch(/<Text style=\{styles\.rail\}>Continue<\/Text>/);
+  });
+});

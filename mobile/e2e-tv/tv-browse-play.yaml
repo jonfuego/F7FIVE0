@@ -6,7 +6,7 @@ name: tv-browse-detail-playback
 # D-pad focus, so Dpad Center plays it.
 - launchApp
 - extendedWaitUntil:
-    visible: "Continue Watching"
+    visible: "Continue"
     timeout: 45000
 - waitForAnimationToEnd:
     timeout: 5000
