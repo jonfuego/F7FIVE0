@@ -21,7 +21,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { apiGet } from "@/lib/client-api";
 import type { ScanStatuses } from "@/app/admin/ScansSection";
 import type {
-  ActiveTranscode, AdminReminder, AdminSession, AdminUser, ArrSettings, AuthEvent,
+  ActiveTranscode, AdminReminder, AdminSession, AdminUser, ArrRoots, ArrSettings, AuthEvent,
   LibraryFolders, MetadataSettings, RemoteAccessStatus, ServerHealth, UpdatesStatus,
   WatchHistoryRow,
 } from "@/lib/types";
@@ -50,6 +50,9 @@ export type OverviewData = {
   metadata: MetadataSettings;
   arr: ArrSettings;
   audio: AudioProgress;
+  /** The *arr apps' root folders and whether the service can open them. Only the
+   *  needs-attention list reads it, so a failure here shows no tile error. */
+  arrRoots: ArrRoots;
 };
 
 export type SourceKey = keyof OverviewData;
@@ -68,7 +71,7 @@ export type OverviewState = { [K in SourceKey]: Source<OverviewData[K]> };
 const FAST_KEYS: SourceKey[] = [
   "reminders", "updates", "remote", "health", "transcodes", "sessions", "authEvents", "history", "scans",
 ];
-const SLOW_KEYS: SourceKey[] = ["users", "folders", "metadata", "arr", "audio"];
+const SLOW_KEYS: SourceKey[] = ["users", "folders", "metadata", "arr", "audio", "arrRoots"];
 const ALL_KEYS: SourceKey[] = [...FAST_KEYS, ...SLOW_KEYS];
 
 const EMPTY: Source<never> = { data: null, error: false, loaded: false };
@@ -117,6 +120,7 @@ function fetcher(key: SourceKey, prev: OverviewState): Promise<unknown> {
     case "metadata": return apiGet("/api/admin/metadata");
     case "arr": return apiGet("/api/admin/arr");
     case "audio": return apiGet("/api/admin/audio/progress");
+    case "arrRoots": return apiGet("/api/admin/path-mappings/arr-roots");
   }
 }
 

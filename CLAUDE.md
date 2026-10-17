@@ -597,6 +597,32 @@ INSTALL.md for the operator view.
   tested by `installer\tests\duckdns-migrate.ps1`) reads the domain and token out
   of the task arguments, they go to `.env` only where blank, `.env` gets
   `Set-PrivateAcl` again, then the task is unregistered. The token is never printed.
+- Path mappings (Admin > Library folders). Radarr, Sonarr and Lidarr report files
+  on a drive letter (`N:\Movies\...`) that is mapped only in someone's Windows
+  login; the services run as LocalSystem and cannot see it, so the files end
+  `missing` or `refused` and the library looks empty. An admin adds a mapping
+  (`N:` is `\\fuegonas\The Hive`) in Admin without editing `.env` or
+  restarting. They live in `app_settings` key `path_mappings`
+  (`services/path_mappings.py`, endpoints in `api/admin_path_mappings.py` under
+  `/api/admin/path-mappings`: list, add, `DELETE ?src=N:`, and `/arr-roots`).
+  `path_map.translate(path, db)` merges them over `PATH_REWRITE_RULES` from
+  `.env` (Admin's win). The API and the stream gateway are separate processes,
+  so each reloads the saved mappings every 3 s (`_DB_TTL_SEC`); Admin's save
+  also drops this process's cache. Pass the caller's `db` to `translate` when
+  there is one: without it the lookup opens its own session, and only on
+  PostgreSQL (the SQLite test database shares one connection, so a second
+  session closing would roll the caller's work back). Saving a mapping rewrites
+  the stored `media_files.path` values that start with the drive, in place, so a
+  row keeps its id and with it its watch progress and history; if the new path is
+  already a row, the two are merged and the history is kept
+  (`path_mappings.rewrite_existing`). `/arr-roots` asks each *arr for its root
+  folders and checks each translated path with `os.path.isdir` from the API
+  process (after `nas_auth.ensure_all`); Admin warns on one it cannot open and
+  Needs attention lists it. The sync records, per app, the drive letter most of its
+  missing files are on when this process cannot open that drive
+  (`missing_drive`, `missing_drive_count` in `arr_sync_status`, only at half or
+  more of the missing files), and the Scans row says "2,662 files on N:, a drive
+  letter the F7FIVE0 service can't see" with a link to the mappings.
 - Updates: Admin > Updates updates the server from the latest GitHub release
   or an uploaded Setup (`backend/app/services/updates.py`,
   `installer/update.ps1`). Setup records the installed version in

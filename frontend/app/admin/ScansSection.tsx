@@ -15,6 +15,7 @@
 
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { apiGet, apiPost, ApiError } from "@/lib/client-api";
 import {
@@ -280,6 +281,14 @@ function ScanListRow({
             )
           ) : null}
           {showReason ? <p className="mt-1 text-xs text-ink-3">{row.disabledReason}</p> : null}
+          {row.hint ? (
+            <p className="mt-1 text-xs text-ink-2" data-testid={`scan-hint-${row.id}`}>
+              {row.hint.text}{" "}
+              <Link href={row.hint.href} className="font-semibold text-hive-text hover:underline">
+                {row.hint.linkLabel}
+              </Link>
+            </p>
+          ) : null}
         </div>
         <button
           type="button"
