@@ -6,7 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  buildScanRows, scanAllPlan, scanErrors, scansSummary,
+  ARR_STALE_MS, buildScanRows, clockTime, scanAllPlan, scanErrors, scansSummary,
   type ArrApps, type ArrSyncLike, type FolderScanLike, type MusicVideosLike, type PodcastRefreshLike,
   type ScanInputs, type ScanRow,
 } from "./scans-rows.ts";
@@ -39,23 +39,22 @@ function row(rows: ScanRow[], id: string): ScanRow {
 }
 
 // -- order and which rows exist ----------------------------------------------
-test("row order is Movies, TV, Music, Music videos, Podcasts, Podcast feeds, *arr sync", () => {
+test("row order is Movies, TV, Music, Music videos, Podcasts, Podcast feeds", () => {
   const rows = buildScanRows(inputs({ apps: { radarr: true, sonarr: true, lidarr: true } }));
   assert.deepEqual(rows.map((r) => r.id), [
-    "movies", "tv", "music", "music_videos", "podcasts", "podcast_feeds", "arr",
+    "movies", "tv", "music", "music_videos", "podcasts", "podcast_feeds",
   ]);
   assert.deepEqual(rows.map((r) => r.label), [
-    "Movies", "TV", "Music", "Music videos", "Podcasts", "Podcast feeds", "*arr sync",
+    "Movies", "TV", "Music", "Music videos", "Podcasts", "Podcast feeds",
   ]);
 });
 
-test("the *arr sync row appears only when an app is set", () => {
-  assert.deepEqual(buildScanRows(inputs()).map((r) => r.id), [
-    "movies", "tv", "music", "music_videos", "podcasts", "podcast_feeds",
-  ]);
-  for (const app of ["radarr", "sonarr", "lidarr"] as const) {
-    const rows = buildScanRows(inputs({ apps: { ...NONE, [app]: true } }));
-    assert.equal(rows.at(-1)?.id, "arr", `${app} alone shows the *arr sync row`);
+test("there is no separate *arr sync row, whatever is set (B1.4)", () => {
+  const everything = [NONE, { radarr: true, sonarr: true, lidarr: true }, { ...NONE, radarr: true }, null];
+  for (const apps of everything) {
+    const rows = buildScanRows(inputs({ apps }));
+    assert.ok(rows.every((r) => (r.id as string) !== "arr"), JSON.stringify(apps));
+    assert.ok(rows.every((r) => r.label !== "*arr sync"), JSON.stringify(apps));
   }
 });
 
@@ -181,10 +180,7 @@ test("an *arr app row is off while an *arr sync runs, and the app running says S
   assert.equal(row(rows, "music").result, "Waiting its turn");
   assert.equal(row(rows, "tv").state, "never");
   assert.equal(row(rows, "tv").disabledReason, "An *arr sync is already running.");
-  const all = row(rows, "arr");
-  assert.equal(all.state, "running");
-  assert.equal(all.result, "Syncing Radarr");
-  assert.equal(all.canStart, false);
+  assert.equal(row(rows, "movies").result, "Syncing", "no counts yet: the plain word");
 });
 
 // -- state and result text -------------------------------------------------------
@@ -230,7 +226,7 @@ test("music videos: running shows x of y, done shows counts, errors turn it red"
   assert.equal(finished.when, "Finished 1 hour ago");
 });
 
-test("the *arr sync row sums up each app that is set", () => {
+test("each *arr app row keeps its own result once the sync is done", () => {
   const arr: ArrSyncLike = {
     state: "idle", finished_at: "2026-10-11T11:59:00Z", current_app: null,
     apps: {
@@ -240,12 +236,11 @@ test("the *arr sync row sums up each app that is set", () => {
     last_error: null,
   };
   const rows = buildScanRows(inputs({ apps: { radarr: true, sonarr: false, lidarr: true }, arr }));
-  const all = row(rows, "arr");
-  assert.equal(all.state, "idle");
-  assert.equal(all.result, "Radarr 12 movies, Lidarr 30 artists");
-  assert.deepEqual(all.action, { kind: "arr", apps: ["radarr", "lidarr"] });
-  assert.equal(all.canStart, true);
+  assert.equal(row(rows, "movies").state, "idle");
   assert.equal(row(rows, "movies").result, "12 movies synced");
+  assert.equal(row(rows, "music").result, "30 artists synced");
+  assert.deepEqual(row(rows, "music").action, { kind: "arr", apps: ["lidarr"] });
+  assert.equal(row(rows, "movies").canStart, true);
 });
 
 // -- Scan all -------------------------------------------------------------------
@@ -278,7 +273,7 @@ test("Scan all skips rows that are already running", () => {
 test("Scan all with Lidarr set starts the Lidarr sync for Music, not the folder scan", () => {
   const rows = buildScanRows(inputs({ apps: { ...NONE, lidarr: true } }));
   const plan = scanAllPlan(rows);
-  assert.deepEqual(plan.rowIds, ["movies", "tv", "music", "music_videos", "podcasts", "arr"]);
+  assert.deepEqual(plan.rowIds, ["movies", "tv", "music", "music_videos", "podcasts"]);
   assert.deepEqual(plan.libraries, ["movies", "tv", "podcasts"], "music is not in the folder scan");
   assert.deepEqual(plan.arrApps, ["lidarr"], "one sync request, no duplicate app");
   assert.equal(plan.musicVideos, true);
@@ -414,3 +409,81 @@ test("a podcast refresh error shows under the list", () => {
   })), ["The last scan was interrupted"]);
 });
 
+
+// -- *arr sync progress (B1) --------------------------------------------------
+const ALL_APPS = { radarr: true, sonarr: true, lidarr: true };
+const NOW = Date.parse("2026-10-11T12:00:00Z");
+
+function runningRadarr(entry: object, over: Partial<ArrSyncLike> = {}): ArrSyncLike {
+  return {
+    state: "running", finished_at: null, current_app: "radarr",
+    apps: { radarr: { state: "running", synced: 1240, errors: 1, ...entry } }, last_error: null, ...over,
+  };
+}
+
+test("a running *arr row shows real progress and the counts that are not zero (B1.3)", () => {
+  const arr = runningRadarr({
+    done: 1240, total: 2707, ready: 1200, missing: 3, refused: 2, updated_at: "2026-10-11T11:59:58Z",
+  });
+  const movies = row(buildScanRows(inputs({ apps: ALL_APPS, arr })), "movies");
+  assert.equal(movies.state, "running");
+  assert.deepEqual(movies.progress, { done: 1240, total: 2707, percent: 46 });
+  assert.equal(movies.result, "1,240 of 2,707 movies, 3 missing, 1 error, 2 refused");
+});
+
+test("a running *arr row with no counts to report shows only done of total", () => {
+  const arr = runningRadarr({ done: 50, total: 60, errors: 0, missing: 0, refused: 0, updated_at: "2026-10-11T11:59:58Z" });
+  const movies = row(buildScanRows(inputs({ apps: ALL_APPS, arr })), "movies");
+  assert.equal(movies.result, "50 of 60 movies");
+  assert.equal(movies.progress?.percent, 83);
+});
+
+test("a finished *arr row keeps the missing, error and refused counts next to the total (B1.3)", () => {
+  const arr: ArrSyncLike = {
+    state: "idle", finished_at: "2026-10-11T11:30:00Z", current_app: null,
+    apps: { radarr: { state: "done", synced: 2707, errors: 3, done: 2707, total: 2707, ready: 40, missing: 2662, refused: 2 } },
+    last_error: null,
+  };
+  const movies = row(buildScanRows(inputs({ apps: ALL_APPS, arr })), "movies");
+  assert.equal(movies.state, "error", "errors make the row need attention, as before");
+  assert.equal(movies.result, "2,707 movies synced, 2,662 missing, 3 errors, 2 refused");
+  assert.equal(movies.progress, null);
+});
+
+test("an *arr app that failed partway says how far it got", () => {
+  const arr: ArrSyncLike = {
+    state: "idle", finished_at: "2026-10-11T11:30:00Z", current_app: null,
+    apps: { radarr: { state: "failed", synced: 25, errors: 1, done: 25, total: 60, missing: 0, refused: 0 } },
+    last_error: "radarr sync failed: boom",
+  };
+  const movies = row(buildScanRows(inputs({ apps: ALL_APPS, arr })), "movies");
+  assert.equal(movies.state, "error");
+  assert.equal(movies.result, "Sync failed after 25 of 60 movies, 1 error");
+});
+
+test("a sync with no change for 5 minutes says so instead of Syncing (B1.5)", () => {
+  const stamp = (msAgo: number) => new Date(NOW - msAgo).toISOString();
+  const at = (msAgo: number) =>
+    row(buildScanRows(inputs({ apps: ALL_APPS, arr: runningRadarr({ done: 10, total: 60, updated_at: stamp(msAgo) }) })), "movies");
+
+  const fresh = at(ARR_STALE_MS - 1000);
+  assert.match(fresh.result, /^10 of 60 movies/);
+
+  const stuck = at(ARR_STALE_MS);
+  assert.equal(stuck.result, `No progress since ${clockTime(stamp(ARR_STALE_MS))}`);
+  assert.ok(stuck.result.startsWith("No progress since "));
+  assert.equal(stuck.state, "running", "it is still running, just not moving");
+
+  // An older backend sends no updated_at: never called stuck.
+  const old = row(
+    buildScanRows(inputs({ apps: ALL_APPS, arr: runningRadarr({ done: 0, total: 0 }) })),
+    "movies",
+  );
+  assert.equal(old.result, "Syncing, 1 error");
+});
+
+test("Scan all still starts every configured app without the *arr sync row (B1.4)", () => {
+  const plan = scanAllPlan(buildScanRows(inputs({ apps: ALL_APPS })));
+  assert.deepEqual(plan.arrApps, ["radarr", "sonarr", "lidarr"]);
+  assert.ok(plan.rowIds.every((id) => (id as string) !== "arr"));
+});

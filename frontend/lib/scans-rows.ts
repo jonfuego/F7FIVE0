@@ -3,15 +3,15 @@
 // nothing at run time, like admin-sections.ts.
 //
 // Rows, always in this order: Movies, TV, Music, Music videos, Podcasts, Podcast
-// feeds, *arr sync.
+// feeds.
 //
 // - A library whose *arr app is set (Radarr for Movies, Sonarr for TV, Lidarr
 //   for Music) is driven by that app's sync. The folder scan must never touch
-//   it, so the row does not offer the folder scan then.
+//   it, so the row does not offer the folder scan then. That row carries the
+//   sync's own progress (done of total, and the missing / error / refused
+//   counts), so there is no separate "*arr sync" row repeating it.
 // - A library with no *arr app is driven by the folder scan.
 // - Music videos are always a folder walk of their own.
-// - The *arr sync row (every app that is set, in one go) appears only when at
-//   least one app is set.
 //
 // - Podcasts are a folder scan of the podcasts library (no *arr app owns them).
 //   "Podcast feeds" is a different job: it refreshes the feeds of the shows people
@@ -23,7 +23,7 @@
 // the button stays off and says to add one, because there is nothing to scan.
 
 export type ScanRowId =
-  | "movies" | "tv" | "music" | "music_videos" | "podcasts" | "podcast_feeds" | "arr";
+  | "movies" | "tv" | "music" | "music_videos" | "podcasts" | "podcast_feeds";
 export type ScanRowState = "idle" | "running" | "error" | "never";
 export type ArrApp = "radarr" | "sonarr" | "lidarr";
 export type ArrApps = Record<ArrApp, boolean>;
@@ -59,12 +59,27 @@ export type MusicVideosLike = {
   last_error: string | null;
 };
 
+/** One app's entry in GET /api/admin/library/arr-sync. `done` is the items saved
+ *  so far out of `total` (known up front); `updated_at` is when the backend last
+ *  wrote the entry. The progress fields are missing from an older backend. */
+export type ArrAppStatusLike = {
+  state: string;
+  synced?: number;
+  errors?: number;
+  done?: number;
+  total?: number;
+  ready?: number;
+  missing?: number;
+  refused?: number;
+  updated_at?: string;
+};
+
 /** GET /api/admin/library/arr-sync. */
 export type ArrSyncLike = {
   state: string;
   finished_at: string | null;
   current_app?: string | null;
-  apps: Record<string, { state: string; synced?: number; errors?: number }>;
+  apps: Record<string, ArrAppStatusLike>;
   last_error: string | null;
 };
 
@@ -211,6 +226,38 @@ function folderRow(id: FolderLibraryId, label: string, inputs: ScanInputs): Scan
 // ---------------------------------------------------------------------------
 // One library driven by its *arr app (Movies, TV, Music with a key set)
 // ---------------------------------------------------------------------------
+/** A running app that has not written its progress for this long is shown as
+ *  stuck ("No progress since 10:42") instead of "Syncing". The backend writes at
+ *  least every 5 seconds while an app runs. */
+export const ARR_STALE_MS = 5 * 60 * 1000;
+
+function isStale(updatedAt: string | undefined, now: number): boolean {
+  if (!updatedAt) return false;
+  const t = Date.parse(updatedAt);
+  return !Number.isNaN(t) && now - t >= ARR_STALE_MS;
+}
+
+/** The clock time of an ISO stamp, "10:42 AM". */
+export function clockTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "a while ago";
+  return d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+}
+
+function count(n: number): string {
+  return n.toLocaleString("en-US");
+}
+
+/** ", 2,662 missing, 3 errors, 1 refused": only the counts that are not zero. */
+function arrCountsTail(entry: ArrAppStatusLike | undefined): string {
+  if (!entry) return "";
+  const parts: string[] = [];
+  if (entry.missing) parts.push(`${count(entry.missing)} missing`);
+  if (entry.errors) parts.push(plural(entry.errors, "error", "errors"));
+  if (entry.refused) parts.push(`${count(entry.refused)} refused`);
+  return parts.length ? `, ${parts.join(", ")}` : "";
+}
+
 function arrAppRow(id: FolderLibraryId, label: string, app: ArrApp, inputs: ScanInputs): ScanRow {
   const { arr } = inputs;
   const now = inputs.now ?? Date.now();
@@ -224,12 +271,27 @@ function arrAppRow(id: FolderLibraryId, label: string, app: ArrApp, inputs: Scan
   else if (entry && entry.state === "done") state = "idle";
   else state = "never";
 
+  // A run that is moving: items saved so far out of the total the app listed.
+  const total = entry?.total ?? 0;
+  const done = entry?.done ?? 0;
+  const progress =
+    running && entry?.state === "running" && total > 0
+      ? { done, total, percent: percentOf(done, total) }
+      : null;
+  const stale = running && entry?.state === "running" && isStale(entry?.updated_at, now);
+
   let result: string;
-  if (running) result = entry?.state === "queued" ? "Waiting its turn" : "Syncing";
-  else if (entry && failedState(entry.state)) result = entry.state === "interrupted" ? "Interrupted" : "Sync failed";
-  else if (entry) {
-    result = `${entry.synced ?? 0} ${APP_NOUN[app]} synced`;
-    if (entry.errors) result += `, ${plural(entry.errors, "error", "errors")}`;
+  if (running && entry?.state === "queued") result = "Waiting its turn";
+  else if (stale && entry?.updated_at) result = `No progress since ${clockTime(entry.updated_at)}`;
+  else if (running) {
+    result = progress ? `${count(done)} of ${count(total)} ${APP_NOUN[app]}` : "Syncing";
+    result += arrCountsTail(entry);
+  } else if (entry && failedState(entry.state)) {
+    result = entry.state === "interrupted" ? "Interrupted" : "Sync failed";
+    if (total > 0) result += ` after ${count(done)} of ${count(total)} ${APP_NOUN[app]}`;
+    result += arrCountsTail(entry);
+  } else if (entry) {
+    result = `${count(entry.synced ?? 0)} ${APP_NOUN[app]} synced${arrCountsTail(entry)}`;
   } else result = "Not synced yet";
 
   let disabledReason: string | null = null;
@@ -238,7 +300,7 @@ function arrAppRow(id: FolderLibraryId, label: string, app: ArrApp, inputs: Scan
   else if (arrRunning) disabledReason = "An *arr sync is already running.";
 
   return {
-    id, label, source: `${APP_LABEL[app]} sync`, state, progress: null, result,
+    id, label, source: `${APP_LABEL[app]} sync`, state, progress, result,
     when: !running && entry ? whenText(arr?.finished_at ?? null, now) : "",
     canStart: disabledReason === null, disabledReason,
     action: { kind: "arr", apps: [app] },
@@ -329,51 +391,8 @@ function podcastFeedsRow(inputs: ScanInputs): ScanRow {
   };
 }
 
-// ---------------------------------------------------------------------------
-// The *arr sync (every app that is set)
-// ---------------------------------------------------------------------------
-function arrSyncRow(set: ArrApp[], inputs: ScanInputs): ScanRow {
-  const { arr } = inputs;
-  const now = inputs.now ?? Date.now();
-  const running = arr?.state === "running";
-  const entries = set.map((app) => [app, arr?.apps[app]] as const);
-
-  let state: ScanRowState;
-  if (running) state = "running";
-  else if (entries.some(([, e]) => e && (failedState(e.state) || (e.errors ?? 0) > 0))) state = "error";
-  else if (arr?.finished_at) state = "idle";
-  else state = "never";
-
-  let result: string;
-  if (running) {
-    const current = arr?.current_app as ArrApp | null | undefined;
-    result = current && APP_LABEL[current] ? `Syncing ${APP_LABEL[current]}` : "Syncing";
-  } else {
-    const parts = entries
-      .filter(([, e]) => !!e)
-      .map(([app, e]) => {
-        if (e && failedState(e.state)) return `${APP_LABEL[app]} failed`;
-        const errors = e?.errors ? `, ${plural(e.errors, "error", "errors")}` : "";
-        return `${APP_LABEL[app]} ${e?.synced ?? 0} ${APP_NOUN[app]}${errors}`;
-      });
-    result = parts.length ? parts.join(", ") : "Not synced yet";
-  }
-
-  let disabledReason: string | null = null;
-  if (!arr) disabledReason = CHECKING;
-  else if (running) disabledReason = "Syncing now.";
-
-  return {
-    id: "arr", label: "*arr sync", source: "*arr sync", state, progress: null, result,
-    when: !running && arr ? whenText(arr.finished_at, now) : "",
-    canStart: disabledReason === null, disabledReason,
-    action: { kind: "arr", apps: set },
-  };
-}
-
 /** The ordered rows of the Scans list. */
 export function buildScanRows(inputs: ScanInputs): ScanRow[] {
-  const set = APP_ORDER.filter((app) => inputs.apps?.[app]);
   const rows: ScanRow[] = [];
   const libs: [FolderLibraryId, string, ArrApp][] = [
     ["movies", "Movies", "radarr"],
@@ -386,7 +405,6 @@ export function buildScanRows(inputs: ScanInputs): ScanRow[] {
   rows.push(musicVideosRow(inputs));
   rows.push(folderRow("podcasts", "Podcasts", inputs));
   rows.push(podcastFeedsRow(inputs));
-  if (set.length > 0) rows.push(arrSyncRow(set, inputs));
   return rows;
 }
 
