@@ -1824,6 +1824,13 @@ def list_continue_watching(
     cw_album_covers = resolve_art_batch(
         db, entity_kind=ENTITY_ALBUM, entity_ids=albums.keys(), role=ROLE_COVER,
     )
+    # A release's own cover_path is a path on the media drive, which no client
+    # can load, so its tile uses the watched video's thumb like every other
+    # music video tile.
+    cw_video_thumbs = resolve_art_batch(
+        db, entity_kind=ENTITY_MUSIC_VIDEO, entity_ids=music_videos.keys(),
+        role=ROLE_THUMB,
+    )
 
     out: list[ContinueWatchingItemOut] = []
     seen_movie: set[uuid.UUID] = set()
@@ -1909,7 +1916,7 @@ def list_continue_watching(
                 title=rel_eff["display_name"],
                 subtitle=_effective_name(ar) if ar else None,
                 year=rel_eff["year"],
-                poster_path=rel.cover_path,
+                poster_path=cw_video_thumbs.get(mv.id),
                 position_sec=r.position_sec, duration_sec=r.duration_sec,
                 updated_at=r.updated_at,
             ))
