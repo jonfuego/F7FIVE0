@@ -7,6 +7,7 @@ handlers; they are thin decision endpoints.
 """
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timezone
 import logging
 import re
@@ -29,7 +30,7 @@ from app.models.user import User
 from app.services import media_paths, media_streams, playback
 from app.services.art import resolve_art
 from app.services.security import build_signed_art_url, sign_stream_url_params
-from app.services.track_opts import resolve_track_opts
+from app.services.track_opts import parse_token, resolve_track_opts
 from app.services.trusted_proxy import forwarded_origin
 
 
@@ -277,6 +278,18 @@ def stream_start(
             opts_token = ""
         if opts_token:
             mode = "hls"
+
+    # A Cast receiver gets its own encode identity: the `c` part of the token
+    # keys the transcode job, the cache dir and the signature apart from the
+    # sender's own stream of the same file, and the master playlist offers one
+    # rung. Only a cast start on a transcoded video sets it; direct play and
+    # audio need no separate encode, and a normal play never carries it.
+    if (
+        body.purpose == "cast"
+        and mode == "hls"
+        and not playback.is_audio_only(mf)
+    ):
+        opts_token = replace(parse_token(opts_token), cast=True).to_token()
 
     # Direct-play ignores the offset (the client handles seeking via Range
     # requests against the MP4), so it always signs bucket=0 regardless of

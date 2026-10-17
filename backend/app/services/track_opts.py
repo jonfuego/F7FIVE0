@@ -11,6 +11,9 @@ Token grammar (all parts optional, in this order, joined by "-"):
     a<N>   ffmpeg absolute stream index of the audio track to map (-map 0:N)
     s<N>   ffmpeg absolute stream index of an image subtitle to burn in
     q<H>   max output height: 1080, 720 or 480
+    c      a cast stream: minted for a Cast receiver, so it gets its own encode
+           and a single rung and never shares a job with the sender's own
+           playback of the same file (see CLAUDE.md, cast stream identity)
 
 An empty token means "no options": argv, cache layout and signatures are then
 bit-identical to the pre-Phase-2 behavior.
@@ -26,7 +29,7 @@ from typing import Optional
 
 QUALITY_HEIGHTS = {"1080p": 1080, "720p": 720, "480p": 480}
 _ALLOWED_HEIGHTS = {1080, 720, 480}
-_TOKEN_RE = re.compile(r"^(?:a(\d{1,3}))?(?:-?s(\d{1,3}))?(?:-?q(\d{3,4}))?$")
+_TOKEN_RE = re.compile(r"^(?:a(\d{1,3}))?(?:-?s(\d{1,3}))?(?:-?q(\d{3,4}))?(?:-?(c))?$")
 
 
 class TrackOptsError(ValueError):
@@ -38,9 +41,13 @@ class TrackOpts:
     audio_index: Optional[int] = None
     burn_sub_index: Optional[int] = None
     max_height: Optional[int] = None
+    cast: bool = False
 
     @property
     def empty(self) -> bool:
+        """No picks that change ffmpeg's argv. The cast marker only changes the
+        stream's identity (key, cache dir, signature, ladder), never the argv, so
+        a cast-only token still builds the same command as no token."""
         return self.audio_index is None and self.burn_sub_index is None and self.max_height is None
 
     def to_token(self) -> str:
@@ -51,6 +58,8 @@ class TrackOpts:
             parts.append(f"s{self.burn_sub_index}")
         if self.max_height is not None:
             parts.append(f"q{self.max_height}")
+        if self.cast:
+            parts.append("c")
         return "-".join(parts)
 
 
@@ -61,7 +70,7 @@ def parse_token(token: Optional[str]) -> TrackOpts:
     m = _TOKEN_RE.match(token)
     if not m or not any(m.groups()):
         raise TrackOptsError("bad_track_opts")
-    a, s, q = m.groups()
+    a, s, q, c = m.groups()
     height = int(q) if q is not None else None
     if height is not None and height not in _ALLOWED_HEIGHTS:
         raise TrackOptsError("bad_track_opts_quality")
@@ -69,6 +78,7 @@ def parse_token(token: Optional[str]) -> TrackOpts:
         audio_index=int(a) if a is not None else None,
         burn_sub_index=int(s) if s is not None else None,
         max_height=height,
+        cast=c is not None,
     )
     # Canonical form only, so one choice maps to exactly one cache dir/key.
     if opts.to_token() != token:

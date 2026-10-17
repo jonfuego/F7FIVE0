@@ -422,12 +422,17 @@ class TranscodeJob:
 def _opts_without_quality(opts: str) -> str:
     """The track-options token minus its quality ceiling. On CPU-only servers
     a quality change arrives as a new stream with a different `q`, so sibling
-    matching must ignore it (audio and subtitle picks still have to match)."""
+    matching must ignore it (audio and subtitle picks still have to match).
+
+    The cast marker is kept: a Cast receiver's stream and the sender's own
+    playback of the same file are never siblings, so neither kills the other."""
     try:
         o = parse_token(opts)
     except Exception:
         return opts
-    return TrackOpts(audio_index=o.audio_index, burn_sub_index=o.burn_sub_index).to_token()
+    return TrackOpts(
+        audio_index=o.audio_index, burn_sub_index=o.burn_sub_index, cast=o.cast,
+    ).to_token()
 
 
 class TranscodeManager:

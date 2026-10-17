@@ -267,17 +267,24 @@ def _variants_for(mf: MediaFile, o: str):
     playback.single_rung_for_cpu) so no player can start a second encode by
     switching quality on its own.
 
+    A cast stream (the `c` part of `o`) gets a single rung on NVENC servers too.
+
     Audio-only sources get one rung (the top rung's AAC bitrate; the label is
     only a cache key), since there is no picture to scale."""
     if is_audio_only(mf):
         return (VARIANT_LADDER[0],)
     variants = pick_variants(mf)
-    max_h = parse_token(o).max_height
+    parsed = parse_token(o)
+    max_h = parsed.max_height
     if not settings.nvenc_enabled:
         return single_rung_for_cpu(variants, max_h)
     if max_h:
         capped = tuple(v for v in variants if v.height <= max_h)
         variants = capped or (variants[-1],)
+    if parsed.cast:
+        # A Cast receiver's player hops rungs on its own; every hop would start
+        # another encode. One rung: the highest within the ceiling.
+        return variants[:1]
     return variants
 
 
