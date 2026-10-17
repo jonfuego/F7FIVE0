@@ -27,3 +27,12 @@ test("the first rail is titled Continue and its See all is not /movies", () => {
 test("the audio rail keeps its own title and its link to Music", () => {
   assert.match(page, /<Row title="Continue Listening" seeAllHref="\/music"/);
 });
+
+test("the PWA Continue shortcut is named Continue", () => {
+  const manifest = JSON.parse(
+    readFileSync(new URL("../public/manifest.json", import.meta.url), "utf8"),
+  ) as { shortcuts: { name: string; url: string }[] };
+  const sc = manifest.shortcuts.find((s) => s.url === "/?row=continue");
+  assert.ok(sc, "a shortcut for /?row=continue exists");
+  assert.equal(sc.name, "Continue");
+});
