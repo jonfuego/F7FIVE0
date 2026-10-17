@@ -839,8 +839,26 @@ is only proven by a real update on a VM: the tests use a stub Setup.
 
 ## Session log
 
-- 2026-10-17 (Code, phone playback fixes, branch `fix/phone-playback-sync`, not
-  merged): six problems on the phone app 1.0.15, four of them one bug. Now playing
+- 2026-10-17 (Code, v1.0.16 wrap-up, release held): merged `--no-ff` to `main`, in
+  order: `fix/phone-playback-sync`; `fix/continue-label-tv-pwa` (the TV rail and
+  the PWA shortcut say "Continue", the two TV e2e flows wait on it, source-text
+  guards in `home-rails.test.ts` and `homeRail.test.ts`); `fix/continue-mv-release-art`
+  (the Continue rail sent a music video release's `cover_path`, a path on the
+  media drive no client can load, so those tiles were blank; it now sends the
+  watched video's thumb or nothing, test `backend/tests/api/test_continue_watching_art.py`);
+  `chore/download-count` (README badge reads the Setup file only; `release.yml`
+  left alone because GitHub documents no way to fetch a draft asset without
+  counting it). Which card "Birmingham (Board Mix)" is could not be confirmed:
+  the install's `.env` and database are not readable from a dev session. If it is
+  an album, its tile uses the same art lookup as the Albums rail, so a blank tile
+  there is missing art data, not code. Checks on main `cc3030b`: pytest 1169
+  passed (10 skipped), web build ok, lint 0 errors, web tests 355, mobile
+  typecheck clean, jest 450. Logs in the vault `projects\f7five0\smoke\wrap-up-1.0.16\`.
+  NOT done: the version bump (1.0.16, versionCode 17), `release-apk.ps1`, the test
+  Setup and the `v1.0.16` tag. Jon asked to hold the build while he adds more.
+  `main` is not pushed.
+- 2026-10-17 (Code, phone playback fixes, branch `fix/phone-playback-sync`, merged
+  in the v1.0.16 wrap-up and hand tested on a phone by Jon, it passes): six problems on the phone app 1.0.15, four of them one bug. Now playing
   mixed the active track's title with the previous track's album, art and ids, so
   "Play album next" queued the wrong album and the album screen's red row sat one
   track behind. Fixed by putting the meta on each Track and building now playing
