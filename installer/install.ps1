@@ -135,6 +135,8 @@ function Step([string]$msg) {
 # Set-EnvKey, Install-Svc, and friends live in common.ps1 (shared with
 # remote-access.ps1).
 . (Join-Path $PSScriptRoot "common.ps1")
+# Pure decisions for the drive-letter mapping step (installer\tests\pathmap-logic.Tests.ps1).
+. (Join-Path $PSScriptRoot "pathmap-logic.ps1")
 # A click in the Setup console must not pause the install (QuickEdit).
 $null = Disable-ConsoleQuickEdit
 # Every Warn during this run, repeated in the summary at the end.
@@ -843,6 +845,72 @@ if ($secretProblems.Count -gt 0) {
 }
 
 # ---------------------------------------------------------------------------
+Step "Mapping network drives for Radarr, Sonarr and Lidarr"
+# ---------------------------------------------------------------------------
+# Radarr, Sonarr and Lidarr often list files on a drive letter (N:\Movies) that
+# is mapped only in this Windows login. The F7FIVE0 services run as a system
+# account that has no N:, so those files would look missing. Setup runs in your
+# login, where N: exists, so it asks each app that has a key in .env for its root
+# folders, finds the network path behind each drive letter, and saves the rule
+# as PATH_REWRITE_RULES in .env (Admin > Library folders > Path mappings shows it
+# and adds its own on top). A network (UNC) folder needs nothing. A letter that is
+# not a network drive is left alone. A drive mapped in another Windows login, or an
+# *arr app saved only in Admin, is not seen here: add that mapping in Admin.
+# Nothing in this step can fail the install; every problem is one line in the log.
+# The decisions are in pathmap-logic.ps1 (tested by tests\pathmap-logic.Tests.ps1).
+$script:PathMappingsWritten = New-Object System.Collections.Generic.List[string]
+try {
+    $arrApps = @()
+    foreach ($a in @(
+        @{ Name = "Radarr"; Key = "RADARR"; Url = "http://127.0.0.1:7878"; Api = "v3" },
+        @{ Name = "Sonarr"; Key = "SONARR"; Url = "http://127.0.0.1:8989"; Api = "v3" },
+        @{ Name = "Lidarr"; Key = "LIDARR"; Url = "http://127.0.0.1:8686"; Api = "v1" }
+    )) {
+        $apiKey = Get-EnvValue "$($a.Key)_API_KEY"
+        if (-not $apiKey) { continue }
+        $arrUrl = Get-EnvValue "$($a.Key)_URL"
+        if (-not $arrUrl) { $arrUrl = $a.Url }
+        $arrApps += [pscustomobject]@{ Name = $a.Name; Url = $arrUrl.TrimEnd('/'); Key = $apiKey; Api = $a.Api }
+    }
+    if ($arrApps.Count -eq 0) {
+        Ok "no Radarr, Sonarr or Lidarr key in .env; nothing to map here (Admin > Library folders > Path mappings covers the rest)"
+    } else {
+        $smbSource = { Get-SmbMapping -ErrorAction Stop }
+        $netUseSource = {
+            $prevEap = $ErrorActionPreference
+            $ErrorActionPreference = "Continue"
+            try { @(& net use) } finally { $ErrorActionPreference = $prevEap }
+        }
+        $regSource = {
+            Get-ChildItem "HKCU:\Network" -ErrorAction Stop | ForEach-Object {
+                [pscustomobject]@{ LocalPath = $_.PSChildName; RemotePath = (Get-ItemProperty -LiteralPath $_.PSPath).RemotePath }
+            }
+        }
+        $driveMap = Get-NetworkDriveMap $smbSource $netUseSource $regSource
+        $fetchRoots = {
+            param($app)
+            $resp = Invoke-RestMethod -Uri "$($app.Url)/api/$($app.Api)/rootfolder" -Headers @{ "X-Api-Key" = $app.Key } -TimeoutSec 8
+            @($resp | ForEach-Object { $_.path })
+        }
+        $plan = Invoke-PathMappingStep $arrApps (Get-EnvValue "PATH_REWRITE_RULES") $driveMap $fetchRoots { param($line) Info $line }
+        if ($plan.Changed) {
+            Set-EnvKey "PATH_REWRITE_RULES" $plan.Rules
+            Set-PrivateAcl $EnvFile @($svcSid)
+            foreach ($m in $plan.Added) {
+                $script:PathMappingsWritten.Add("$($m.Src) -> $($m.Dst)  (for $($m.For))")
+            }
+            Ok ("saved {0} drive mapping(s) in .env" -f $plan.Added.Count)
+        } elseif ($plan.Asked -eq 0) {
+            Info "none of the *arr apps answered, so no drive mappings were written"
+        } else {
+            Ok "no drive mappings needed"
+        }
+    }
+} catch {
+    Info "Could not set up drive mappings: $($_.Exception.Message). Add them in Admin > Library folders > Path mappings."
+}
+
+# ---------------------------------------------------------------------------
 Step "Backend packages"
 # ---------------------------------------------------------------------------
 if (-not (Test-Path $VenvPy)) {
@@ -1166,6 +1234,11 @@ if ($AndroidAppVersion) {
 if (-not $IsUpgrade) {
     $summary.Add("")
     $summary.Add("Sign in as '$AdminUser'. Your libraries fill in over the next few minutes.")
+}
+if ($script:PathMappingsWritten.Count -gt 0) {
+    $summary.Add("")
+    $summary.Add("Network drives mapped for the services (so Radarr, Sonarr and Lidarr files are found):")
+    foreach ($m in $script:PathMappingsWritten) { $summary.Add("  $m") }
 }
 # A key saved later in Admin > Metadata lives in the database, so only a
 # fresh install can tell for sure that there is none yet.

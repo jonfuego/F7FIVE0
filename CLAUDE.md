@@ -623,6 +623,23 @@ INSTALL.md for the operator view.
   (`missing_drive`, `missing_drive_count` in `arr_sync_status`, only at half or
   more of the missing files), and the Scans row says "2,662 files on N:, a drive
   letter the F7FIVE0 service can't see" with a link to the mappings.
+- Setup maps the drive letters your *arr apps use (`install.ps1` step "Mapping
+  network drives for Radarr, Sonarr and Lidarr", decisions in
+  `installer/pathmap-logic.ps1`, Pester tests in
+  `installer/tests/pathmap-logic.Tests.ps1`). Setup runs in the installing
+  user's login, where `N:` exists, so for each *arr app that has a key in
+  `.env` it asks `/api/v3/rootfolder` (Radarr, Sonarr) or `/api/v1/rootfolder`
+  (Lidarr), finds what each drive-letter root points at (`Get-SmbMapping`, then
+  `net use`, then `HKCU:\Network\<letter>\RemotePath`, which still answers when an
+  elevated Setup cannot see the connection), and saves `PATH_REWRITE_RULES` in
+  `.env` (then `Set-PrivateAcl` again). A UNC root needs nothing, an existing
+  rule for a letter is kept and never duplicated, a letter that is not a network
+  drive is left alone with a log line, and an *arr app that does not answer adds a
+  log line and nothing else: the step never fails the install. Each mapping
+  written is listed in `logs\setup-summary.txt`. It cannot see an app saved only
+  in Admin (the database) or a drive mapped by another Windows account; Admin >
+  Library folders > Path mappings covers those. New installer files go in
+  `build-dist.ps1`.
 - Updates: Admin > Updates updates the server from the latest GitHub release
   or an uploaded Setup (`backend/app/services/updates.py`,
   `installer/update.ps1`). Setup records the installed version in
