@@ -243,3 +243,14 @@ def _tmp_media_roots(monkeypatch, tmp_path_factory):
     from app.config import settings
     monkeypatch.setattr(settings, "stream_allowed_roots", str(tmp_path_factory.getbasetemp()))
     yield
+
+
+@pytest.fixture(autouse=True)
+def _forget_saved_path_mappings():
+    """The saved path mappings are cached for a few seconds (services/path_map.py);
+    never let one test's mappings leak into the next."""
+    from app.services import path_map
+
+    path_map.invalidate()
+    yield
+    path_map.invalidate()

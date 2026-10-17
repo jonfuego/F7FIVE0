@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -90,6 +91,9 @@ class SyncStats:
     # Paths an *arr app reported outside the library folders: never probed,
     # never stored (services/media_paths.py).
     files_refused: int = 0
+    # Missing files by the drive letter their stored path starts with ("N:"),
+    # so Admin can say the service cannot see a mapped drive (services/path_map).
+    missing_drives: dict = field(default_factory=dict)
     errors: int = 0
     # Rows to enrich once the caller has committed (see schedule_pending_enrichment).
     pending_movies: list = field(default_factory=list)
@@ -140,6 +144,24 @@ def _synced_count(app: str, stats: SyncStats) -> int:
     }[app]
 
 
+_DRIVE_RE = re.compile(r"^([A-Za-z]:)[\\/]")
+
+
+def drive_of(path: str) -> Optional[str]:
+    """"N:" for a path that starts with a drive letter, else None."""
+    m = _DRIVE_RE.match(path or "")
+    return m.group(1).upper() if m else None
+
+
+def _drive_visible(drive: str) -> bool:
+    """Whether this process can open the drive's root. A drive mapped only in
+    someone's Windows login is not there for a service running as LocalSystem."""
+    try:
+        return os.path.isdir(drive + "\\")
+    except OSError:
+        return False
+
+
 class _AppProgress:
     """Saves and reports one app's sync as it goes.
 
@@ -166,13 +188,24 @@ class _AppProgress:
         return {
             "synced": _synced_count(self.app, s), "errors": s.errors, "ready": s.files_ready,
             "missing": s.files_missing, "refused": s.files_refused,
+            "drives": dict(s.missing_drives),
         }
 
     def counts(self, done: int) -> dict:
-        """What has happened since this app started, with `done` items saved."""
+        """What has happened since this app started, with `done` items saved.
+        `missing_drive` / `missing_drive_count` name the drive letter most of the
+        missing files are on, when it is at least half of them."""
         now = self._tally()
-        out = {k: now[k] - self._base[k] for k in now}
+        out = {k: now[k] - self._base[k] for k in now if k != "drives"}
+        drives = {
+            d: n - self._base["drives"].get(d, 0)
+            for d, n in now["drives"].items() if n - self._base["drives"].get(d, 0) > 0
+        }
         out.update(done=done, total=max(self.total, done))
+        if drives:
+            drive, n = max(drives.items(), key=lambda kv: kv[1])
+            if n * 2 >= out["missing"]:
+                out.update(missing_drive=drive, missing_drive_count=n)
         return out
 
     def _pending_marks(self) -> tuple:
@@ -800,7 +833,7 @@ def _upsert_media_file(
     # path before the UNIQUE lookup. Keeps stored paths canonical and makes
     # every downstream read (ffprobe, os.path.exists, HLS) resolve under
     # whatever account the service is running as.
-    path = translate_path(path) or path
+    path = translate_path(path, db) or path
     # The path comes from a remote service. Hold it to the library folders
     # before anything stats, probes or stores it, so a hostile or mistaken
     # *arr cannot get an outside file parsed or marked ready.
@@ -873,6 +906,11 @@ def _probe_and_update(db: Session, mf: MediaFile, stats: SyncStats) -> None:
         if not os.path.exists(mf.path):
             mf.scan_state = ScanState.missing
             stats.files_missing += 1
+            drive = drive_of(mf.path)
+            # Only a drive letter this process cannot open counts: a file missing
+            # from a drive that is here is just missing.
+            if drive and not _drive_visible(drive):
+                stats.missing_drives[drive] = stats.missing_drives.get(drive, 0) + 1
         else:
             mf.scan_state = ScanState.error
             stats.errors += 1

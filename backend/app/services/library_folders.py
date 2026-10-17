@@ -178,7 +178,7 @@ _MEDIA_KIND = {
 
 def _hide_files_under(db: Session, kind: str, removed: list[str], keep: list[str]) -> int:
     def under(path: str, folders_: list[str]) -> bool:
-        return any(_inside(path, translate_path(f) or f) for f in folders_)
+        return any(_inside(path, translate_path(f, db) or f) for f in folders_)
 
     n = 0
     rows = db.scalars(select(MediaFile).where(MediaFile.kind == _MEDIA_KIND[kind])).all()

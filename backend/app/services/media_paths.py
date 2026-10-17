@@ -47,7 +47,7 @@ def allowed_roots(db: Session) -> list[Path]:
         if not p:
             return
         roots.append(Path(p))
-        translated = translate_path(p)
+        translated = translate_path(p, db)
         if translated and translated != p:
             roots.append(Path(translated))
 
@@ -83,7 +83,7 @@ def resolve_contained_media_path(db: Session, mf_or_path: Union[str, Path, objec
     """
     raw = mf_or_path if isinstance(mf_or_path, (str, Path)) else mf_or_path.path
     raw = str(raw)
-    return contain(db, Path(translate_path(raw) or raw))
+    return contain(db, Path(translate_path(raw, db) or raw))
 
 
 def is_contained(db: Session, path: str) -> bool:

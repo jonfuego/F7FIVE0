@@ -356,7 +356,7 @@ def _scan_root(
             release = _upsert_release(db, artist, disc, stats)
             for v in disc.videos:
                 mv = _upsert_music_video(db, artist, release, v, stats)
-                stored_path = translate_path(v.abs_path) or v.abs_path
+                stored_path = translate_path(v.abs_path, db) or v.abs_path
                 seen_paths.add(stored_path)
                 mf = _upsert_media_file(db, mv, stored_path, stats)
                 _ensure_thumb(db, mv, mf, v)
@@ -619,7 +619,7 @@ def _mark_missing(
 ) -> None:
     seen = set(seen_paths)
     skip = [
-        os.path.normcase((translate_path(r) or r).rstrip("\\/")) for r in skip_under
+        os.path.normcase((translate_path(r, db) or r).rstrip("\\/")) for r in skip_under
     ]
     rows = db.scalars(
         select(MediaFile).where(MediaFile.kind == MediaKind.music_video)
