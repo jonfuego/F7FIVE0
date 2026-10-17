@@ -51,21 +51,58 @@ import { ProgressSyncer } from "./progressSync";
 import { PodcastProgressSaver, podcastSaverBridge } from "./podcastProgress";
 import { musicLookahead } from "@/download/autoCache";
 import { setPlayerMode, setupPlayer } from "./setup";
+import { metaFromTrack, nowPlayingFromTrack, type NowPlaying, type QueueMeta } from "./nowPlayingFromTrack";
+import { createPlayTokenSource } from "./playToken";
+import { loadQueueInStages } from "./queueLoad";
 
-interface QueueMeta {
-  mediaFileId: string;
-  trackId?: string | null;
-  title: string;
-  artist?: string | null;
-  album?: string | null;
-  albumId?: string | null;
-  artistId?: string | null;
-  artPath?: string | null;
-  durationSec?: number | null;
-  /** A podcast episode: mediaFileId holds the episode id too. */
-  kind?: "podcast";
-  episodeId?: string;
-  podcastId?: string | null;
+/** A signed stream (or a local file) for one song. */
+interface SignedStream {
+  url: string;
+  art_url?: string | null;
+  cover_path?: string | null;
+}
+
+/** A track for TrackPlayer and the queue-list meta for the same song. */
+interface QueueEntry {
+  track: Track;
+  meta: QueueMeta;
+}
+
+/** Build a song's track. The meta rides on the track as custom fields so the
+ * track that is playing always says which album, art and ids it has (see
+ * nowPlayingFromTrack.ts). */
+function songEntry(s: SongRow, sig: SignedStream): QueueEntry {
+  const mediaFileId = s.media_files[0].id;
+  const track: Track = {
+    id: s.id,
+    url: sig.url,
+    title: s.title,
+    artist: s.artist_name,
+    album: s.album_title,
+    duration: s.duration_sec ?? undefined,
+    artwork: buildTrackArtwork({ base: getApiBase(), artUrl: sig.art_url, coverPath: sig.cover_path ?? s.cover_path }),
+    mediaFileId,
+    trackId: s.id,
+    albumId: s.album_id ?? undefined,
+    artistId: s.artist_id ?? undefined,
+    artPath: s.cover_path ?? undefined,
+    kind: undefined,
+    episodeId: undefined,
+    podcastId: undefined,
+    durationSec: s.duration_sec ?? undefined,
+  };
+  const meta: QueueMeta = {
+    mediaFileId,
+    trackId: s.id,
+    title: s.title,
+    artist: s.artist_name,
+    album: s.album_title,
+    albumId: s.album_id,
+    artistId: s.artist_id,
+    artPath: s.cover_path,
+    durationSec: s.duration_sec,
+  };
+  return { track, meta };
 }
 
 /** What playEpisode needs to start an episode. */
@@ -82,25 +119,15 @@ export interface PlayableEpisode {
 
 export type RepeatSetting = "off" | "all" | "one";
 
-interface NowPlaying {
-  title: string;
-  artist?: string;
-  artPath?: string | null;
-  mediaFileId?: string;
-  trackId?: string | null;
-  albumId?: string | null;
-  artistId?: string | null;
-  kind?: "podcast";
-  episodeId?: string;
-  podcastId?: string | null;
-}
-
 /** Tracks queued before and after the tapped one (see playSongs). */
 const QUEUE_BEHIND = 10;
 const QUEUE_AHEAD = 50;
 
 interface PlayerContextValue {
   ready: boolean;
+  /** True from the start of a playSongs call until its first track plays (or it
+   * fails). The Play and Shuffle buttons show it. */
+  starting: boolean;
   playSongs: (songs: SongRow[], startIndex: number) => Promise<void>;
   /** Play a podcast episode: a signed /stream/podcast URL (or the local file when
    * it is downloaded), resumed where the person left off, in podcast mode (jump
@@ -163,6 +190,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const downloadsRef = useRef(downloads);
   downloadsRef.current = downloads;
   const [ready, setReady] = useState(false);
+  const [starting, setStarting] = useState(false);
   const [hasQueue, setHasQueue] = useState(false);
   const [repeatMode, setRepeatMode] = useState<RepeatSetting>("off");
   const [shuffleOn, setShuffleOn] = useState(false);
@@ -179,7 +207,14 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   podcastSpeedRef.current = podcastSpeed;
   const rateRef = useRef(1);
   rateRef.current = playbackRate;
+  // Meta for the Queue panel list and the server queue sync, parallel to the
+  // native queue. Not a source for "what is playing": that is the active
+  // track's own fields (nowPlayingFromTrack.ts).
   const queueMeta = useRef<QueueMeta[]>([]);
+  const playTokens = useRef(createPlayTokenSource());
+  /** Identifies the list a playSongs call is starting, so a second tap on the
+   * same Play while it loads does not start a second load. */
+  const startingKey = useRef<string | null>(null);
   const recovering = useRef(false);
   const lastPlayReported = useRef<string | null>(null);
   const crossfadeRef = useRef(0);
@@ -206,6 +241,12 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const loudnessCache = useRef<Map<string, number>>(new Map());
 
   const activeTrack = useActiveTrack();
+  // The active track, kept current by the track-changed event itself (before
+  // any await) and by the hook. Sync readers use this, never a queue index.
+  const activeTrackRef = useRef<Track | null>(null);
+  useEffect(() => {
+    activeTrackRef.current = activeTrack ?? null;
+  }, [activeTrack]);
   const progress = useProgress(250);
   const playback = usePlaybackState();
   const isPlaying = playback.state === State.Playing;
@@ -235,8 +276,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const s = new ProgressSyncer({
       getSnapshot: () => {
-        const idx = activeIndexRef.current;
-        const meta = idx >= 0 ? queueMeta.current[idx] : undefined;
+        const meta = metaFromTrack(activeTrackRef.current);
         if (!meta || meta.kind === "podcast") return null;
         return {
           trackId: meta.mediaFileId,
@@ -271,8 +311,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const saver = new PodcastProgressSaver({
       currentEpisode: () => {
         if (!podcastModeRef.current) return null;
-        const idx = activeIndexRef.current;
-        const meta = idx >= 0 ? queueMeta.current[idx] : undefined;
+        const meta = metaFromTrack(activeTrackRef.current);
         if (!meta || meta.kind !== "podcast") return null;
         return { episodeId: meta.episodeId ?? meta.mediaFileId, durationSec: meta.durationSec };
       },
@@ -312,15 +351,22 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   // ---- Audio saved while it plays (download/autoCache.ts) -------------------
   /** Save the playing music track and the next two, and tell the cache what is
    * loaded so it is never removed mid-play. */
-  const cacheMusicAround = useCallback(() => {
-    const idx = activeIndexRef.current;
-    const metas = queueMeta.current;
-    const current = idx >= 0 ? metas[idx] : undefined;
+  const cacheMusicAround = useCallback(async () => {
+    let queue: Track[];
+    let idx: number;
+    try {
+      queue = await TrackPlayer.getQueue();
+      idx = (await TrackPlayer.getActiveTrackIndex()) ?? -1;
+    } catch {
+      return;
+    }
+    const metas = queue.map((t) => metaFromTrack(t));
+    const current = idx >= 0 ? metas[idx] : null;
     downloadsRef.current.setAudioInUse(current ? [current.mediaFileId] : []);
     if (!current || current.kind === "podcast") return;
     downloadsRef.current.cacheAudio(
       musicLookahead(metas, idx)
-        .filter((m) => m.kind !== "podcast")
+        .filter((m): m is QueueMeta => m !== null && m.kind !== "podcast")
         .map((m) => ({
           id: m.mediaFileId,
           kind: "track" as const,
@@ -344,12 +390,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     return downloadsRef.current.onAudioCached((id, localPath) => {
       void (async () => {
-        const idx = activeIndexRef.current;
-        const metas = queueMeta.current;
-        const current = idx >= 0 ? metas[idx] : undefined;
         try {
+          const active = await TrackPlayer.getActiveTrack();
+          const current = metaFromTrack(active);
           if (podcastModeRef.current && current?.kind === "podcast" && (current.episodeId ?? current.mediaFileId) === id) {
-            const active = await TrackPlayer.getActiveTrack();
             if (!active || active.id !== id || !/^https?:/i.test(String(active.url))) return;
             const saver = podcastSaver.current;
             saver?.suspend();
@@ -367,11 +411,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             return;
           }
           if (podcastModeRef.current) return;
+          const idx = (await TrackPlayer.getActiveTrackIndex()) ?? -1;
           const queue = await TrackPlayer.getQueue();
-          for (let i = idx + 1; i < metas.length && i < queue.length; i++) {
-            if (metas[i].mediaFileId !== id) continue;
+          for (let i = idx + 1; i < queue.length; i++) {
             const t = queue[i];
-            if (!t || !/^https?:/i.test(String(t.url))) continue;
+            if (!t || t.mediaFileId !== id || !/^https?:/i.test(String(t.url))) continue;
             await TrackPlayer.remove(i);
             await TrackPlayer.add({ ...t, url: localPath }, i);
           }
@@ -452,8 +496,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   // per-track gain from /loudness (cached by trackId), resolves a 0..1 volume by
   // the current settings, stores it as the crossfade baseline, and sets it live.
   const applyLoudness = useCallback(async () => {
-    const idx = activeIndexRef.current;
-    const meta = idx >= 0 ? queueMeta.current[idx] : undefined;
+    const startedOn = await TrackPlayer.getActiveTrack().catch(() => undefined);
+    const meta = metaFromTrack(startedOn);
     if (!loudnessOnRef.current || !meta?.trackId) {
       baseVolumeRef.current = 1;
       void TrackPlayer.setVolume(1).catch(() => {});
@@ -477,7 +521,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       }
     }
     // Guard against a race: only apply if this is still the active track.
-    if (activeIndexRef.current === idx) {
+    const stillOn = await TrackPlayer.getActiveTrack().catch(() => undefined);
+    if (stillOn?.id === startedOn?.id) {
       baseVolumeRef.current = vol;
       // During a crossfade fade-in the progress tick applies ramp * baseline.
       if (!fadingInRef.current) void TrackPlayer.setVolume(vol).catch(() => {});
@@ -509,7 +554,12 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   }, [progress.position, progress.duration]);
 
   useEffect(() => {
-    const sub = TrackPlayer.addEventListener(Event.PlaybackActiveTrackChanged, async () => {
+    const sub = TrackPlayer.addEventListener(Event.PlaybackActiveTrackChanged, (e) => {
+      // The event says which track is active now. Take the index and the track
+      // from it first, with nothing awaited, so nothing below (or any render)
+      // reads the previous track's place in the queue.
+      activeIndexRef.current = e.index ?? -1;
+      activeTrackRef.current = e.track ?? null;
       // A new track started. If the previous one ran into its crossfade window
       // (it ended on its own), ramp this one in from silence; otherwise restore
       // full volume (undo any fade). Also honor an "end of track" sleep timer.
@@ -525,14 +575,15 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         setSleepState(cleared());
       }
       // Record a play for the track we just left (Recently/Most Played inputs),
-      // the way the web dock POSTs to /api/track-plays.
-      const prevIdx = activeIndexRef.current;
-      const prev = prevIdx >= 0 ? queueMeta.current[prevIdx] : undefined;
-      if (prev?.trackId && lastPlayReported.current !== prev.trackId) {
+      // the way the web dock POSTs to /api/track-plays. The event carries the
+      // track it left and where it stopped.
+      const prev = metaFromTrack(e.lastTrack);
+      if (prev?.trackId && prev.kind !== "podcast" && lastPlayReported.current !== prev.trackId) {
         lastPlayReported.current = prev.trackId;
-        const played = Math.round((progressRef.current.position || 0) * 1000);
-        const dur = progressRef.current.duration || prev.durationSec || 0;
-        const completed = dur > 0 ? progressRef.current.position >= dur - 5 : false;
+        const lastPos = e.lastPosition || 0;
+        const played = Math.round(lastPos * 1000);
+        const dur = prev.durationSec || progressRef.current.duration || 0;
+        const completed = dur > 0 ? lastPos >= dur - 5 : false;
         if (!downloadsRef.current.online) {
           downloadsRef.current.bufferOffline({
             kind: "track_play",
@@ -545,11 +596,9 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
           void postTrackPlay(api, prev.trackId, played, completed);
         }
       }
-      const idx = (await TrackPlayer.getActiveTrackIndex()) ?? -1;
-      activeIndexRef.current = idx;
       void applyLoudness();
       syncer.current?.flush();
-      cacheMusicAround();
+      void cacheMusicAround();
       void pushQueue();
     });
     return () => sub.remove();
@@ -565,8 +614,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       if (recovering.current) return;
       recovering.current = true;
       try {
-        const idx = (await TrackPlayer.getActiveTrackIndex()) ?? -1;
-        const meta = idx >= 0 ? queueMeta.current[idx] : undefined;
+        const meta = metaFromTrack(await TrackPlayer.getActiveTrack());
         if (!meta) return;
         // The native position: the hook value freezes with the screen off, so
         // reloading at it would jump playback back by however long that was.
@@ -611,6 +659,20 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       // signed URL (Option A: fresh just before play).
       let tappedIdx = tapped ? playable.findIndex((s) => s.id === tapped.id) : 0;
       if (tappedIdx < 0) tappedIdx = 0;
+      // A second tap on the same Play while it is still starting is the same
+      // request: do not load the list twice.
+      const key = `${playable.length}:${playable[0].id}:${playable[tappedIdx].id}`;
+      if (startingKey.current === key) return;
+      startingKey.current = key;
+      // Latest tap wins: a request that is no longer current stops before its
+      // next queue change.
+      const token = playTokens.current.take();
+      setStarting(true);
+      const finish = () => {
+        if (!token.isCurrent()) return;
+        startingKey.current = null;
+        setStarting(false);
+      };
       const from = Math.max(0, tappedIdx - QUEUE_BEHIND);
       const windowed = playable.slice(from, tappedIdx + QUEUE_AHEAD);
       // Offline / downloaded first: a downloaded track plays from its local file
@@ -618,69 +680,74 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       // With no network, only downloaded tracks are queued and no stream/start
       // request is made at all (nothing to wait on).
       const offline = !downloadsRef.current.online;
-      const signed = await Promise.all(
-        windowed.map((s) => {
-          const local = downloadsRef.current.localPathFor(s.media_files[0].id);
-          if (local) return Promise.resolve<{ url: string; art_url?: string | null; cover_path?: string | null }>({ url: local });
-          if (offline) return Promise.resolve(null);
-          return startStream(api, s.media_files[0].id).catch(() => null);
-        }),
-      );
-      const tracks: Track[] = [];
-      const metas: QueueMeta[] = [];
-      let startAt = -1;
-      const tappedId = playable[tappedIdx].id;
-      windowed.forEach((s, i) => {
-        const sig = signed[i];
-        if (!sig) return;
-        // If the tapped song itself can't play (offline, not downloaded), start
-        // at the first playable one after it.
-        if (startAt < 0 && (s.id === tappedId || i > tappedIdx - from)) startAt = tracks.length;
-        tracks.push({
-          id: s.id,
-          url: sig.url,
-          title: s.title,
-          artist: s.artist_name,
-          album: s.album_title,
-          duration: s.duration_sec ?? undefined,
-          artwork: buildTrackArtwork({ base: getApiBase(), artUrl: sig.art_url, coverPath: sig.cover_path ?? s.cover_path }),
+      const sign = async (s: SongRow): Promise<QueueEntry | null> => {
+        const local = downloadsRef.current.localPathFor(s.media_files[0].id);
+        if (local) return songEntry(s, { url: local });
+        if (offline) return null;
+        const sig = await startStream(api, s.media_files[0].id).catch(() => null);
+        return sig ? songEntry(s, sig) : null;
+      };
+      try {
+        const result = await loadQueueInStages<SongRow, QueueEntry>({
+          items: windowed,
+          tappedIndex: tappedIdx - from,
+          sign,
+          isCurrent: token.isCurrent,
+          reset: async () => {
+            // Save the episode that was playing before it is replaced.
+            await podcastSaver.current?.save("switch");
+            await leavePodcastMode();
+            await TrackPlayer.reset();
+            queueMeta.current = [];
+            activeIndexRef.current = -1;
+            lastPlayReported.current = null;
+          },
+          add: async (entries, insertAt) => {
+            const tracks = entries.map((e) => e.track);
+            const metas = entries.map((e) => e.meta);
+            // Keep the meta list parallel to the native queue before the call
+            // returns, so a newer request's reset cannot land between them.
+            if (insertAt === undefined) queueMeta.current.push(...metas);
+            else queueMeta.current.splice(insertAt, 0, ...metas);
+            try {
+              if (insertAt === undefined) await TrackPlayer.add(tracks);
+              else await TrackPlayer.add(tracks, insertAt);
+            } catch (err) {
+              queueMeta.current = queueMeta.current.filter((m) => !metas.includes(m));
+              throw err;
+            }
+            // Adding in front of the playing track moves its index and fires no
+            // track-changed event; ask the player where it is now.
+            activeIndexRef.current = (await TrackPlayer.getActiveTrackIndex()) ?? -1;
+            setHasQueue(true);
+            setQueueVersion((v) => v + 1);
+          },
+          skip: (index) => TrackPlayer.skip(index),
+          play: () => TrackPlayer.play(),
+          onStarted: () => {
+            finish();
+            void applyLoudness();
+            syncer.current?.flush();
+          },
         });
-        metas.push({
-          mediaFileId: s.media_files[0].id,
-          trackId: s.id,
-          title: s.title,
-          artist: s.artist_name,
-          album: s.album_title,
-          albumId: s.album_id,
-          artistId: s.artist_id,
-          artPath: s.cover_path,
-          durationSec: s.duration_sec,
-        });
-      });
-      if (tracks.length === 0) return;
-      // Save the episode that was playing before it is replaced.
-      await podcastSaver.current?.save("switch");
-      await leavePodcastMode();
-      queueMeta.current = metas;
-      await TrackPlayer.reset();
-      await TrackPlayer.add(tracks);
-      const safeIndex = startAt < 0 ? 0 : Math.min(startAt, tracks.length - 1);
-      await TrackPlayer.skip(safeIndex);
-      activeIndexRef.current = safeIndex;
-      setHasQueue(true);
-      lastPlayReported.current = null;
-      await TrackPlayer.play();
-      void applyLoudness();
-      syncer.current?.flush();
-      cacheMusicAround();
-      setQueueVersion((v) => v + 1);
-      void pushQueue();
+        if (result === "loaded") {
+          void cacheMusicAround();
+          void pushQueue();
+        }
+      } finally {
+        // Covers a failed or empty start; a no-op once onStarted ran.
+        finish();
+      }
     },
     [api, pushQueue, applyLoudness, leavePodcastMode, cacheMusicAround],
   );
 
   const playEpisode = useCallback(
     async (ep: PlayableEpisode): Promise<boolean> => {
+      // An episode replaces whatever a music load was filling in.
+      playTokens.current.take();
+      startingKey.current = null;
+      setStarting(false);
       let url: string;
       let resume = ep.resumeSec ?? null;
       let artUrl: string | null | undefined;
@@ -734,6 +801,15 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
           album: ep.showTitle,
           duration: ep.durationSec ?? undefined,
           artwork: buildTrackArtwork({ base: getApiBase(), artUrl, coverPath }),
+          mediaFileId: ep.id,
+          trackId: undefined,
+          albumId: undefined,
+          artistId: undefined,
+          artPath: coverPath ?? undefined,
+          kind: "podcast",
+          episodeId: ep.id,
+          podcastId: ep.podcastId ?? undefined,
+          durationSec: ep.durationSec ?? undefined,
         };
         queueMeta.current = [{
           mediaFileId: ep.id,
@@ -799,13 +875,12 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const markEpisodePlayed = useCallback(async () => {
-    const idx = activeIndexRef.current;
-    const meta = idx >= 0 ? queueMeta.current[idx] : undefined;
+    const meta = metaFromTrack(await TrackPlayer.getActiveTrack());
     if (!meta || meta.kind !== "podcast") return;
     await setEpisodePlayed(api, meta.episodeId ?? meta.mediaFileId, true).catch(() => {});
   }, [api]);
 
-  /** Sign a window of songs into track-player tracks + parallel metas. */
+  /** Sign a list of songs into track-player tracks + parallel metas. */
   const signSongs = useCallback(
     async (songs: SongRow[]): Promise<{ tracks: Track[]; metas: QueueMeta[] }> => {
       const playable = songs.filter((s) => s.media_files.length > 0);
@@ -817,26 +892,9 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       playable.forEach((s, i) => {
         const sig = signed[i];
         if (!sig) return;
-        tracks.push({
-          id: s.id,
-          url: sig.url,
-          title: s.title,
-          artist: s.artist_name,
-          album: s.album_title,
-          duration: s.duration_sec ?? undefined,
-          artwork: buildTrackArtwork({ base: getApiBase(), artUrl: sig.art_url, coverPath: sig.cover_path ?? s.cover_path }),
-        });
-        metas.push({
-          mediaFileId: s.media_files[0].id,
-          trackId: s.id,
-          title: s.title,
-          artist: s.artist_name,
-          album: s.album_title,
-          albumId: s.album_id,
-          artistId: s.artist_id,
-          artPath: s.cover_path,
-          durationSec: s.duration_sec,
-        });
+        const entry = songEntry(s, sig);
+        tracks.push(entry.track);
+        metas.push(entry.meta);
       });
       return { tracks, metas };
     },
@@ -844,12 +902,14 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   );
 
   /** Play next: insert right after the current track (TrackPlayer.add with an
-   * insert index). */
+   * insert index). The slot comes from the player when this runs, not from a
+   * stored index that may be a track behind. */
   const playNext = useCallback(
     async (songs: SongRow[]) => {
       const { tracks, metas } = await signSongs(songs);
       if (tracks.length === 0) return;
-      const at = Math.max(0, activeIndexRef.current) + 1;
+      const active = (await TrackPlayer.getActiveTrackIndex()) ?? -1;
+      const at = active + 1;
       await TrackPlayer.add(tracks, at);
       queueMeta.current.splice(at, 0, ...metas);
       setHasQueue(true);
@@ -920,6 +980,9 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   );
 
   const clearQueue = useCallback(async () => {
+    playTokens.current.take();
+    startingKey.current = null;
+    setStarting(false);
     await podcastSaver.current?.save("switch");
     await TrackPlayer.reset();
     queueMeta.current = [];
@@ -944,7 +1007,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const nextOn = !shuffleRef.current;
     setShuffleOn(nextOn);
     if (nextOn) {
-      const act = activeIndexRef.current;
+      const act = (await TrackPlayer.getActiveTrackIndex()) ?? -1;
+      activeIndexRef.current = act;
       const q = await TrackPlayer.getQueue();
       const tail = q.slice(act + 1);
       if (tail.length > 1) {
@@ -972,7 +1036,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   }, [queueVersion]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const togglePlay = useCallback(async () => {
-    if (playingRef.current) {
+    // Ask the player, not a React ref: the ref lags the native state, so a quick
+    // second tap used to play again instead of pausing.
+    const { state } = await TrackPlayer.getPlaybackState();
+    if (state === State.Playing) {
       await TrackPlayer.pause();
       syncer.current?.flush();
     } else {
@@ -981,11 +1048,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const castCurrentQueue = useCallback(async (): Promise<boolean> => {
-    const metas = queueMeta.current;
+    const queue = await TrackPlayer.getQueue();
+    const metas = queue.map((t) => metaFromTrack(t)).filter((m): m is QueueMeta => m !== null);
     if (metas.length === 0 || metas.some((m) => m.kind === "podcast")) return false;
-    const startIndex = Math.max(0, activeIndexRef.current);
     const startPositionSec = Math.floor(progressRef.current.position || 0);
-    const activeMediaId = metas[startIndex]?.mediaFileId;
+    const activeMediaId = metaFromTrack(await TrackPlayer.getActiveTrack())?.mediaFileId;
     // Sign a direct cast URL per track; the receiver fetches each itself from
     // the server, so every URL must be absolute + signed (purpose:"cast" so
     // the server logs the cast start).
@@ -1039,23 +1106,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     await TrackPlayer.seekTo(sec);
   }, []);
 
-  const nowPlaying = useMemo<NowPlaying | null>(() => {
-    if (!activeTrack) return null;
-    const idx = activeIndexRef.current;
-    const meta = idx >= 0 ? queueMeta.current[idx] : undefined;
-    return {
-      title: activeTrack.title ?? "Unknown",
-      artist: activeTrack.artist,
-      artPath: meta?.artPath ?? (typeof activeTrack.artwork === "string" ? activeTrack.artwork : null),
-      mediaFileId: meta?.mediaFileId,
-      trackId: meta?.trackId ?? null,
-      albumId: meta?.albumId ?? null,
-      artistId: meta?.artistId ?? null,
-      kind: meta?.kind,
-      episodeId: meta?.episodeId,
-      podcastId: meta?.podcastId ?? null,
-    };
-  }, [activeTrack]);
+  const nowPlaying = useMemo<NowPlaying | null>(() => nowPlayingFromTrack(activeTrack), [activeTrack]);
 
   const setCrossfade = useCallback((sec: number) => {
     const c = clampCrossfade(sec);
@@ -1116,6 +1167,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo<PlayerContextValue>(
     () => ({
       ready,
+      starting,
       playSongs,
       playEpisode,
       podcastMode,
@@ -1160,6 +1212,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     }),
     [
       ready,
+      starting,
       playSongs,
       playEpisode,
       podcastMode,
