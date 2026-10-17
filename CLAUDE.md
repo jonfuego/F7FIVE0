@@ -690,6 +690,40 @@ INSTALL.md for the operator view.
 - Writing style for docs, comments, and commits: plain and direct, no em
   dashes.
 
+## Admin
+
+- `/admin` is an overview dashboard (needs attention, status tiles, streams,
+  sessions, recent plays and sign-ins, a settings grid). Each settings area is
+  its own page: `/admin/users`, `library-folders`, `scans`, `metadata`, `arr`,
+  `audio-analysis`, `remote-access`, `updates` and `activity` (sessions, auth
+  events, play history).
+- `app/admin/layout.tsx` checks the admin role once (members get "This area is
+  limited to administrators") and wraps every admin page in `AuthShell`;
+  subpages also get the section list (`components/admin/AdminSectionList.tsx`,
+  `aria-current` on the current area). Pages read the signed-in admin with
+  `useAdminMe()`.
+- The pure rules live in `frontend/lib/admin-dashboard.ts` (no React, no `@/`
+  imports, covered by `admin-dashboard.test.ts`): the area list
+  (`ADMIN_AREAS`), the old-anchor map (`ADMIN_HASH_MAP`,
+  `adminRedirectForHash`, `resolveAdminHref`), the needs-attention rules
+  (`buildAttentionItems`), the meter threshold (90 percent warns) and the tile
+  summaries. The overview's data and its one shared poll (10 s, 60 s for the
+  count tiles, paused while the tab is hidden) are in
+  `components/admin/useAdminOverview.ts`; every source fails on its own.
+- A new admin area needs a subpage under `app/admin/<area>`, an
+  `ADMIN_AREAS` entry (the section list and its tile status in
+  `settingsTiles`), a row in `components/admin/SettingsGrid.tsx`, and a hash
+  entry in `ADMIN_HASH_MAP` so an old `/admin#<section>` link still lands. The
+  backend's reminders still send `/admin#metadata` and
+  `/admin#library-folders`; the overview redirects them, so the backend was not
+  touched.
+- Admin UI uses the v3 tokens only: no raw hex, no `neutral`/`gray`/`zinc`
+  classes, `bg-hive` once on the overview (the Update button), red text is
+  `text-hive-text`, every status pairs an icon with a word, times and counts
+  use `tabular-nums`, touch targets are 44 px. A QR code stays black on white
+  (`lib/qr-colors.ts`). The admin no longer folds sections; the
+  `admin.collapsed` view pref stays valid so an old stored value still parses.
+
 ## Design system
 
 `design/` is an export of the F7FIVE0 Design System artifact in Claude, not

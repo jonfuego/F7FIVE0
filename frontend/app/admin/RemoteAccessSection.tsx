@@ -13,6 +13,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import QRCode from "qrcode";
 import { apiDelete, apiGet, apiPost, ApiError } from "@/lib/client-api";
+import { QR_DARK, QR_LIGHT } from "@/lib/qr-colors";
 import type {
   RemoteAccessMethod, RemoteAccessRun, RemoteAccessRunState, RemoteAccessStatus,
 } from "@/lib/types";
@@ -219,20 +220,20 @@ export function RemoteAccessSection() {
   return (
     <div>
       <div className="flex items-baseline justify-between gap-3">
-        <p className="text-xs text-neutral-500">
+        <p className="text-xs text-ink-3">
           Use F7FIVE0 away from home: on your phone&apos;s data, at work, at a friend&apos;s place.
         </p>
         {!active ? (
-          <button type="button" onClick={() => void load()} className="shrink-0 text-xs text-neutral-500 hover:text-neutral-200">
+          <button type="button" onClick={() => void load()} className="shrink-0 text-xs text-ink-3 hover:text-ink">
             Refresh
           </button>
         ) : null}
       </div>
 
       {loadError ? (
-        <div className="mt-4 rounded-md border border-red-900/60 bg-red-950/40 px-4 py-3 text-sm text-red-200">{loadError}</div>
+        <div className="mt-4 rounded-md border border-line bg-hive-tint px-4 py-3 text-sm text-hive-text">{loadError}</div>
       ) : status === null ? (
-        <div className="mt-4 h-24 animate-pulse rounded-md bg-neutral-900" />
+        <div className="mt-4 h-24 animate-pulse rounded-md bg-surface-2" />
       ) : (
         <div className="mt-4 space-y-4">
           {!status.available ? (
@@ -261,7 +262,7 @@ export function RemoteAccessSection() {
                   <label
                     key={m.id}
                     className={`cursor-pointer rounded-lg border p-4 text-sm ${
-                      form.method === m.id ? "border-neutral-300 bg-neutral-800/60" : "border-neutral-800 hover:border-neutral-600"
+                      form.method === m.id ? "border-ink-2 bg-surface-3" : "border-line hover:border-ink-3"
                     }`}
                   >
                     <div className="flex items-center gap-2">
@@ -272,10 +273,10 @@ export function RemoteAccessSection() {
                         checked={form.method === m.id}
                         onChange={() => setForm({ ...form, method: m.id })}
                       />
-                      <span className="font-medium text-neutral-100">{m.title}</span>
+                      <span className="font-medium text-ink">{m.title}</span>
                     </div>
-                    <p className="mt-2 text-neutral-300">{m.blurb}</p>
-                    <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-neutral-500">
+                    <p className="mt-2 text-ink-2">{m.blurb}</p>
+                    <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-ink-3">
                       {m.points.map((p) => (
                         <li key={p}>{p}</li>
                       ))}
@@ -286,7 +287,7 @@ export function RemoteAccessSection() {
 
               {form.method !== "tailscale" ? (
                 <label className="block text-sm">
-                  <span className="text-neutral-300">Address</span>
+                  <span className="text-ink-2">Address</span>
                   <input
                     type="text"
                     inputMode="url"
@@ -296,36 +297,36 @@ export function RemoteAccessSection() {
                     value={form.host}
                     onChange={(e) => setForm({ ...form, host: e.target.value })}
                     placeholder={form.method === "portforward" ? "myname.duckdns.org or music.yourdomain.com" : "music.yourdomain.com"}
-                    className="mt-1 w-full rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 font-sans text-sm text-neutral-100"
+                    className="mt-1 w-full rounded-md border border-line-strong bg-surface-1 px-3 py-2 font-sans text-sm text-ink"
                   />
                 </label>
               ) : null}
               {form.method === "portforward" && isDuck ? (
                 <label className="block text-sm">
-                  <span className="text-neutral-300">DuckDNS token</span>
+                  <span className="text-ink-2">DuckDNS token</span>
                   <input
                     type="password"
                     autoComplete="off"
                     value={form.duckdns}
                     onChange={(e) => setForm({ ...form, duckdns: e.target.value })}
-                    className="mt-1 w-full rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 font-sans text-sm text-neutral-100"
+                    className="mt-1 w-full rounded-md border border-line-strong bg-surface-1 px-3 py-2 font-sans text-sm text-ink"
                   />
-                  <span className="mt-1 block text-xs text-neutral-500">
+                  <span className="mt-1 block text-xs text-ink-3">
                     From duckdns.org. It keeps the name pointed at your home when your internet address changes.
                   </span>
                 </label>
               ) : null}
               {form.method === "token" ? (
                 <label className="block text-sm">
-                  <span className="text-neutral-300">Tunnel token</span>
+                  <span className="text-ink-2">Tunnel token</span>
                   <input
                     type="password"
                     autoComplete="off"
                     value={form.token}
                     onChange={(e) => setForm({ ...form, token: e.target.value })}
-                    className="mt-1 w-full rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 font-sans text-sm text-neutral-100"
+                    className="mt-1 w-full rounded-md border border-line-strong bg-surface-1 px-3 py-2 font-sans text-sm text-ink"
                   />
-                  <span className="mt-1 block text-xs text-neutral-500">
+                  <span className="mt-1 block text-xs text-ink-3">
                     In the Cloudflare dashboard, give the tunnel the public hostname above pointing at{" "}
                     <span className="font-sans">http://localhost:{status.web_port}</span>.
                   </span>
@@ -333,7 +334,7 @@ export function RemoteAccessSection() {
               ) : null}
 
               {form.method === "tailscale" || form.method === "cloudflare" ? (
-                <p className="text-xs text-neutral-500">
+                <p className="text-xs text-ink-3">
                   Next, a sign-in link appears here. Open it, sign in, and come back. Stay on this page:{" "}
                   {form.method === "cloudflare"
                     ? "Cloudflare allows about 9 minutes."
@@ -346,12 +347,12 @@ export function RemoteAccessSection() {
                 </p>
               ) : null}
 
-              {formError ? <p className="text-sm text-rose-300">{formError}</p> : null}
+              {formError ? <p className="text-sm text-hive-text">{formError}</p> : null}
               <div className="flex flex-wrap gap-2">
                 <button
                   type="submit"
                   disabled={busy || !status.available}
-                  className="rounded-md bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-900 hover:bg-white disabled:opacity-50"
+                  className="rounded-md bg-ink px-4 py-2 text-sm font-medium text-bg hover:bg-ink-2 disabled:opacity-50"
                 >
                   {busy ? "Starting..." : "Set it up"}
                 </button>
@@ -361,7 +362,7 @@ export function RemoteAccessSection() {
                     setPicking(false);
                     setFormError(null);
                   }}
-                  className="rounded-md border border-neutral-700 px-4 py-2 text-sm text-neutral-300 hover:bg-neutral-800"
+                  className="rounded-md border border-line-strong px-4 py-2 text-sm text-ink-2 hover:bg-surface-3"
                 >
                   Back
                 </button>
@@ -409,7 +410,7 @@ function CurrentSetup({
       return;
     }
     let cancelled = false;
-    QRCode.toDataURL(url, { margin: 1, width: 144, color: { dark: "#000000", light: "#ffffff" } })
+    QRCode.toDataURL(url, { margin: 1, width: 144, color: { dark: QR_DARK, light: QR_LIGHT } })
       .then((data) => !cancelled && setQr(data))
       .catch(() => !cancelled && setQr(null));
     return () => {
@@ -420,18 +421,18 @@ function CurrentSetup({
   if (!url) {
     return (
       <div className="space-y-3">
-        <p className="text-sm text-neutral-300">Off. F7FIVE0 works on your home network only.</p>
+        <p className="text-sm text-ink-2">Off. F7FIVE0 works on your home network only.</p>
         {status.pending_public_url ? (
-          <p className="text-xs text-neutral-500">
+          <p className="text-xs text-ink-3">
             Saved {status.pending_public_url}; F7FIVE0 picks it up after its next restart.
           </p>
         ) : null}
-        {error ? <p className="text-sm text-rose-300">{error}</p> : null}
+        {error ? <p className="text-sm text-hive-text">{error}</p> : null}
         <button
           type="button"
           onClick={onChange}
           disabled={!status.available}
-          className="rounded-md bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-900 hover:bg-white disabled:opacity-50"
+          className="rounded-md bg-ink px-4 py-2 text-sm font-medium text-bg hover:bg-ink-2 disabled:opacity-50"
         >
           Set up remote access
         </button>
@@ -441,9 +442,9 @@ function CurrentSetup({
 
   const reach =
     status.reachable === true
-      ? { text: "Connected", cls: "bg-emerald-500/15 text-emerald-300" }
+      ? { text: "Connected", cls: "bg-surface-3 text-positive" }
       : status.reachable === false
-        ? { text: "Not reachable from this server", cls: "bg-rose-500/15 text-rose-300" }
+        ? { text: "Not reachable from this server", cls: "bg-hive-tint text-hive-text" }
         : null;
 
   return (
@@ -454,15 +455,15 @@ function CurrentSetup({
           <img src={qr} alt={`QR code for ${url}`} width={144} height={144} className="rounded-md" />
         ) : null}
         <div className="min-w-0 space-y-2">
-          <p className="break-all font-sans text-sm text-neutral-100">{url}</p>
+          <p className="break-all font-sans text-sm text-ink">{url}</p>
           <div className="flex flex-wrap items-center gap-2 text-xs">
             {status.method ? (
-              <span className="rounded-full bg-neutral-800 px-2 py-0.5 text-neutral-300">{METHOD_LABEL[status.method]}</span>
+              <span className="rounded-full bg-surface-3 px-2 py-0.5 text-ink-2">{METHOD_LABEL[status.method]}</span>
             ) : null}
             {reach ? <span className={`rounded-full px-2 py-0.5 ${reach.cls}`}>{reach.text}</span> : null}
           </div>
           {status.reachable === false ? (
-            <p className="max-w-md text-xs text-neutral-500">
+            <p className="max-w-md text-xs text-ink-3">
               {status.method === "portforward"
                 ? "Many routers can't loop back to their own public address, so this check can fail at home even when it works outside. Try it on your phone with Wi-Fi off."
                 : "Check the tunnel or Tailscale on this PC, or set it up again."}
@@ -471,15 +472,15 @@ function CurrentSetup({
         </div>
       </div>
       {status.pending_public_url ? (
-        <p className="text-xs text-neutral-500">
+        <p className="text-xs text-ink-3">
           Saved {status.pending_public_url}; F7FIVE0 picks it up after its next restart.
         </p>
       ) : null}
-      {error ? <p className="text-sm text-rose-300">{error}</p> : null}
+      {error ? <p className="text-sm text-hive-text">{error}</p> : null}
       {confirmOff ? (
-        <div className="rounded-md border border-neutral-700 p-4 text-sm">
-          <p className="text-neutral-200">Turn off remote access?</p>
-          <p className="mt-1 text-xs text-neutral-500">
+        <div className="rounded-md border border-line-strong p-4 text-sm">
+          <p className="text-ink">Turn off remote access?</p>
+          <p className="mt-1 text-xs text-ink-3">
             F7FIVE0 keeps working at home. If you&apos;re using it through {url} right now, this page stops
             responding; open it at home instead.
           </p>
@@ -488,14 +489,14 @@ function CurrentSetup({
               type="button"
               disabled={busy}
               onClick={onOff}
-              className="rounded-md bg-rose-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-rose-500 disabled:opacity-50"
+              className="rounded-md border border-hive-text px-3 py-1.5 text-xs font-medium text-hive-text hover:bg-hive-tint disabled:opacity-50"
             >
               Turn off
             </button>
             <button
               type="button"
               onClick={onKeep}
-              className="rounded-md border border-neutral-700 px-3 py-1.5 text-xs text-neutral-300 hover:bg-neutral-800"
+              className="rounded-md border border-line-strong px-3 py-1.5 text-xs text-ink-2 hover:bg-surface-3"
             >
               Keep it on
             </button>
@@ -507,7 +508,7 @@ function CurrentSetup({
             type="button"
             onClick={onChange}
             disabled={!status.available}
-            className="rounded-md border border-neutral-700 px-3 py-1.5 text-xs text-neutral-300 hover:bg-neutral-800 disabled:opacity-50"
+            className="rounded-md border border-line-strong px-3 py-1.5 text-xs text-ink-2 hover:bg-surface-3 disabled:opacity-50"
           >
             Change
           </button>
@@ -515,7 +516,7 @@ function CurrentSetup({
             type="button"
             onClick={onAskOff}
             disabled={!status.available}
-            className="rounded-md border border-neutral-700 px-3 py-1.5 text-xs text-neutral-300 hover:bg-neutral-800 disabled:opacity-50"
+            className="rounded-md border border-line-strong px-3 py-1.5 text-xs text-ink-2 hover:bg-surface-3 disabled:opacity-50"
           >
             Turn off
           </button>
@@ -542,8 +543,8 @@ function RunPanel({
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-3 text-sm">
-        {active ? <span className="h-2 w-2 animate-pulse rounded-full bg-sky-400" /> : null}
-        <span className="text-neutral-200">
+        {active ? <span className="h-2 w-2 animate-pulse rounded-full bg-ink-2" /> : null}
+        <span className="text-ink">
           {run.state === "succeeded"
             ? run.method === "off"
               ? "Remote access is off."
@@ -559,27 +560,27 @@ function RunPanel({
       </div>
 
       {run.state === "signin" && run.sign_in_url ? (
-        <div className="rounded-lg border border-sky-900/60 bg-sky-950/30 p-4">
+        <div className="rounded-lg border border-line bg-surface-2 p-4">
           <a
             href={run.sign_in_url}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-block rounded-md bg-sky-500 px-5 py-2.5 text-sm font-semibold text-white hover:bg-sky-400"
+            className="inline-block rounded-md bg-ink px-5 py-2.5 text-sm font-semibold text-bg hover:bg-ink-2"
           >
             {signInLabel}
           </a>
-          <p className="mt-3 text-sm text-neutral-300">
+          <p className="mt-3 text-sm text-ink-2">
             {isCloudflare
               ? `Sign in (or create a free account), click your domain${run.host ? ` (${run.host.split(".").slice(1).join(".")})` : ""}, then Authorize. Then come back here.`
               : "Sign in (or create a free account) with Google, Microsoft, Apple, or GitHub, then come back here. If Tailscale asks you to allow Funnel, allow it."}
           </p>
           {secondsLeft != null ? (
-            <p className="mt-2 text-xs text-neutral-400">
+            <p className="mt-2 text-xs text-ink-2">
               {secondsLeft > 0 ? `Time left to sign in: ${formatClock(secondsLeft)}` : "The sign-in window closed."}
             </p>
           ) : null}
           {isCloudflare ? (
-            <p className="mt-2 text-xs text-neutral-500">
+            <p className="mt-2 text-xs text-ink-3">
               Signed in but no Authorize page? Click the button again: Cloudflare sometimes lands on its dashboard first.
             </p>
           ) : null}
@@ -587,18 +588,18 @@ function RunPanel({
       ) : null}
 
       {run.state === "succeeded" && run.public_url ? (
-        <p className="text-sm text-neutral-300">
-          F7FIVE0 is reachable at <span className="break-all font-sans text-neutral-100">{run.public_url}</span>.
+        <p className="text-sm text-ink-2">
+          F7FIVE0 is reachable at <span className="break-all font-sans text-ink">{run.public_url}</span>.
         </p>
       ) : null}
       {run.state === "failed" && run.error ? (
-        <div className="rounded-md border border-red-900/60 bg-red-950/40 px-4 py-3 text-sm text-red-200">{run.error}</div>
+        <div className="rounded-md border border-line bg-hive-tint px-4 py-3 text-sm text-hive-text">{run.error}</div>
       ) : null}
 
       {run.log.length ? (
         <details className="text-xs">
-          <summary className="cursor-pointer text-neutral-500 hover:text-neutral-300">Details</summary>
-          <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-all rounded-md bg-neutral-950 p-3 font-sans text-[11px] text-neutral-400">
+          <summary className="cursor-pointer text-ink-3 hover:text-ink">Details</summary>
+          <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-all rounded-md bg-surface-1 p-3 font-sans text-[11px] text-ink-2">
             {run.log.join("\n")}
           </pre>
         </details>
@@ -609,7 +610,7 @@ function RunPanel({
           <button
             type="button"
             onClick={onCancel}
-            className="rounded-md border border-neutral-700 px-3 py-1.5 text-xs text-neutral-300 hover:bg-neutral-800"
+            className="rounded-md border border-line-strong px-3 py-1.5 text-xs text-ink-2 hover:bg-surface-3"
           >
             Cancel
           </button>
@@ -618,7 +619,7 @@ function RunPanel({
           <button
             type="button"
             onClick={onRetry}
-            className="rounded-md bg-neutral-100 px-3 py-1.5 text-xs font-medium text-neutral-900 hover:bg-white"
+            className="rounded-md bg-ink px-3 py-1.5 text-xs font-medium text-bg hover:bg-ink-2"
           >
             Try again
           </button>
@@ -627,7 +628,7 @@ function RunPanel({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md border border-neutral-700 px-3 py-1.5 text-xs text-neutral-300 hover:bg-neutral-800"
+            className="rounded-md border border-line-strong px-3 py-1.5 text-xs text-ink-2 hover:bg-surface-3"
           >
             {run.state === "succeeded" ? "OK" : "Close"}
           </button>

@@ -257,10 +257,20 @@ button { border: 0; background: transparent; color: inherit; font: inherit; curs
   /* The hidden nav leaves a gap in the grid; pin the search + gear to
      the last column so they align with the right edge of the screen
      instead of cuddling up to the wordmark. */
-  .marquee-row .marquee-actions { grid-column: 3; justify-self: end; }
-  /* Phone keyboards eat space; keep the input narrow but typable. */
-  .marquee-search input { min-width: 0; width: 140px; }
-  .marquee-mobile-nav { display: flex; }
+  .marquee-row .marquee-actions { grid-column: 2 / 4; justify-self: end; min-width: 0; }
+  /* Phone keyboards eat space; keep the input narrow but typable. 100px keeps
+     the wordmark, search and gear inside a 390px screen. */
+  .marquee-search { min-width: 0; }
+  .marquee-search input { min-width: 0; width: 100px; }
+  /* Seven links (Podcasts joined in 1.0.11) are wider than a phone: the row
+     scrolls inside itself instead of widening the whole page. */
+  .marquee-mobile-nav {
+    display: flex;
+    justify-content: flex-start;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .marquee-mobile-nav::-webkit-scrollbar { display: none; }
 }
 
 /* ============ Hero ============ */

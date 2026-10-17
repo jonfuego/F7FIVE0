@@ -107,9 +107,9 @@ export function LibraryFoldersSection({ onSaved }: { onSaved?: () => void }) {
 
   if (!data || !draft) {
     return error ? (
-      <p className="text-xs text-red-400">{error}</p>
+      <p className="text-xs text-hive-text">{error}</p>
     ) : (
-      <div className="h-24 animate-pulse rounded-lg bg-neutral-900" />
+      <div className="h-24 animate-pulse rounded-lg bg-surface-2" />
     );
   }
 
@@ -230,7 +230,7 @@ export function LibraryFoldersSection({ onSaved }: { onSaved?: () => void }) {
 
   return (
     <div>
-      <p className="text-xs text-neutral-500">
+      <p className="text-xs text-ink-3">
         Each library can use more than one folder, on this PC or a network share
         (like <code>\\nas\media\Movies</code>). Type the path as the server sees it.
         Removing a folder takes its items out of the library; nothing is deleted.
@@ -243,14 +243,14 @@ export function LibraryFoldersSection({ onSaved }: { onSaved?: () => void }) {
           return (
             <div key={kind}>
               <div className="flex flex-wrap items-baseline justify-between gap-2">
-                <h3 className="text-sm font-medium text-neutral-100">{lib.label}</h3>
-                <span className="text-xs text-neutral-500">
+                <h3 className="text-sm font-medium text-ink">{lib.label}</h3>
+                <span className="text-xs text-ink-3">
                   {lib.arr_managed ? "Managed by your *arr app; these folders aren't scanned." : HINT[kind]}
                 </span>
               </div>
               <ul className="mt-2 space-y-1.5">
                 {draft[kind].length === 0 ? (
-                  <li className="text-xs text-neutral-500">No folders. This library is off.</li>
+                  <li className="text-xs text-ink-3">No folders. This library is off.</li>
                 ) : (
                   draft[kind].map((path) => {
                     const key = `${kind}|${path}`;
@@ -263,21 +263,21 @@ export function LibraryFoldersSection({ onSaved }: { onSaved?: () => void }) {
                       info && !info.reachable ? REASON_TEXT[info.reason] : undefined;
                     const formOpen = nasForm?.key === key;
                     return (
-                      <li key={path} className="rounded-lg border border-neutral-800 bg-neutral-950">
+                      <li key={path} className="rounded-lg border border-line bg-surface-1">
                         <div className="flex items-center gap-3 px-3 py-2">
                           <span
-                            className="min-w-0 flex-1 truncate font-mono text-xs text-neutral-200"
+                            className="min-w-0 flex-1 truncate font-mono text-xs text-ink"
                             title={path}
                           >
                             {path}
                           </span>
                           {known === undefined ? (
-                            <span className="text-xs text-neutral-500">not saved yet</span>
+                            <span className="text-xs text-ink-3">not saved yet</span>
                           ) : known ? (
-                            <span className="text-xs text-emerald-400">found</span>
+                            <span className="text-xs text-positive">found</span>
                           ) : (
                             <span
-                              className="text-xs text-amber-400"
+                              className="text-xs text-warning"
                               title="The server can't open this folder. Check the path, that the drive or NAS is on, and that the account the F7FIVE0 services run under can read it."
                             >
                               can&apos;t open
@@ -293,16 +293,16 @@ export function LibraryFoldersSection({ onSaved }: { onSaved?: () => void }) {
                           </button>
                         </div>
                         {info && unc ? (
-                          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-neutral-800/70 px-3 py-1.5">
+                          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line px-3 py-1.5">
                             {reasonText ? (
-                              <span className="text-xs text-amber-400">{reasonText}</span>
+                              <span className="text-xs text-warning">{reasonText}</span>
                             ) : null}
                             {signedInAs ? (
-                              <span className="text-xs text-neutral-400">
-                                signed in as <span className="text-neutral-200">{signedInAs}</span>
+                              <span className="text-xs text-ink-2">
+                                signed in as <span className="text-ink">{signedInAs}</span>
                               </span>
                             ) : (
-                              <span className="text-xs text-neutral-500">no NAS sign-in</span>
+                              <span className="text-xs text-ink-3">no NAS sign-in</span>
                             )}
                             <button
                               type="button"
@@ -315,13 +315,13 @@ export function LibraryFoldersSection({ onSaved }: { onSaved?: () => void }) {
                         ) : null}
                         {formOpen ? (
                           <form
-                            className="space-y-2 border-t border-neutral-800/70 px-3 py-3"
+                            className="space-y-2 border-t border-line px-3 py-3"
                             onSubmit={(e) => {
                               e.preventDefault();
                               void saveNas(server);
                             }}
                           >
-                            <p className="text-xs text-neutral-500">
+                            <p className="text-xs text-ink-3">
                               One sign-in covers every share on <code>\\{server}</code>. The
                               password is stored encrypted on the server and never shown again.
                             </p>
@@ -359,7 +359,7 @@ export function LibraryFoldersSection({ onSaved }: { onSaved?: () => void }) {
                                   Remove sign-in
                                 </button>
                               ) : null}
-                              {nasError ? <span className="text-xs text-red-400">{nasError}</span> : null}
+                              {nasError ? <span className="text-xs text-hive-text">{nasError}</span> : null}
                             </div>
                           </form>
                         ) : null}
@@ -407,9 +407,9 @@ export function LibraryFoldersSection({ onSaved }: { onSaved?: () => void }) {
             Undo changes
           </button>
         ) : null}
-        {error ? <span className="text-xs text-red-400">{error}</span> : null}
-        {status ? <span className="text-xs text-neutral-400">{status}</span> : null}
-        {nasNotice ? <span className="text-xs text-neutral-400">{nasNotice}</span> : null}
+        {error ? <span className="text-xs text-hive-text">{error}</span> : null}
+        {status ? <span className="text-xs text-ink-2">{status}</span> : null}
+        {nasNotice ? <span className="text-xs text-ink-2">{nasNotice}</span> : null}
       </div>
     </div>
   );
@@ -435,9 +435,9 @@ function PodcastStorageNote() {
   const warning = storageWarning(storage);
   return (
     <div className="mt-2 space-y-1" data-testid="podcast-storage">
-      <p className="text-xs text-neutral-400">{storageSummary(storage)}</p>
+      <p className="text-xs text-ink-2">{storageSummary(storage)}</p>
       {warning ? (
-        <p className="text-xs text-amber-400" role="alert">
+        <p className="text-xs text-warning" role="alert">
           {warning}
         </p>
       ) : null}
@@ -446,10 +446,10 @@ function PodcastStorageNote() {
 }
 
 const inputCls =
-  "w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 outline-none focus:border-neutral-500";
+  "w-full rounded-lg border border-line-strong bg-surface-1 px-3 py-2 text-sm text-ink outline-none focus:border-ink-2";
 
 const primaryButtonCls =
-  "rounded-lg bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-900 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60";
+  "rounded-lg bg-ink px-4 py-2 text-sm font-medium text-bg transition hover:bg-ink-2 disabled:cursor-not-allowed disabled:opacity-60";
 
 const smallButtonCls =
-  "rounded-md border border-neutral-800 px-2.5 py-1 text-xs text-neutral-200 transition hover:border-neutral-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-50";
+  "rounded-md border border-line px-2.5 py-1 text-xs text-ink transition hover:border-ink-3 hover:text-ink disabled:cursor-not-allowed disabled:opacity-50";
