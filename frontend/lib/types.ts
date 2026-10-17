@@ -589,6 +589,10 @@ export type StreamStartRequest = {
   // Rendition ceiling. On CPU-only servers it picks the one rendition the
   // stream carries (default 720p).
   quality?: "original" | "1080p" | "720p" | "480p";
+  // "cast" mints a stream for a Cast receiver: its own encode (never shared
+  // with this browser's own stream of the file) and a single rung. Default
+  // "play".
+  purpose?: "play" | "cast";
   // What this browser plays as-is (lib/playback-caps.ts). Lets the server
   // direct-play, for example, an H.264 + AAC MKV instead of transcoding it.
   client_caps?: {
