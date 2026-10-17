@@ -158,8 +158,9 @@ INSTALL.md for the operator view.
   non-blank value never changes).
 - Admin > Scans is the one place to start and watch scans: Movies, TV, Music,
   Music videos, Podcasts (the folder scan of the podcasts library), Podcast feeds
-  (Refresh feeds; not part of Scan all) and the *arr sync, with Scan all and a
-  button per row. The rows
+  (Refresh feeds; not part of Scan all), with Scan all and a button per row. The
+  Movies, TV and Music rows show the *arr sync's own progress when their app is
+  set, so there is no separate "*arr sync" row. The rows
   come from the pure helper `frontend/lib/scans-rows.ts`. Music is driven by the
   folder scan when Lidarr is not set and by the Lidarr sync when it is, so music
   is always scannable. `POST /api/admin/library/scan?library=movies|tv|music`
@@ -168,6 +169,14 @@ INSTALL.md for the operator view.
   and the *arr sync keeps its own status (`arr_sync_status`,
   `GET /api/admin/library/arr-sync`). Library folders keeps folder editing and
   NAS sign-in only.
+  The *arr sync saves as it goes too: `sync.full_sync` commits every 25 items
+  of an app (`sync.BATCH_SIZE`, at most 50) and at least every 5 s, then writes
+  the app's entry in `arr_sync_status` (`done`, `total` known up front,
+  `ready`, `missing`, `errors`, `refused`, `updated_at`; `scan_status.arr_set_app`),
+  so movies appear while it runs, the count is real, and an app that raises loses
+  only its open batch (status `failed` with the `done` it reached; the next app
+  still runs). Never wrap the pass in one `db_session()`. The web row says "No
+  progress since <time>" when a running app's `updated_at` is 5 minutes old.
   The folder scan saves as it goes: it commits every 25 items (`BATCH_SIZE`)
   and at the end of each library, so rows show up while it runs and a library
   that fails loses only its open batch (the others still run). Never wrap a

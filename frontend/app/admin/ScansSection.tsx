@@ -4,8 +4,9 @@
 //
 // What each row runs: Movies, TV and Music use the folder scan when no
 // Radarr / Sonarr / Lidarr is set and that app's sync when it is (never both:
-// the app owns the library). Music videos always have their own scan. The
-// *arr sync row syncs every app that is set. Podcasts is a folder scan of the
+// the app owns the library). Music videos always have their own scan. Each
+// *arr row shows its sync's own progress (done of total, and the missing,
+// error and refused counts); there is no separate *arr sync row. Podcasts is a folder scan of the
 // podcasts library, and Podcast feeds (Refresh feeds) refreshes the feeds of the
 // shows people follow. Editing the folders themselves stays in Library folders.
 //

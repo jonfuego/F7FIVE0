@@ -257,10 +257,17 @@ def arr_read(db: Session) -> dict:
     """The stored *arr sync status, with every field present:
 
         {state: "idle" | "running", started_at, finished_at, current_app,
-         apps: {radarr | sonarr | lidarr: {state, synced, errors}}, last_error}
+         apps: {radarr | sonarr | lidarr: {state, synced, errors, done, total,
+                ready, missing, refused, updated_at}}, last_error}
 
-    An app's `state` is queued, running, done or failed; `synced` is the items
-    it brought in (movies, series, artists)."""
+    An app's `state` is queued, running, done, failed or interrupted; `synced`
+    is the items it brought in (movies, series, artists). While it runs, `total`
+    is how many items the app listed (known up front), `done` how many are
+    saved so far, `ready` / `missing` / `errors` / `refused` count what
+    happened to their files, and `updated_at` is when the entry was last
+    written, so Admin can tell a sync that stopped moving. The sync saves in
+    batches (sync.BATCH_SIZE) and writes this after each one, so `done` is
+    never ahead of what the library holds."""
     out = _arr_blank()
     stored = app_settings.get(db, ARR_KEY)
     if stored:
@@ -292,11 +299,22 @@ def arr_begin(db: Session, apps: list, *, force: bool = False) -> bool:
     return True
 
 
+# The per-app progress fields the sync reports (see arr_read).
+ARR_COUNT_KEYS = ("done", "total", "ready", "missing", "refused")
+
+
 def arr_set_app(db: Session, name: str, state: str, synced: int = 0, errors: int = 0,
-                error: Optional[str] = None) -> None:
-    """Record one app's state and counts. `error` also becomes `last_error`."""
+                error: Optional[str] = None, counts: Optional[dict] = None) -> None:
+    """Record one app's state and counts. `error` also becomes `last_error`.
+    `counts` (done, total, ready, missing, refused) adds the progress fields;
+    `updated_at` is stamped whenever they are given."""
     current = arr_read(db)
-    current["apps"][name] = {"state": state, "synced": synced, "errors": errors}
+    entry = {"state": state, "synced": synced, "errors": errors}
+    if counts is not None:
+        for key in ARR_COUNT_KEYS:
+            entry[key] = int(counts.get(key, 0))
+        entry["updated_at"] = _now()
+    current["apps"][name] = entry
     if state == "running":
         current["current_app"] = name
     elif current["current_app"] == name:

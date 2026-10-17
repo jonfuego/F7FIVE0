@@ -111,12 +111,19 @@ def _run_full_sync(apps: Optional[list] = None) -> None:
             return
         _arr_status(scan_status.arr_begin, names, force=True)
 
-        def progress(app, state, synced, errors, err):
-            _arr_status(scan_status.arr_set_app, app, state, synced, errors, err)
+        def progress(app, state, synced, errors, err, counts=None):
+            _arr_status(scan_status.arr_set_app, app, state, synced, errors, err, counts)
 
         try:
-            with db_session() as db:
+            # full_sync commits as it goes (a batch at a time), so the rows show
+            # up while an app runs and a failure keeps what was saved. Do not
+            # wrap the pass in one commit-on-exit block.
+            db = SessionLocal()
+            try:
                 stats = sync.full_sync(db, only=names, on_progress=progress)
+                db.commit()
+            finally:
+                db.close()
         except Exception as exc:
             log.exception("scheduled full_sync raised")
             error = f"The sync stopped: {exc}"

@@ -228,7 +228,9 @@ def test_the_arr_sync_job_writes_running_per_app_then_idle(file_db, monkeypatch)
     with file_db() as db:
         final = scan_status.arr_read(db)
     assert final["state"] == "idle" and final["finished_at"] and final["last_error"] is None
-    assert final["apps"]["lidarr"] == {"state": "done", "synced": 7, "errors": 0}
+    assert {k: final["apps"]["lidarr"][k] for k in ("state", "synced", "errors")} == {
+        "state": "done", "synced": 7, "errors": 0,
+    }
     assert "radarr" not in final["apps"]
 
 
@@ -250,7 +252,9 @@ def test_the_arr_sync_job_records_a_failed_app_without_stopping_the_next(file_db
         final = scan_status.arr_read(db)
     assert final["state"] == "idle"
     assert final["apps"]["radarr"]["state"] == "failed" and final["apps"]["radarr"]["errors"] == 1
-    assert final["apps"]["sonarr"] == {"state": "done", "synced": 2, "errors": 0}
+    assert {k: final["apps"]["sonarr"][k] for k in ("state", "synced", "errors")} == {
+        "state": "done", "synced": 2, "errors": 0,
+    }
     assert "radarr is down" in (final["last_error"] or "")
 
 
