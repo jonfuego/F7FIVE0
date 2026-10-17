@@ -5,6 +5,7 @@ Fixtures and helpers come from test_library_scan.py and test_arr_sync_progress.p
 """
 from __future__ import annotations
 
+import os
 import uuid
 from datetime import datetime, timezone
 
@@ -24,6 +25,12 @@ from tests.test_library_scan import (  # noqa: F401  (fixtures are used by name)
 )
 
 UNC = r"\\nas\share"
+
+
+# These tests run the sync against real folders under Windows paths (N:, a share
+# folder). The product is Windows-only and CI's backend job runs on Linux; the
+# logic around them (rewrite, merge, the endpoints, env rules) runs everywhere.
+windows_only = pytest.mark.skipif(os.name != "nt", reason="uses real Windows paths")
 
 
 @pytest.fixture(autouse=True)
@@ -49,6 +56,7 @@ def _n_drive_movie(i, name="x"):
 # ---------------------------------------------------------------------------
 # B2.1: the N:\ path fails with no mapping and works with a saved one
 # ---------------------------------------------------------------------------
+@windows_only
 def test_an_n_drive_path_is_refused_without_a_mapping_and_stored_with_one(file_db, libs, monkeypatch, tmp_path):
     _radarr_key(monkeypatch)
     _strict_roots(monkeypatch)
@@ -241,6 +249,7 @@ def test_a_member_cannot_read_or_change_mappings(authed):
     assert client.get("/api/admin/path-mappings/arr-roots", headers=member_h).status_code == 403
 
 
+@windows_only
 def test_arr_roots_say_which_folders_the_service_can_open(authed, monkeypatch, tmp_path):
     client, admin_h, _member = authed
     _radarr_key(monkeypatch)
@@ -314,6 +323,7 @@ def test_an_arr_that_cannot_be_asked_is_a_note_not_a_failure(authed, monkeypatch
 # ---------------------------------------------------------------------------
 # B2.6 (backend half): the sync says which drive most missing files are on
 # ---------------------------------------------------------------------------
+@windows_only
 def test_the_status_names_the_drive_most_missing_files_are_on(file_db, libs, monkeypatch):
     _radarr_key(monkeypatch)
     _strict_roots(monkeypatch)
