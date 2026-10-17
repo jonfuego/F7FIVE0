@@ -704,6 +704,12 @@ INSTALL.md for the operator view.
   the tag makes CI bundle the APK into Setup.exe (no APK, no release), and
   `install.ps1` copies it into `data/downloads`, so the server and the app it
   hands out are always the same version.
+  The README downloads badge counts the Setup file only (shields.io has no
+  wildcard, the asset name is matched exactly), so each release bumps the version
+  in its URL (`latest/F7FIVE0-Setup-<version>.exe`) in the same `chore/app-<version>`
+  branch. CI still downloads the APK and its `.sha256` from the draft; GitHub
+  documents no way to fetch an asset without counting it, and the badge no longer
+  reads those counts.
 - Android downloads are stamped, never re-signed: the API adds the server's
   addresses (PUBLIC_URL, the address used, HOME_URL or LAN IP) as one pair in
   the APK Signing Block (`services/apk_stamp.py`, `services/android_app.py`,
