@@ -860,24 +860,35 @@ is only proven by a real update on a VM: the tests use a stub Setup.
 
 ## Session log
 
-- 2026-10-17 (Code, v1.0.16 wrap-up, release held): merged `--no-ff` to `main`, in
-  order: `fix/phone-playback-sync`; `fix/continue-label-tv-pwa` (the TV rail and
-  the PWA shortcut say "Continue", the two TV e2e flows wait on it, source-text
-  guards in `home-rails.test.ts` and `homeRail.test.ts`); `fix/continue-mv-release-art`
-  (the Continue rail sent a music video release's `cover_path`, a path on the
-  media drive no client can load, so those tiles were blank; it now sends the
-  watched video's thumb or nothing, test `backend/tests/api/test_continue_watching_art.py`);
-  `chore/download-count` (README badge reads the Setup file only; `release.yml`
-  left alone because GitHub documents no way to fetch a draft asset without
-  counting it). Which card "Birmingham (Board Mix)" is could not be confirmed:
-  the install's `.env` and database are not readable from a dev session. If it is
-  an album, its tile uses the same art lookup as the Albums rail, so a blank tile
-  there is missing art data, not code. Checks on main `cc3030b`: pytest 1169
-  passed (10 skipped), web build ok, lint 0 errors, web tests 355, mobile
-  typecheck clean, jest 450. Logs in the vault `projects\f7five0\smoke\wrap-up-1.0.16\`.
-  NOT done: the version bump (1.0.16, versionCode 17), `release-apk.ps1`, the test
-  Setup and the `v1.0.16` tag. Jon asked to hold the build while he adds more.
-  `main` is not pushed.
+- 2026-10-17 (Code, v1.0.16 wrap-up and Chromecast fix): v1.0.16 (versionCode 17) is
+  released from `main` `a1bf13a` (Setup, APK, zip, SBOMs and `SHA256SUMS.txt`; CI,
+  CodeQL and the Release run green; test Setup from the draft built first). Merged
+  `--no-ff`, in order: `fix/phone-playback-sync`; `fix/continue-label-tv-pwa` (the TV
+  rail and PWA shortcut say "Continue"); `fix/continue-mv-release-art` (the Continue
+  rail sent a music video release's `cover_path`, a path on the media drive no client
+  can load, so those tiles were blank; it now sends the watched video's thumb or
+  nothing); `chore/download-count` (README badge reads the Setup file only; `release.yml`
+  left alone because GitHub documents no way to fetch a draft asset without counting
+  it); `fix/cast-stream-identity`; `fix/cast-sender-handoff`; `chore/app-1.0.16`.
+  The Chromecast fix: the Stream log showed about 30 `same viewer switched to variant`
+  kills in a minute. With NVENC the receiver's player hopped the master playlist's three
+  rungs and each hop killed the encode something else was reading, and the phone's cast
+  start shared the phone's own encode identity. A cast start now carries a `c` token part
+  and one rung (see the cast stream identity rule); tests in
+  `backend/tests/services/test_cast_stream_identity.py`. The phone unmounts its `Video`
+  while casting and resumes at the receiver's place; the web mints a cast stream and stops
+  hls.js loading. The phone's own ExoPlayer playback did hop rungs on an NVENC server, so
+  it is now pinned to one rung (`video/rungPin.ts`). Which card "Birmingham (Board Mix)" is
+  could not be confirmed (the install's `.env` and database are not readable from a dev
+  session); if it is an album, a blank tile is missing art data. Checks on `main`
+  `c02eee6`: pytest 1186 passed (10 skipped), web build ok, lint 0 errors, web tests 364,
+  mobile typecheck clean, jest 469. Logs in the vault `projects\f7five0\smoke\wrap-up-1.0.16\`
+  (`*-v2.txt`). Not done: a clean-VM install (not run for this release) and Jon's
+  Chromecast device check (cast a transcoded movie from the phone and the web past a
+  minute, disconnect and confirm the resume, then no `same viewer switched` in the Stream
+  log between the cast job and the play job). `release-apk.ps1` run from pwsh 7 spawns
+  Windows PowerShell with PowerShell 7's module path and dies at `Get-FileHash`; reset
+  `PSModulePath` to the machine value first.
 - 2026-10-17 (Code, phone playback fixes, branch `fix/phone-playback-sync`, merged
   in the v1.0.16 wrap-up and hand tested on a phone by Jon, it passes): six problems on the phone app 1.0.15, four of them one bug. Now playing
   mixed the active track's title with the previous track's album, art and ids, so
