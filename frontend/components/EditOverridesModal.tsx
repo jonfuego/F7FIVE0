@@ -13,7 +13,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "@/components/Icon";
-import { X } from "lucide-react";
+import { Lock, LockOpen, X } from "lucide-react";
 import { ArtOverrideModal, ArtKind, ArtRole } from "@/components/ArtOverrideModal";
 import { SourceCallouts, SourceTag } from "@/components/SourceTag";
 import type {
@@ -70,6 +70,38 @@ const ART_KIND_MAP: Partial<Record<OverrideKind, ArtKind>> = {
   movie: "movie",
   series: "series",
   artist: "artist",
+};
+
+const LOCKABLE_FIELDS: Partial<Record<OverrideKind, string[]>> = {
+  movie: ["title", "sort_title", "year", "overview", "genres", "tagline", "runtime_min"],
+  series: ["title", "sort_title", "overview", "first_aired"],
+  artist: ["name", "sort_name", "overview", "country", "formed_year", "disbanded_year"],
+  album: ["title", "sort_title", "release_date", "genres"],
+  track: ["title", "sort_title", "track_number", "disc_number", "credited_as"],
+  music_video_release: ["title", "release_year"],
+};
+
+type FieldType = "text" | "number" | "textarea" | "date" | "tags";
+
+const FIELD_TYPES: Record<string, FieldType> = {
+  title: "text",
+  sort_title: "text",
+  year: "number",
+  overview: "textarea",
+  genres: "tags",
+  tagline: "text",
+  runtime_min: "number",
+  first_aired: "date",
+  name: "text",
+  sort_name: "text",
+  country: "text",
+  formed_year: "number",
+  disbanded_year: "number",
+  release_date: "date",
+  track_number: "number",
+  disc_number: "number",
+  credited_as: "text",
+  release_year: "number",
 };
 
 export function algorithmicSortHint(title: string): string {
@@ -829,6 +861,26 @@ function MetadataTab({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [adopting, setAdopting] = useState<string | null>(null);
   const [adoptError, setAdoptError] = useState<string | null>(null);
+  const [fieldDraft, setFieldDraft] = useState<Record<string, string>>({});
+  const [dirtyFields, setDirtyFields] = useState<Set<string>>(new Set());
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [lockingField, setLockingField] = useState<string | null>(null);
+
+  const lockableFields = LOCKABLE_FIELDS[kind] ?? [];
+
+  const draftFromMetadata = useCallback((md: MetadataOut): Record<string, string> => {
+    const draft: Record<string, string> = {};
+    for (const f of (LOCKABLE_FIELDS[kind] ?? [])) {
+      const val = md.fields[f];
+      if (Array.isArray(val)) {
+        draft[f] = val.join(", ");
+      } else {
+        draft[f] = val != null ? String(val) : "";
+      }
+    }
+    return draft;
+  }, [kind]);
 
   const load = useCallback(async () => {
     try {
@@ -837,12 +889,15 @@ function MetadataTab({
         setLoadError(`Failed to load (${res.status}).`);
         return;
       }
-      setData(await res.json() as MetadataOut);
+      const md = await res.json() as MetadataOut;
+      setData(md);
+      setFieldDraft(draftFromMetadata(md));
+      setDirtyFields(new Set());
       setLoadError(null);
     } catch {
       setLoadError("Failed to load metadata.");
     }
-  }, [kind, entityId]);
+  }, [kind, entityId, draftFromMetadata]);
 
   useEffect(() => {
     if (active) void load();
@@ -862,14 +917,81 @@ function MetadataTab({
         setAdoptError(await extractError(res));
         return;
       }
-      setData(await res.json() as MetadataOut);
+      const md = await res.json() as MetadataOut;
+      setData(md);
+      setFieldDraft(draftFromMetadata(md));
+      setDirtyFields(new Set());
       onApplied();
     } catch (err) {
       setAdoptError(err instanceof Error ? err.message : "Adopt failed.");
     } finally {
       setAdopting(null);
     }
-  }, [entityId, kind, onApplied]);
+  }, [entityId, kind, onApplied, draftFromMetadata]);
+
+  const handleFieldChange = useCallback((field: string, value: string) => {
+    setFieldDraft((prev) => ({ ...prev, [field]: value }));
+    setDirtyFields((prev) => new Set(prev).add(field));
+  }, []);
+
+  const handleSave = useCallback(async () => {
+    if (dirtyFields.size === 0) return;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const patch: Record<string, unknown> = {};
+      for (const field of dirtyFields) {
+        const raw = fieldDraft[field] ?? "";
+        const ftype: FieldType = FIELD_TYPES[field] ?? "text";
+        if (raw === "") {
+          patch[field] = null;
+        } else if (ftype === "number") {
+          const n = Number(raw);
+          patch[field] = Number.isFinite(n) ? n : null;
+        } else if (ftype === "tags") {
+          patch[field] = raw.split(",").map((s) => s.trim()).filter(Boolean);
+        } else {
+          patch[field] = raw;
+        }
+      }
+      const res = await fetch(`/api/admin/metadata/${kind}/${entityId}`, {
+        method: "PATCH",
+        cache: "no-store",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      if (!res.ok) {
+        setSaveError(await extractError(res));
+        return;
+      }
+      const md = await res.json() as MetadataOut;
+      setData(md);
+      setFieldDraft(draftFromMetadata(md));
+      setDirtyFields(new Set());
+      onApplied();
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Save failed.");
+    } finally {
+      setSaving(false);
+    }
+  }, [dirtyFields, fieldDraft, entityId, kind, onApplied, draftFromMetadata]);
+
+  const handleToggleLock = useCallback(async (field: string, currentlyLocked: boolean) => {
+    setLockingField(field);
+    try {
+      const body = currentlyLocked ? { unlock: [field] } : { lock: [field] };
+      const res = await fetch(`/api/admin/metadata/${kind}/${entityId}/locks`, {
+        method: "PATCH",
+        cache: "no-store",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) return;
+      await load();
+    } finally {
+      setLockingField(null);
+    }
+  }, [kind, entityId, load]);
 
   if (loadError) {
     return (
@@ -887,55 +1009,119 @@ function MetadataTab({
     );
   }
 
-  const overriddenEntries = Object.entries(data.overridden_fields);
-  const lockedFields = new Set(data.locked_fields);
+  if (lockableFields.length === 0) {
+    return (
+      <Section title="Metadata">
+        <p className="text-xs text-neutral-400">
+          Canonical field editing is not available for this kind.
+        </p>
+      </Section>
+    );
+  }
+
+  const lockedSet = new Set(data.locked_fields);
 
   return (
     <Section title="Metadata">
-      {overriddenEntries.length === 0 ? (
-        <p className="text-xs text-neutral-400">
-          No overrides pending. Use Fix Match to attach a different external
-          source, or edit fields in the General / Details tabs.
-        </p>
-      ) : (
-        <>
-          <p className="text-xs text-neutral-400">
-            These fields have a pending override value. Adopting a field
-            writes the override value as the canonical value and locks it.
-          </p>
-          <ul className="mt-2 space-y-2">
-            {overriddenEntries.map(([field, value]) => (
-              <li
-                key={field}
-                className="flex items-center gap-3 rounded border border-neutral-800 bg-neutral-950/60 px-3 py-2"
-              >
-                <div className="flex-1 min-w-0">
-                  <span className="text-xs font-medium text-neutral-300">{field}</span>
-                  {lockedFields.has(field) && (
-                    <span className="ml-2 text-[10px] text-neutral-500">locked</span>
-                  )}
-                  <p className="mt-0.5 truncate text-[11px] text-neutral-400">
-                    {String(value ?? "")}
-                  </p>
-                </div>
+      <div className="space-y-3">
+        {lockableFields.map((field) => {
+          const ftype: FieldType = FIELD_TYPES[field] ?? "text";
+          const isLocked = lockedSet.has(field);
+          const hasOverride = field in data.overridden_fields;
+          const overrideValue = data.overridden_fields[field];
+          const currentDraft = fieldDraft[field] ?? "";
+          const isDirty = dirtyFields.has(field);
+
+          return (
+            <div key={field} className="space-y-1">
+              <div className="flex items-center justify-between gap-2">
+                <label className="text-xs text-neutral-300 capitalize">
+                  {field.replace(/_/g, " ")}
+                </label>
                 <button
                   type="button"
-                  onClick={() => adoptOverride(field)}
-                  disabled={adopting === field}
-                  className="rounded bg-neutral-800 px-2.5 py-1 text-xs text-neutral-100 hover:bg-neutral-700 disabled:opacity-50"
+                  onClick={() => handleToggleLock(field, isLocked)}
+                  disabled={lockingField === field}
+                  title={isLocked ? "Unlock field" : "Lock field"}
+                  className="rounded p-0.5 text-neutral-400 hover:text-neutral-100 disabled:opacity-50"
+                  aria-label={isLocked ? `Unlock ${field}` : `Lock ${field}`}
                 >
-                  {adopting === field ? "Adopting..." : "Use as edit"}
+                  <Icon icon={isLocked ? Lock : LockOpen} size={12} />
                 </button>
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
-      {adoptError && (
-        <p className="mt-2 rounded border border-red-900/60 bg-red-950/40 px-3 py-2 text-xs text-red-200">
-          {adoptError}
-        </p>
-      )}
+              </div>
+              {ftype === "textarea" ? (
+                <textarea
+                  value={currentDraft}
+                  onChange={(e) => handleFieldChange(field, e.target.value)}
+                  rows={3}
+                  className={`${inputClass} resize-y`}
+                />
+              ) : ftype === "number" ? (
+                <input
+                  type="number"
+                  value={currentDraft}
+                  onChange={(e) => handleFieldChange(field, e.target.value)}
+                  className={inputClass}
+                />
+              ) : ftype === "date" ? (
+                <input
+                  type="date"
+                  value={currentDraft}
+                  onChange={(e) => handleFieldChange(field, e.target.value)}
+                  className={inputClass}
+                />
+              ) : (
+                <input
+                  type="text"
+                  value={currentDraft}
+                  onChange={(e) => handleFieldChange(field, e.target.value)}
+                  className={inputClass}
+                />
+              )}
+              {isDirty && (
+                <p className="text-[10px] text-amber-500">Unsaved change</p>
+              )}
+              {hasOverride && (
+                <div className="flex items-center gap-2 rounded border border-amber-900/40 bg-amber-950/30 px-2 py-1">
+                  <p className="min-w-0 flex-1 truncate text-[10px] text-amber-300">
+                    Override: {String(overrideValue ?? "")}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => adoptOverride(field)}
+                    disabled={adopting === field}
+                    className="shrink-0 rounded bg-neutral-800 px-2 py-0.5 text-[10px] text-neutral-100 hover:bg-neutral-700 disabled:opacity-50"
+                  >
+                    {adopting === field ? "Adopting..." : "Use as edit"}
+                  </button>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <div className="mt-3 flex items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          {saveError && (
+            <p className="rounded border border-red-900/60 bg-red-950/40 px-3 py-2 text-xs text-red-200">
+              {saveError}
+            </p>
+          )}
+          {adoptError && (
+            <p className="rounded border border-red-900/60 bg-red-950/40 px-3 py-2 text-xs text-red-200">
+              {adoptError}
+            </p>
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={saving || dirtyFields.size === 0}
+          className="shrink-0 rounded bg-hive px-3 py-1.5 text-sm font-medium text-on-hive hover:bg-hive-hover disabled:opacity-50"
+        >
+          {saving ? "Saving..." : "Save changes"}
+        </button>
+      </div>
     </Section>
   );
 }
