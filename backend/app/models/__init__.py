@@ -31,6 +31,9 @@ from app.models.share import ShareLink  # noqa: F401
 # Admin overrides
 from app.models.art import ArtOverride  # noqa: F401
 
+# Metadata editor locks
+from app.models.metadata_lock import MetadataLock  # noqa: F401
+
 # Media requests
 from app.models.request import Request  # noqa: F401
 

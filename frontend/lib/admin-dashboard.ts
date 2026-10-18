@@ -7,7 +7,7 @@
 //   - the "Needs attention" items (buildAttentionItems)
 //   - the five status tiles (versionTile, remoteTile, streamingTile,
 //     storageMeters, libraryTile)
-//   - the nine settings tiles (settingsTiles)
+//   - the ten settings tiles (settingsTiles)
 //   - the old /admin#<section> links (adminRedirectForHash)
 //
 // A new admin area needs three things: a subpage under app/admin/<area>, an
@@ -22,11 +22,12 @@ import type { ScanRow } from "./scans-rows.ts";
 // ---------------------------------------------------------------------------
 export type AdminAreaId =
   | "users" | "library-folders" | "scans" | "metadata" | "arr"
-  | "audio-analysis" | "remote-access" | "updates" | "activity";
+  | "audio-analysis" | "remote-access" | "updates" | "activity"
+  | "library-health";
 
 export type AdminArea = { id: AdminAreaId; label: string; href: string };
 
-/** The nine settings areas, in the order of the section list and the tile grid. */
+/** The ten settings areas, in the order of the section list and the tile grid. */
 export const ADMIN_AREAS: readonly AdminArea[] = [
   { id: "users", label: "Users", href: "/admin/users" },
   { id: "library-folders", label: "Libraries", href: "/admin/library-folders" },
@@ -34,6 +35,7 @@ export const ADMIN_AREAS: readonly AdminArea[] = [
   { id: "metadata", label: "Metadata", href: "/admin/metadata" },
   { id: "arr", label: "Radarr, Sonarr and Lidarr", href: "/admin/arr" },
   { id: "audio-analysis", label: "Audio analysis", href: "/admin/audio-analysis" },
+  { id: "library-health", label: "Library health", href: "/admin/library-health" },
   { id: "remote-access", label: "Remote access", href: "/admin/remote-access" },
   { id: "updates", label: "Updates", href: "/admin/updates" },
   { id: "activity", label: "Activity log", href: "/admin/activity" },
@@ -53,6 +55,7 @@ export const ADMIN_HASH_MAP: Readonly<Record<string, string>> = {
   metadata: "/admin/metadata",
   arr: "/admin/arr",
   "audio-analysis": "/admin/audio-analysis",
+  "library-health": "/admin/library-health",
   sessions: "/admin/activity",
   "auth-events": "/admin/activity",
   history: "/admin/activity",
@@ -196,7 +199,12 @@ export type ArrRootLike = {
   drive: string | null;
 };
 
-export type AttentionKind = "reminder" | "transcode" | "scan" | "root" | "update" | "remote";
+export type AttentionKind = "reminder" | "transcode" | "scan" | "root" | "update" | "remote" | "health";
+
+export type LibraryHealthLike = {
+  missing_files_eligible: number;
+  unreachable_folders: number;
+};
 
 export type AttentionItem = {
   /** Stable key for React. */
@@ -218,6 +226,8 @@ export type AttentionInputs = {
   remote: RemoteLike | null;
   /** The *arr apps' root folders; leave out (or null) when not loaded. */
   arrRoots?: ArrRootLike[] | null;
+  /** Library health counts; leave out (or null) when not loaded. */
+  libraryHealth?: LibraryHealthLike | null;
 };
 
 /** The "Streaming now" panel is on the overview, so a slow-stream item links to
@@ -310,6 +320,28 @@ export function buildAttentionItems(inputs: AttentionInputs): AttentionItem[] {
       detail: null,
       linkLabel: "Open Remote access",
       href: "/admin/remote-access",
+    });
+  }
+
+  const lh = inputs.libraryHealth;
+  if (lh && lh.missing_files_eligible > 0) {
+    items.push({
+      id: "health:missing",
+      kind: "health",
+      text: `${plural(lh.missing_files_eligible, "missing file", "missing files")} eligible for cleanup`,
+      detail: null,
+      linkLabel: "Open Library health",
+      href: "/admin/library-health",
+    });
+  }
+  if (lh && lh.unreachable_folders > 0) {
+    items.push({
+      id: "health:unreachable",
+      kind: "health",
+      text: `${plural(lh.unreachable_folders, "library folder", "library folders")} unreachable`,
+      detail: null,
+      linkLabel: "Open Library health",
+      href: "/admin/library-health",
     });
   }
 
@@ -613,6 +645,7 @@ export type SettingsSources = {
   audio: AudioProgressLike | null;
   remote: RemoteLike | null;
   updates: UpdatesLike | null;
+  libraryHealth?: LibraryHealthLike | null;
 };
 
 export type SettingsTile = {
@@ -629,7 +662,7 @@ export function arrStatus(arr: ArrLike): string {
   return on.length > 0 ? `${on.join(", ")} connected` : "Not connected";
 }
 
-/** The nine tiles of the settings grid, in ADMIN_AREAS order. A source that has
+/** The ten tiles of the settings grid, in ADMIN_AREAS order. A source that has
  *  not loaded gives an empty status; the tile is still a link. */
 export function settingsTiles(src: SettingsSources): SettingsTile[] {
   const status: Record<AdminAreaId, { text: string; tone: Tone }> = {
@@ -639,6 +672,7 @@ export function settingsTiles(src: SettingsSources): SettingsTile[] {
     metadata: { text: "", tone: "neutral" },
     arr: { text: "", tone: "neutral" },
     "audio-analysis": { text: "", tone: "neutral" },
+    "library-health": { text: "", tone: "neutral" },
     "remote-access": { text: "", tone: "neutral" },
     updates: { text: "", tone: "neutral" },
     activity: { text: "Sessions, sign-ins, play history", tone: "neutral" },
@@ -672,6 +706,16 @@ export function settingsTiles(src: SettingsSources): SettingsTile[] {
   if (src.updates) {
     const s = updatesSummary(src.updates);
     status.updates = { text: s.text, tone: s.attention ? "warning" : "neutral" };
+  }
+  if (src.libraryHealth) {
+    const lh = src.libraryHealth;
+    const attention = lh.missing_files_eligible > 0 || lh.unreachable_folders > 0;
+    status["library-health"] = {
+      text: attention
+        ? `${lh.missing_files_eligible} eligible for cleanup · ${lh.unreachable_folders} unreachable`
+        : "No issues",
+      tone: attention ? "warning" : "neutral",
+    };
   }
 
   return ADMIN_AREAS.map((a) => ({

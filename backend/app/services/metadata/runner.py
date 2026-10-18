@@ -32,6 +32,7 @@ from app.services.metadata._base import ProviderError
 from app.services.metadata.musicbrainz import MusicBrainzClient
 from app.services.metadata.tmdb import TMDBClient
 from app.services.metadata.wikipedia import WikipediaClient
+from app.services import metadata_locks
 
 
 log = logging.getLogger("f7five0.metadata.runner")
@@ -221,11 +222,17 @@ def enrich_movie(
         if (p.get("job") or "").lower() == "director"
     ]
 
+    locked = metadata_locks.locked_fields(db, "movie", movie.id)
+    if "title" not in locked:
+        title = payload.get("title")
+        if title:
+            movie.title = title
     # An empty answer never wipes genres Radarr (or an earlier run) saved.
     genres = tmdb_genre_names(payload)
-    if genres:
+    if genres and "genres" not in locked:
         movie.genres = genres
-    movie.tagline = payload.get("tagline") or None
+    if "tagline" not in locked:
+        movie.tagline = payload.get("tagline") or None
     movie.movie_cast = cast_top
     movie.directors = directors
     rating = payload.get("vote_average")
@@ -281,7 +288,7 @@ def backfill_movie_genres(
                     log.warning("tmdb genres fetch failed for movie %s: %s", movie.id, exc)
                     payload = None
                 names = tmdb_genre_names(payload)
-                if names:
+                if names and not metadata_locks.is_locked(db, "movie", movie.id, "genres"):
                     movie.genres = names
                     filled += 1
                 if pause_sec > 0:
@@ -396,13 +403,17 @@ def enrich_artist(
         db.commit()
         return MetadataResult(status="no_external_id", provider="musicbrainz")
 
-    artist.country = mb_payload.get("country") or None
+    locked = metadata_locks.locked_fields(db, "artist", artist.id)
+    if "country" not in locked:
+        artist.country = mb_payload.get("country") or None
     artist.artist_type = mb_payload.get("type") or None
     life_span = mb_payload.get("life-span") or {}
-    artist.formed_year = _safe_year(life_span.get("begin"))
-    artist.disbanded_year = (
-        _safe_year(life_span.get("end")) if life_span.get("ended") else None
-    )
+    if "formed_year" not in locked:
+        artist.formed_year = _safe_year(life_span.get("begin"))
+    if "disbanded_year" not in locked:
+        artist.disbanded_year = (
+            _safe_year(life_span.get("end")) if life_span.get("ended") else None
+        )
     relations = mb_payload.get("relations") or []
     artist.links = _extract_links(relations)
 
@@ -536,11 +547,12 @@ def enrich_series(
         # Key unset or TMDB 404 for this id. Nothing to write.
         return MetadataResult(status="no_external_id", provider="tmdb")
 
+    locked = metadata_locks.locked_fields(db, "series", series.id)
     overview = payload.get("overview")
-    if overview:
+    if overview and "overview" not in locked:
         series.overview = overview
     aired = _parse_date(payload.get("first_air_date"))
-    if aired is not None:
+    if aired is not None and "first_aired" not in locked:
         series.first_aired = aired
     db.commit()
 

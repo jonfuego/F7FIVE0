@@ -68,7 +68,7 @@ from app.models.media_file import MediaFile, MediaKind, ScanState
 from app.models.movie import Movie
 from app.models.music import Album, Artist, Track
 from app.models.tv import Episode, Season, Series
-from app.services import arr_settings, ffprobe, library_folders, tmdb_key
+from app.services import arr_settings, ffprobe, history_keys, library_folders, metadata_locks, tmdb_key
 from app.services.credits import parse_credit, resolve_artist
 from app.services.path_map import translate as translate_path
 
@@ -544,7 +544,8 @@ def _upsert_file(
         size = os.path.getsize(path)
     except OSError:
         size = None
-    if mf is None:
+    is_new = mf is None
+    if is_new:
         mf = MediaFile(kind=kind, ref_id=ref_id, path=path)
         db.add(mf)
     else:
@@ -559,6 +560,8 @@ def _upsert_file(
     if size is not None:
         mf.size_bytes = size
     db.flush()
+    if is_new:
+        history_keys.relink_history(db, mf)
     stats.files_seen += 1
     if changed or mf.scan_state != ScanState.ready or mf.probed_at is None:
         _probe(mf, stats)
@@ -570,6 +573,8 @@ def _probe(mf: MediaFile, stats: FolderScanStats) -> None:
     if result is None:
         if not os.path.exists(mf.path):
             mf.scan_state = ScanState.missing
+            if mf.missing_since is None:
+                mf.missing_since = datetime.now(timezone.utc)
             stats.files_missing += 1
         else:
             mf.scan_state = ScanState.error
@@ -586,6 +591,7 @@ def _probe(mf: MediaFile, stats: FolderScanStats) -> None:
     mf.height = result.height or mf.height
     mf.probed_at = datetime.now(timezone.utc)
     mf.scan_state = ScanState.ready
+    mf.missing_since = None
     stats.files_probed += 1
 
 
@@ -599,6 +605,8 @@ def _mark_missing_under(db: Session, kind: MediaKind, root: str, seen: set[str],
             continue
         if p not in seen and mf.scan_state != ScanState.missing:
             mf.scan_state = ScanState.missing
+            if mf.missing_since is None:
+                mf.missing_since = datetime.now(timezone.utc)
             stats.files_missing += 1
 
 
@@ -1334,9 +1342,13 @@ def _import_one_track(
         stats.tracks += 1
     else:
         track.album_id = album.id
-        track.title = ft.title or track.title
-        track.track_number = ft.track
-        track.disc_number = ft.disc
+        _locked = metadata_locks.locked_fields(db, "track", track.id)
+        if "title" not in _locked:
+            track.title = ft.title or track.title
+        if "track_number" not in _locked:
+            track.track_number = ft.track
+        if "disc_number" not in _locked:
+            track.disc_number = ft.disc
         if ft.credited_as and not track.credited_as:
             track.credited_as = ft.credited_as
     mf = _upsert_file(db, kind=MediaKind.track, ref_id=track.id, path=path, stats=stats, library_id=library_id)

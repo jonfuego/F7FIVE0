@@ -44,7 +44,12 @@ class WatchProgress(Base):
 
 
 class WatchHistory(UUIDPKMixin, Base):
-    """One row per playback session (start → end)."""
+    """One row per playback session (start -> end).
+
+    When the media file is deleted, media_file_id becomes NULL (SET NULL).
+    ref_kind, ref_id, last_path, and ref_key allow the row to be relinked to a
+    new MediaFile row when the file reappears or is re-scanned.
+    """
 
     __tablename__ = "watch_history"
 
@@ -54,15 +59,22 @@ class WatchHistory(UUIDPKMixin, Base):
         nullable=False,
         index=True,
     )
-    media_file_id: Mapped[uuid.UUID] = mapped_column(
+    media_file_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("media_files.id", ondelete="CASCADE"),
-        nullable=False,
+        ForeignKey("media_files.id", ondelete="SET NULL"),
+        nullable=True,
         index=True,
     )
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     ended_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     last_position_sec: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    # Orphan-relinking fields. Populated on every new row and on existing rows
+    # by migration 0031 backfill, so a deleted file's history survives.
+    ref_kind: Mapped[Optional[str]] = mapped_column(String(32))
+    ref_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True))
+    last_path: Mapped[Optional[str]] = mapped_column(String(2048))
+    ref_key: Mapped[Optional[str]] = mapped_column(String(128))
 
     __table_args__ = (
         Index("ix_watch_history_user_started", "user_id", "started_at"),

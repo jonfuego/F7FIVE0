@@ -4,13 +4,17 @@ One row per finished or skipped-with-progress track. Powers the
 Most Played / Never Played / Recently Played / Artist Radio kinds in
 the auto-playlist module. Sized to be cheap: no indexes beyond the two
 the playlist queries need.
+
+When a track is deleted, track_id becomes NULL (SET NULL). last_path and
+ref_key allow the row to be relinked when a matching track reappears.
 """
 from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -26,10 +30,10 @@ class TrackPlay(UUIDPKMixin, Base):
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
     )
-    track_id: Mapped[uuid.UUID] = mapped_column(
+    track_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("tracks.id", ondelete="CASCADE"),
-        nullable=False,
+        ForeignKey("tracks.id", ondelete="SET NULL"),
+        nullable=True,
     )
     played_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -38,6 +42,10 @@ class TrackPlay(UUIDPKMixin, Base):
     )
     ms_played: Mapped[int] = mapped_column(Integer, nullable=False)
     completed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    # Orphan-relinking fields.
+    last_path: Mapped[Optional[str]] = mapped_column(String(2048))
+    ref_key: Mapped[Optional[str]] = mapped_column(String(128))
 
     __table_args__ = (
         Index("ix_track_plays_user_track", "user_id", "track_id"),

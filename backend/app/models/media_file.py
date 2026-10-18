@@ -72,6 +72,9 @@ class MediaFile(UUIDPKMixin, TimestampMixin, Base):
         default=ScanState.pending,
         nullable=False,
     )
+    # Set when the file is first seen as missing; cleared when it reappears.
+    # The health endpoint uses this (not updated_at) for the 7-day eligibility check.
+    missing_since: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
     __table_args__ = (
         Index("ix_media_files_kind_ref", "kind", "ref_id"),

@@ -24,7 +24,7 @@ import type {
   OverrideUpdate,
 } from "@/lib/types";
 
-type TabId = "general" | "details" | "art" | "match" | "refresh";
+type TabId = "general" | "details" | "art" | "match" | "refresh" | "metadata";
 
 type FieldState<T> = {
   value: T | null;
@@ -55,6 +55,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: "art", label: "Art" },
   { id: "match", label: "Fix Match" },
   { id: "refresh", label: "Refresh" },
+  { id: "metadata", label: "Metadata" },
 ];
 
 // `runtime_min` only makes sense for video kinds. The Pydantic schema
@@ -170,6 +171,7 @@ export default function EditOverridesModal({
   if (!open) return null;
 
   const showSaveBar = tab === "general" || tab === "details";
+  const showMetadata = tab === "metadata";
 
   return (
     <>
@@ -247,13 +249,20 @@ export default function EditOverridesModal({
                   onApplied={onApplied}
                   onClose={onClose}
                 />
-              ) : (
+              ) : tab === "refresh" ? (
                 <RefreshTab
                   kind={kind}
                   entityId={entityId}
                   external={initial.external_id}
                   onApplied={onApplied}
                   onClose={onClose}
+                />
+              ) : (
+                <MetadataTab
+                  kind={kind}
+                  entityId={entityId}
+                  active={showMetadata}
+                  onApplied={onApplied}
                 />
               )}
 
@@ -791,6 +800,142 @@ function RefreshTab({
           {error}
         </p>
       ) : null}
+    </Section>
+  );
+}
+
+// ---- Metadata tab ----------------------------------------------------------
+
+type MetadataOut = {
+  kind: string;
+  entity_id: string;
+  fields: Record<string, unknown>;
+  locked_fields: string[];
+  overridden_fields: Record<string, unknown>;
+};
+
+function MetadataTab({
+  kind,
+  entityId,
+  active,
+  onApplied,
+}: {
+  kind: OverrideKind;
+  entityId: string;
+  active: boolean;
+  onApplied: () => void;
+}) {
+  const [data, setData] = useState<MetadataOut | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [adopting, setAdopting] = useState<string | null>(null);
+  const [adoptError, setAdoptError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/admin/metadata/${kind}/${entityId}`, { cache: "no-store" });
+      if (!res.ok) {
+        setLoadError(`Failed to load (${res.status}).`);
+        return;
+      }
+      setData(await res.json() as MetadataOut);
+      setLoadError(null);
+    } catch {
+      setLoadError("Failed to load metadata.");
+    }
+  }, [kind, entityId]);
+
+  useEffect(() => {
+    if (active) void load();
+  }, [active, load]);
+
+  const adoptOverride = useCallback(async (field: string) => {
+    setAdopting(field);
+    setAdoptError(null);
+    try {
+      const res = await fetch(`/api/admin/metadata/${kind}/${entityId}`, {
+        method: "PATCH",
+        cache: "no-store",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ adopt_overrides: [field] }),
+      });
+      if (!res.ok) {
+        setAdoptError(await extractError(res));
+        return;
+      }
+      setData(await res.json() as MetadataOut);
+      onApplied();
+    } catch (err) {
+      setAdoptError(err instanceof Error ? err.message : "Adopt failed.");
+    } finally {
+      setAdopting(null);
+    }
+  }, [entityId, kind, onApplied]);
+
+  if (loadError) {
+    return (
+      <Section title="Metadata">
+        <p className="text-xs text-red-400">{loadError}</p>
+      </Section>
+    );
+  }
+
+  if (!data) {
+    return (
+      <Section title="Metadata">
+        <p className="text-xs text-neutral-500">Loading...</p>
+      </Section>
+    );
+  }
+
+  const overriddenEntries = Object.entries(data.overridden_fields);
+  const lockedFields = new Set(data.locked_fields);
+
+  return (
+    <Section title="Metadata">
+      {overriddenEntries.length === 0 ? (
+        <p className="text-xs text-neutral-400">
+          No overrides pending. Use Fix Match to attach a different external
+          source, or edit fields in the General / Details tabs.
+        </p>
+      ) : (
+        <>
+          <p className="text-xs text-neutral-400">
+            These fields have a pending override value. Adopting a field
+            writes the override value as the canonical value and locks it.
+          </p>
+          <ul className="mt-2 space-y-2">
+            {overriddenEntries.map(([field, value]) => (
+              <li
+                key={field}
+                className="flex items-center gap-3 rounded border border-neutral-800 bg-neutral-950/60 px-3 py-2"
+              >
+                <div className="flex-1 min-w-0">
+                  <span className="text-xs font-medium text-neutral-300">{field}</span>
+                  {lockedFields.has(field) && (
+                    <span className="ml-2 text-[10px] text-neutral-500">locked</span>
+                  )}
+                  <p className="mt-0.5 truncate text-[11px] text-neutral-400">
+                    {String(value ?? "")}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => adoptOverride(field)}
+                  disabled={adopting === field}
+                  className="rounded bg-neutral-800 px-2.5 py-1 text-xs text-neutral-100 hover:bg-neutral-700 disabled:opacity-50"
+                >
+                  {adopting === field ? "Adopting..." : "Use as edit"}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {adoptError && (
+        <p className="mt-2 rounded border border-red-900/60 bg-red-950/40 px-3 py-2 text-xs text-red-200">
+          {adoptError}
+        </p>
+      )}
     </Section>
   );
 }

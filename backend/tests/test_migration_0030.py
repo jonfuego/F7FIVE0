@@ -1,9 +1,9 @@
 """Migration 0030 round-trip on a scratch SQLite database.
 
 Builds the pre-0030 schema (users, the old one-folder-per-row `libraries`, and
-`media_files`), stamps it at 0029, runs `alembic upgrade head` (which runs only
-0030), checks the new shape, then runs one `downgrade` step and checks the new
-objects are gone. Also asserts 0030 is the single Alembic head.
+`media_files`), stamps it at 0029, runs `alembic upgrade 0030` (one step),
+checks the new shape, then runs one `downgrade` step and checks the new
+objects are gone.
 
 Only 0030 runs against SQLite here: the full 0001..0029 chain uses PostgreSQL-only
 DDL (ALTER CONSTRAINT, enum ALTER TYPE) that SQLite cannot replay, so the pre-0030
@@ -14,10 +14,8 @@ from __future__ import annotations
 import uuid
 from pathlib import Path
 
-import pytest
 from alembic import command
 from alembic.config import Config
-from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, inspect, text
 
 _BACKEND = Path(__file__).resolve().parent.parent
@@ -55,13 +53,6 @@ def _build_pre_0030(engine) -> None:
             )
 
 
-def test_0030_is_the_single_head():
-    cfg = _config("sqlite://")
-    script = ScriptDirectory.from_config(cfg)
-    heads = list(script.get_heads())
-    assert heads == ["0030"], heads
-
-
 def test_0030_upgrade_then_downgrade_round_trip(tmp_path, monkeypatch):
     from app.config import settings
 
@@ -76,8 +67,8 @@ def test_0030_upgrade_then_downgrade_round_trip(tmp_path, monkeypatch):
     cfg = _config(url)
     command.stamp(cfg, "0029")
 
-    # Upgrade head (only 0030 runs).
-    command.upgrade(cfg, "head")
+    # Upgrade one step (0030 only).
+    command.upgrade(cfg, "0030")
     insp = inspect(engine)
     tables = set(insp.get_table_names())
     assert "library_folders" in tables

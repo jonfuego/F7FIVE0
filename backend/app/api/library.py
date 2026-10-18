@@ -44,7 +44,7 @@ from app.models.playback import WatchProgress
 from app.models.track_play import TrackPlay
 from app.models.tv import Episode, Series
 from app.models.user import User
-from app.services import arr_settings, library_access, scan_status
+from app.services import arr_settings, history_keys, library_access, scan_status
 from app.services.bio_excerpt import bio_excerpt
 from app.services.art import resolve_art, resolve_art_batch
 
@@ -1774,11 +1774,24 @@ def create_track_play(
     if track is None:
         raise HTTPException(status_code=404, detail="track_not_found")
 
+    # Find the media file path for relinking when the track is later deleted.
+    mf = db.scalar(
+        select(MediaFile).where(
+            MediaFile.kind == MediaKind.track,
+            MediaFile.ref_id == body.track_id,
+            MediaFile.scan_state == ScanState.ready,
+        ).limit(1)
+    )
+    last_path = mf.path if mf else None
+    ref_key = history_keys.provider_key(db, "track", track)
+
     row = TrackPlay(
         user_id=user.id,
         track_id=body.track_id,
         ms_played=body.ms_played,
         completed=body.completed,
+        last_path=last_path,
+        ref_key=ref_key,
     )
     db.add(row)
     db.commit()

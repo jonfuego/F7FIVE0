@@ -19,6 +19,8 @@ from app.services.trusted_proxy import real_client_ip
 from app import scheduler
 from app.api import admin as admin_routes
 from app.api import admin_arr as admin_arr_routes
+from app.api import admin_library_health as admin_library_health_routes
+from app.api import admin_metadata_editor as admin_metadata_editor_routes
 from app.api import admin_path_mappings as admin_path_mappings_routes
 from app.api import art as art_routes
 from app.api import auth as auth_routes
@@ -181,6 +183,8 @@ app.include_router(webhook_routes.router, prefix="/api/webhooks", tags=["webhook
 app.include_router(remote_access_routes.router, prefix="/api/admin/remote-access", tags=["admin", "remote-access"])
 app.include_router(admin_arr_routes.router, prefix="/api/admin/arr", tags=["admin", "arr"])
 app.include_router(admin_path_mappings_routes.router, prefix="/api/admin/path-mappings", tags=["admin", "path-mappings"])
+app.include_router(admin_metadata_editor_routes.router, prefix="/api/admin", tags=["admin", "metadata-editor"])
+app.include_router(admin_library_health_routes.router, prefix="/api/admin/library", tags=["admin", "library-health"])
 app.include_router(admin_routes.router, prefix="/api/admin", tags=["admin"])
 app.include_router(art_routes.admin_router, prefix="/api/admin/art", tags=["admin", "art"])
 app.include_router(art_routes.read_router, prefix="/api/art", tags=["art"])
