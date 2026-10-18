@@ -29,7 +29,7 @@ export type AdminArea = { id: AdminAreaId; label: string; href: string };
 /** The nine settings areas, in the order of the section list and the tile grid. */
 export const ADMIN_AREAS: readonly AdminArea[] = [
   { id: "users", label: "Users", href: "/admin/users" },
-  { id: "library-folders", label: "Library folders", href: "/admin/library-folders" },
+  { id: "library-folders", label: "Libraries", href: "/admin/library-folders" },
   { id: "scans", label: "Scans", href: "/admin/scans" },
   { id: "metadata", label: "Metadata", href: "/admin/metadata" },
   { id: "arr", label: "Radarr, Sonarr and Lidarr", href: "/admin/arr" },
