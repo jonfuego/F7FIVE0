@@ -301,3 +301,195 @@ def test_delete_clears_metadata_locks(client, db_session):
             r = client.delete(f"/api/admin/library/health/missing-files/{mf.id}")
     assert r.status_code == 204
     assert metadata_locks.locked_fields(db_session, "movie", m.id) == set()
+
+
+# ---------------------------------------------------------------------------
+# ref_kind / ref_id preservation on orphaned WatchHistory
+# ---------------------------------------------------------------------------
+def test_watch_history_preserves_ref_fields_after_delete(client, db_session):
+    """ref_kind and ref_id on WatchHistory remain set after media_file is removed."""
+    u = _user(db_session)
+    m = _movie(db_session)
+    mf = _mf(db_session, m, r"D:\Movies\reffed.mkv", missing_since=_OLD)
+    now = datetime.now(timezone.utc)
+    wh = WatchHistory(
+        user_id=u.id, media_file_id=mf.id,
+        started_at=now, last_position_sec=20,
+        ref_kind="movie", ref_id=m.id, last_path=mf.path,
+    )
+    db_session.add(wh)
+    db_session.commit()
+
+    with _fake_folders([r"D:\Movies"]):
+        with patch("os.path.exists", return_value=False):
+            r = client.delete(f"/api/admin/library/health/missing-files/{mf.id}")
+    assert r.status_code == 204
+
+    db_session.expire(wh)
+    wh_reloaded = db_session.get(WatchHistory, wh.id)
+    assert wh_reloaded is not None
+    assert wh_reloaded.media_file_id is None
+    assert wh_reloaded.ref_kind == "movie"
+    assert wh_reloaded.ref_id == m.id
+    assert wh_reloaded.last_path == mf.path
+
+
+# ---------------------------------------------------------------------------
+# Scan relinking: new MediaFile relinks orphaned WatchHistory
+# ---------------------------------------------------------------------------
+def test_rescan_relinks_watch_history_by_path(client, db_session):
+    """After a movie is deleted, rescanning the same path relinks WatchHistory."""
+    from app.services import history_keys
+
+    u = _user(db_session)
+    m = _movie(db_session)
+    path = r"D:\Movies\relink.mkv"
+    mf = _mf(db_session, m, path, missing_since=_OLD)
+    now = datetime.now(timezone.utc)
+    wh = WatchHistory(
+        user_id=u.id, media_file_id=mf.id,
+        started_at=now, last_position_sec=30,
+        ref_kind="movie", ref_id=m.id, last_path=path,
+    )
+    db_session.add(wh)
+    db_session.commit()
+
+    # Delete the file via the health endpoint; movie and mf are removed.
+    with _fake_folders([r"D:\Movies"]):
+        with patch("os.path.exists", return_value=False):
+            r = client.delete(f"/api/admin/library/health/missing-files/{mf.id}")
+    assert r.status_code == 204
+    db_session.expire_all()
+    assert db_session.get(Movie, m.id) is None
+
+    # WatchHistory survives with no media_file_id.
+    wh_live = db_session.get(WatchHistory, wh.id)
+    assert wh_live.media_file_id is None
+
+    # Simulate a rescan: new Movie row at the same path.
+    new_m = Movie(title="Test Movie")
+    db_session.add(new_m)
+    db_session.flush()
+    new_mf = MediaFile(
+        kind=MediaKind.movie, ref_id=new_m.id, path=path,
+        scan_state=ScanState.missing,
+    )
+    db_session.add(new_mf)
+    db_session.flush()
+
+    history_keys.relink_history(db_session, new_mf)
+    db_session.commit()
+
+    db_session.expire(wh_live)
+    wh_reloaded = db_session.get(WatchHistory, wh.id)
+    assert wh_reloaded.media_file_id == new_mf.id
+
+
+# ---------------------------------------------------------------------------
+# Scan relinking: new track MediaFile relinks orphaned TrackPlay by path
+# ---------------------------------------------------------------------------
+def test_rescan_relinks_track_plays_by_path(client, db_session):
+    """After a track is deleted, rescanning the same path relinks TrackPlay rows."""
+    from app.models.music import Album, Artist, Track
+    from app.services import history_keys
+
+    u = _user(db_session)
+    artist = Artist(name="Relink Artist")
+    db_session.add(artist)
+    db_session.flush()
+    album = Album(title="Relink Album", artist_id=artist.id)
+    db_session.add(album)
+    db_session.flush()
+    track = Track(title="Relink Track", album_id=album.id, track_number=1, disc_number=1)
+    db_session.add(track)
+    db_session.flush()
+    path = r"D:\Music\relink.flac"
+    mf = MediaFile(
+        kind=MediaKind.track, ref_id=track.id,
+        path=path,
+        scan_state=ScanState.missing, missing_since=_OLD,
+    )
+    db_session.add(mf)
+    db_session.flush()
+    tp = TrackPlay(
+        user_id=u.id, track_id=track.id, ms_played=60000, completed=False,
+        last_path=path,
+    )
+    db_session.add(tp)
+    db_session.commit()
+
+    # Delete: track and mf are removed; TrackPlay.track_id becomes NULL.
+    with _fake_folders([r"D:\Music"]):
+        with patch("os.path.exists", return_value=False):
+            r = client.delete(f"/api/admin/library/health/missing-files/{mf.id}")
+    assert r.status_code == 204
+    db_session.expire_all()
+    assert db_session.get(Track, track.id) is None
+
+    tp_live = db_session.get(TrackPlay, tp.id)
+    assert tp_live.track_id is None
+
+    # Simulate a rescan: new track at the same path.
+    new_artist = Artist(name="Relink Artist 2")
+    db_session.add(new_artist)
+    db_session.flush()
+    new_album = Album(title="Relink Album 2", artist_id=new_artist.id)
+    db_session.add(new_album)
+    db_session.flush()
+    new_track = Track(title="Relink Track 2", album_id=new_album.id, track_number=1, disc_number=1)
+    db_session.add(new_track)
+    db_session.flush()
+    new_mf = MediaFile(
+        kind=MediaKind.track, ref_id=new_track.id, path=path,
+        scan_state=ScanState.missing,
+    )
+    db_session.add(new_mf)
+    db_session.flush()
+
+    history_keys.relink_history(db_session, new_mf)
+    db_session.commit()
+
+    db_session.expire(tp_live)
+    tp_reloaded = db_session.get(TrackPlay, tp.id)
+    assert tp_reloaded.track_id == new_track.id
+
+
+# ---------------------------------------------------------------------------
+# Album absent from browse list after last track file removed
+# ---------------------------------------------------------------------------
+def test_album_absent_from_albums_list_after_last_track_deleted(client, db_session):
+    """An album whose only track is deleted is kept in the DB but hidden from browse."""
+    from app.models.music import Album, Artist, Track
+
+    artist = Artist(name="Hidden Artist")
+    db_session.add(artist)
+    db_session.flush()
+    album = Album(title="Hidden Album", artist_id=artist.id)
+    db_session.add(album)
+    db_session.flush()
+    track = Track(title="Hidden Track", album_id=album.id, track_number=1, disc_number=1)
+    db_session.add(track)
+    db_session.flush()
+    mf = MediaFile(
+        kind=MediaKind.track, ref_id=track.id,
+        path=r"D:\Music\hidden.flac",
+        scan_state=ScanState.missing, missing_since=_OLD,
+    )
+    db_session.add(mf)
+    db_session.commit()
+
+    with _fake_folders([r"D:\Music"]):
+        with patch("os.path.exists", return_value=False):
+            r = client.delete(f"/api/admin/library/health/missing-files/{mf.id}")
+    assert r.status_code == 204
+
+    # Track was deleted, album and artist were not.
+    db_session.expire_all()
+    assert db_session.get(Track, track.id) is None
+    assert db_session.get(Album, album.id) is not None
+
+    # The album must not appear in the browse list (no ready tracks).
+    resp = client.get("/api/albums")
+    assert resp.status_code == 200
+    ids = [item["id"] for item in resp.json()]
+    assert str(album.id) not in ids
