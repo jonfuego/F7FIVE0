@@ -27,7 +27,7 @@ from app.models.movie import Movie
 from app.models.music import Album, Artist, MusicVideo, Track
 from app.models.tv import Episode
 from app.models.user import User
-from app.services import media_paths, media_streams, playback
+from app.services import library_access, media_paths, media_streams, playback
 from app.services.art import resolve_art
 from app.services.security import build_signed_art_url, sign_stream_url_params
 from app.services.track_opts import parse_token, resolve_track_opts
@@ -206,6 +206,10 @@ def stream_start(
         raise HTTPException(status_code=409, detail="file_unplayable")
     if mf.scan_state != ScanState.ready:
         raise HTTPException(status_code=409, detail="file_not_ready")
+    # Per-user library access: refuse a file in a library this user cannot see,
+    # before minting any URL for it.
+    if not library_access.can_access_media_file(db, user, mf):
+        raise HTTPException(status_code=403, detail="library_forbidden")
     # The gateway would refuse this file anyway; say so now (403) instead of
     # minting a URL for it, and before anything probes the path.
     source_path = media_paths.resolve_contained_media_path(db, mf)

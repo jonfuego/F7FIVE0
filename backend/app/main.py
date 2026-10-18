@@ -73,6 +73,16 @@ async def lifespan(app: FastAPI):
         nas_auth.ensure_all()
     except Exception:
         log.warning("NAS ensure_all at API startup raised", exc_info=True)
+    # Seed one library per kind from the env folders on an install that has no
+    # libraries configured, so library_id is assignable and access control is
+    # consistent. A no-op once an admin manages folders in Admin.
+    try:
+        from app.services import library_folders
+        with db_session() as db:
+            if library_folders.ensure_seeded(db):
+                db.commit()
+    except Exception:
+        log.warning("library seed at API startup raised", exc_info=True)
     # Start the *arr sync scheduler. Jobs run every 5 minutes, starting on
     # the first fire interval (not immediately on boot) so startup stays fast.
     scheduler.start()

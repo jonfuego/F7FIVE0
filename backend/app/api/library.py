@@ -11,7 +11,7 @@ import uuid
 from typing import Annotated, Iterable, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import case, exists, func, select
+from sqlalchemy import case, exists, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, aliased, selectinload
 
@@ -33,6 +33,7 @@ from app.models.art import (
     ENTITY_ALBUM, ENTITY_ARTIST, ENTITY_MOVIE, ENTITY_MUSIC_VIDEO, ENTITY_SERIES,
     ROLE_BACKDROP, ROLE_COVER, ROLE_POSTER, ROLE_THUMB,
 )
+from app.models.library import Library
 from app.models.markers import MediaMarker
 from app.models.media_file import MediaFile, MediaKind, ScanState
 from app.models.movie import Movie
@@ -43,7 +44,7 @@ from app.models.playback import WatchProgress
 from app.models.track_play import TrackPlay
 from app.models.tv import Episode, Series
 from app.models.user import User
-from app.services import arr_settings, scan_status
+from app.services import arr_settings, library_access, scan_status
 from app.services.bio_excerpt import bio_excerpt
 from app.services.art import resolve_art, resolve_art_batch
 
@@ -135,14 +136,45 @@ router = APIRouter()
 log = logging.getLogger("f7five0.library")
 
 
-def _ready_files_subq(parent_id_col, kind: MediaKind):
-    """Correlated EXISTS for at least one ready MediaFile under parent_id_col."""
+# ---------------------------------------------------------------------------
+# Libraries the signed-in user can see
+# ---------------------------------------------------------------------------
+@router.get("/libraries")
+def list_libraries(
+    user: Annotated[User, Depends(current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> list[dict]:
+    """The named libraries this user may see (deny-list; admins see all), as
+    `[{id, name, kind, sort_order}]` ordered by kind then sort order. The web,
+    phone and TV nav show a per-kind library name only when a kind has more than
+    one visible library."""
+    visible = library_access.visible_library_ids(db, user)
+    rows = db.scalars(
+        select(Library).order_by(Library.kind, Library.sort_order, Library.created_at)
+    ).all()
+    return [
+        {
+            "id": str(lib.id),
+            "name": lib.name,
+            "kind": lib.kind.value,
+            "sort_order": lib.sort_order,
+        }
+        for lib in rows
+        if lib.id in visible
+    ]
+
+
+def _ready_files_subq(parent_id_col, kind: MediaKind, hidden_ids=()):
+    """Correlated EXISTS for at least one ready, visible MediaFile under
+    parent_id_col. `hidden_ids` (the user's hidden libraries) filters out files in
+    a library the user cannot see; an empty set means everything is visible."""
     from sqlalchemy import exists, select as _sel
     return exists(
         _sel(MediaFile.id)
         .where(MediaFile.kind == kind)
         .where(MediaFile.ref_id == parent_id_col)
         .where(MediaFile.scan_state == ScanState.ready)
+        .where(library_access.visible_media_file_clause(hidden_ids))
     )
 
 
@@ -202,9 +234,10 @@ def list_movies(
     include_pending: bool = Query(False),
 ) -> list[MovieOut]:
     skip_filter = _allow_pending(include_pending, user)
+    hidden = library_access.hidden_library_ids(db, user)
     stmt = select(Movie).order_by(_sort_expr(Movie.title, Movie.sort_title))
     if not skip_filter:
-        stmt = stmt.where(_ready_files_subq(Movie.id, MediaKind.movie))
+        stmt = stmt.where(_ready_files_subq(Movie.id, MediaKind.movie, hidden))
     rows = list(db.scalars(stmt.limit(limit).offset(offset)))
     files = _files_by_ref(db, MediaKind.movie, (m.id for m in rows))
     movie_ids = [m.id for m in rows]
@@ -259,8 +292,9 @@ def get_movie(
     if m is None:
         raise HTTPException(status_code=404, detail="movie_not_found")
     files = _files_by_ref(db, MediaKind.movie, [m.id])
-    if not skip_filter and not any(
-        f.scan_state == ScanState.ready for f in files.get(m.id, [])
+    ready = [f for f in files.get(m.id, []) if f.scan_state == ScanState.ready]
+    if not skip_filter and (
+        not ready or not library_access.can_access_item_files(db, user, ready)
     ):
         raise HTTPException(status_code=404, detail="movie_not_found")
     return MovieDetailOut.model_validate({
@@ -303,6 +337,7 @@ def list_series(
     include_pending: bool = Query(False),
 ) -> list[SeriesOut]:
     skip_filter = _allow_pending(include_pending, user)
+    hidden = library_access.hidden_library_ids(db, user)
     stmt = select(Series).order_by(_sort_expr(Series.title, Series.sort_title))
     if not skip_filter:
         stmt = stmt.where(
@@ -315,6 +350,7 @@ def list_series(
                 )
                 .where(Episode.series_id == Series.id)
                 .where(MediaFile.scan_state == ScanState.ready)
+                .where(library_access.visible_media_file_clause(hidden))
             )
         )
     rows = list(db.scalars(stmt.limit(limit).offset(offset)))
@@ -370,10 +406,16 @@ def get_series(
     if skip_filter:
         episodes = all_episodes
     else:
-        episodes = [
-            e for e in all_episodes
-            if any(f.scan_state == ScanState.ready for f in files.get(e.id, []))
-        ]
+        hidden = library_access.hidden_library_ids(db, user)
+
+        def _visible_ready(fs):
+            return any(
+                f.scan_state == ScanState.ready
+                and (f.library_id is None or f.library_id not in hidden)
+                for f in fs
+            )
+
+        episodes = [e for e in all_episodes if _visible_ready(files.get(e.id, []))]
         if not episodes:
             raise HTTPException(status_code=404, detail="series_not_found")
     return SeriesDetailOut.model_validate({
@@ -435,6 +477,7 @@ def list_albums(
             _sort_expr(Album.title, Album.sort_title),
         )
     )
+    hidden = library_access.hidden_library_ids(db, user)
     if artist_id is not None:
         stmt = stmt.where(Album.artist_id == artist_id)
     if not skip_filter:
@@ -448,6 +491,7 @@ def list_albums(
                 )
                 .where(Track.album_id == Album.id)
                 .where(MediaFile.scan_state == ScanState.ready)
+                .where(library_access.visible_media_file_clause(hidden))
             )
         )
     rows = list(db.scalars(stmt.limit(limit).offset(offset)))
@@ -501,10 +545,16 @@ def get_album(
     if skip_filter:
         tracks = all_tracks
     else:
-        tracks = [
-            t for t in all_tracks
-            if any(f.scan_state == ScanState.ready for f in files.get(t.id, []))
-        ]
+        hidden = library_access.hidden_library_ids(db, user)
+
+        def _visible_ready(fs):
+            return any(
+                f.scan_state == ScanState.ready
+                and (f.library_id is None or f.library_id not in hidden)
+                for f in fs
+            )
+
+        tracks = [t for t in all_tracks if _visible_ready(files.get(t.id, []))]
         if not tracks:
             raise HTTPException(status_code=404, detail="album_not_found")
     artist = db.scalar(select(Artist).where(Artist.id == album.artist_id))
@@ -578,7 +628,8 @@ def list_songs(
     if album_id is not None:
         stmt = stmt.where(Track.album_id == album_id)
     if not skip_filter:
-        stmt = stmt.where(_ready_files_subq(Track.id, MediaKind.track))
+        hidden = library_access.hidden_library_ids(db, user)
+        stmt = stmt.where(_ready_files_subq(Track.id, MediaKind.track, hidden))
     rows = list(db.scalars(stmt.limit(limit).offset(offset)))
     files = _files_by_ref(db, MediaKind.track, (t.id for t in rows))
     song_covers = resolve_art_batch(
@@ -630,6 +681,7 @@ def list_music_artists(
         .order_by(_sort_expr(Artist.name, Artist.sort_name))
     )
     if not skip_filter:
+        hidden = library_access.hidden_library_ids(db, user)
         TrackAlbum = aliased(Album)
         stmt = stmt.where(
             exists(
@@ -642,6 +694,7 @@ def list_music_artists(
                 )
                 .where(TrackAlbum.artist_id == Artist.id)
                 .where(MediaFile.scan_state == ScanState.ready)
+                .where(library_access.visible_media_file_clause(hidden))
             )
         )
     rows = db.execute(stmt).all()
@@ -697,6 +750,7 @@ def get_music_artist(
         )
     )
     if not skip_filter:
+        hidden = library_access.hidden_library_ids(db, user)
         albums_stmt = albums_stmt.where(
             exists(
                 select(Track.id)
@@ -707,6 +761,7 @@ def get_music_artist(
                 )
                 .where(Track.album_id == Album.id)
                 .where(MediaFile.scan_state == ScanState.ready)
+                .where(library_access.visible_media_file_clause(hidden))
             )
         )
     albums = list(db.scalars(albums_stmt))
@@ -782,12 +837,14 @@ def list_music_video_artists(
         .order_by(_sort_expr(Artist.name, Artist.sort_name))
     )
     if not skip_filter:
+        hidden = library_access.hidden_library_ids(db, user)
         stmt = stmt.where(
             exists(
                 select(MediaFile.id)
                 .where(MediaFile.kind == MediaKind.music_video)
                 .where(MediaFile.ref_id == MusicVideo.id)
                 .where(MediaFile.scan_state == ScanState.ready)
+                .where(library_access.visible_media_file_clause(hidden))
             )
         )
     rows = db.execute(stmt).all()
@@ -832,9 +889,16 @@ def get_music_video_artist(
     # Aggregated per-release video and disc counts. We join through
     # music_videos to media_files so a release with rows but no ready
     # files surfaces as zero — and gets filtered out below for non-admin.
+    hidden = library_access.hidden_library_ids(db, user)
     video_count_col = func.count(
         func.distinct(
-            case((MediaFile.scan_state == ScanState.ready, MusicVideo.id))
+            case(
+                (
+                    (MediaFile.scan_state == ScanState.ready)
+                    & library_access.visible_media_file_clause(hidden),
+                    MusicVideo.id,
+                )
+            )
         )
     )
     disc_count_col = func.coalesce(func.max(MusicVideo.disc_number), 1)
@@ -929,8 +993,9 @@ def get_music_video_release(
         )
     )
     if not skip_filter:
+        hidden = library_access.hidden_library_ids(db, user)
         videos_stmt = videos_stmt.where(
-            _ready_files_subq(MusicVideo.id, MediaKind.music_video),
+            _ready_files_subq(MusicVideo.id, MediaKind.music_video, hidden),
         )
     videos = list(db.scalars(videos_stmt))
     if not skip_filter and not videos:
@@ -980,7 +1045,7 @@ def get_music_video_release(
     "/music-videos/recent", response_model=list[RecentMusicVideoOut],
 )
 def list_recent_music_videos(
-    _user: Annotated[User, Depends(current_user)],
+    user: Annotated[User, Depends(current_user)],
     db: Annotated[Session, Depends(get_db)],
     limit: int = Query(12, ge=1, le=100),
 ) -> list[RecentMusicVideoOut]:
@@ -999,6 +1064,8 @@ def list_recent_music_videos(
         .join(Artist, Artist.id == MusicVideoRelease.artist_id)
         .where(MediaFile.kind == MediaKind.music_video)
         .where(MediaFile.scan_state == ScanState.ready)
+        .where(library_access.visible_media_file_clause(
+            library_access.hidden_library_ids(db, user)))
         .order_by(MediaFile.created_at.desc())
         .limit(limit)
     )
@@ -1045,7 +1112,7 @@ def _first_duration(files: list[MediaFile]) -> Optional[int]:
 # ---------------------------------------------------------------------------
 @router.get("/recent", response_model=list[RecentItemOut])
 def list_recent(
-    _user: Annotated[User, Depends(current_user)],
+    user: Annotated[User, Depends(current_user)],
     db: Annotated[Session, Depends(get_db)],
     limit: int = Query(20, ge=1, le=100),
 ) -> list[RecentItemOut]:
@@ -1071,6 +1138,8 @@ def list_recent(
         select(MediaFile)
         .where(MediaFile.scan_state == ScanState.ready)
         .where(MediaFile.kind != MediaKind.music_video)
+        .where(library_access.visible_media_file_clause(
+            library_access.hidden_library_ids(db, user)))
         .order_by(MediaFile.created_at.desc())
         .limit(overshoot)
     ))
@@ -1227,6 +1296,8 @@ def recent_badge(
     base = (
         MediaFile.scan_state == ScanState.ready,
         MediaFile.created_at > since,
+        library_access.visible_media_file_clause(
+            library_access.hidden_library_ids(db, user)),
     )
     movies = db.scalar(
         select(func.count(func.distinct(MediaFile.ref_id)))
@@ -1313,6 +1384,7 @@ def search_library(
         return []
 
     skip_filter = _allow_pending(include_pending, user)
+    hidden = library_access.hidden_library_ids(db, user)
 
     def like_clauses(column):
         return [
@@ -1349,6 +1421,7 @@ def search_library(
                     )
                     .where(TrackAlbum.artist_id == Artist.id)
                     .where(MediaFile.scan_state == ScanState.ready)
+                    .where(library_access.visible_media_file_clause(hidden))
                 )
             )
         artist_rows = list(db.scalars(artist_stmt))
@@ -1373,7 +1446,7 @@ def search_library(
         )
         if not skip_filter:
             movies_stmt = movies_stmt.where(
-                _ready_files_subq(Movie.id, MediaKind.movie),
+                _ready_files_subq(Movie.id, MediaKind.movie, hidden),
             )
         movies = list(db.scalars(movies_stmt))
         movie_posters = resolve_art_batch(
@@ -1407,6 +1480,7 @@ def search_library(
                     )
                     .where(Episode.series_id == Series.id)
                     .where(MediaFile.scan_state == ScanState.ready)
+                    .where(library_access.visible_media_file_clause(hidden))
                 )
             )
         series_rows = list(db.scalars(series_stmt))
@@ -1445,6 +1519,7 @@ def search_library(
                     )
                     .where(Track.album_id == Album.id)
                     .where(MediaFile.scan_state == ScanState.ready)
+                    .where(library_access.visible_media_file_clause(hidden))
                 )
             )
         rows = list(db.execute(stmt.order_by(Album.title).limit(limit)))
@@ -1479,7 +1554,7 @@ def search_library(
             )
             if not skip_filter:
                 ep_stmt = ep_stmt.where(
-                    _ready_files_subq(Episode.id, MediaKind.episode),
+                    _ready_files_subq(Episode.id, MediaKind.episode, hidden),
                 )
             for ep, s in db.execute(ep_stmt).all():
                 if s.id in seen_series:
@@ -1507,7 +1582,7 @@ def search_library(
             )
             if not skip_filter:
                 tr_stmt = tr_stmt.where(
-                    _ready_files_subq(Track.id, MediaKind.track),
+                    _ready_files_subq(Track.id, MediaKind.track, hidden),
                 )
             for tr, a in db.execute(tr_stmt).all():
                 if a.id in seen_albums:
@@ -1742,12 +1817,15 @@ def list_continue_watching(
     if not rows:
         return []
 
+    hidden = library_access.hidden_library_ids(db, user)
     files = {
         mf.id: mf for mf in db.scalars(
             select(MediaFile).where(
                 MediaFile.id.in_(r.media_file_id for r in rows)
             )
         )
+        # Drop files in a library this user can no longer see.
+        if mf.library_id is None or mf.library_id not in hidden
     }
 
     # Batch-load the parents we'll need.
@@ -1938,6 +2016,7 @@ def list_on_deck(
     """
     from app.services.on_deck import EpisodeRef, ProgressRef, next_episode
 
+    hidden = library_access.hidden_library_ids(db, user)
     ep_rows = list(db.execute(
         select(Episode.series_id, func.max(WatchProgress.updated_at))
         .join(MediaFile, MediaFile.ref_id == Episode.id)
@@ -1945,6 +2024,7 @@ def list_on_deck(
         .where(
             WatchProgress.user_id == user.id,
             MediaFile.kind == MediaKind.episode,
+            library_access.visible_media_file_clause(hidden),
         )
         .group_by(Episode.series_id)
         .order_by(func.max(WatchProgress.updated_at).desc())
@@ -1965,6 +2045,7 @@ def list_on_deck(
             MediaFile.kind == MediaKind.episode,
             MediaFile.ref_id.in_(ep_ids),
             MediaFile.scan_state == ScanState.ready,
+            library_access.visible_media_file_clause(hidden),
         )
     )) if ep_ids else []
     file_for_ep: dict[uuid.UUID, MediaFile] = {}

@@ -11,7 +11,9 @@ from app.models.login_attempt import LoginAttempt  # noqa: F401
 from app.models.webauthn import WebAuthnCredential, WebAuthnChallenge  # noqa: F401
 
 # Libraries + canonical metadata
-from app.models.library import Library  # noqa: F401
+from app.models.library import (  # noqa: F401
+    Library, LibraryFolder, UserLibraryAccess,
+)
 from app.models.movie import Movie  # noqa: F401
 from app.models.tv import Series, Season, Episode  # noqa: F401
 from app.models.music import (  # noqa: F401

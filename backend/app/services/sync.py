@@ -44,7 +44,7 @@ from app.models.media_file import MediaFile, MediaKind, ScanState
 from app.models.movie import Movie
 from app.models.music import Album, Artist, Track
 from app.models.tv import Episode, Season, Series
-from app.services import arr_settings, ffprobe
+from app.services import arr_library_map, arr_settings, ffprobe
 from app.services.credits import resolve_artist
 from app.services.arr import LidarrClient, RadarrClient, SonarrClient
 from app.services.arr._base import ArrClientError
@@ -434,6 +434,7 @@ def _upsert_movie(
             path=path,
             arr_file=mf,
             stats=stats,
+            app="radarr",
         )
     else:
         _mark_missing_for_ref(db, MediaKind.movie, movie.id, stats)
@@ -593,6 +594,7 @@ def _upsert_episode(
                 path=path,
                 arr_file=mf,
                 stats=stats,
+                app="sonarr",
             )
     else:
         _mark_missing_for_ref(db, MediaKind.episode, episode.id, stats)
@@ -810,6 +812,7 @@ def _upsert_track(
                 path=path,
                 arr_file=mf,
                 stats=stats,
+                app="lidarr",
             )
     else:
         _mark_missing_for_ref(db, MediaKind.track, track.id, stats)
@@ -828,6 +831,7 @@ def _upsert_media_file(
     path: str,
     arr_file: dict[str, Any],
     stats: SyncStats,
+    app: Optional[str] = None,
 ) -> Optional[MediaFile]:
     # Rewrite any user-session-only drive letters (e.g. `N:\\`) to the UNC
     # path before the UNIQUE lookup. Keeps stored paths canonical and makes
@@ -852,6 +856,13 @@ def _upsert_media_file(
         mf = existing
         mf.kind = kind
         mf.ref_id = ref_id
+
+    # Stamp the library this *arr root folder maps to (per-library *arr mapping,
+    # defaulting to the first library of the app's kind).
+    if app is not None:
+        lib_id = arr_library_map.library_for(db, app, path)
+        if lib_id is not None:
+            mf.library_id = lib_id
 
     mf.size_bytes = arr_file.get("size") or mf.size_bytes
 

@@ -33,6 +33,7 @@ JOB_FOLDER_SCAN = "folder_scan"
 JOB_AUDIO_ANALYSIS = "audio_analysis"
 JOB_UPDATE_CHECK = "update_check"
 JOB_ART_COPIES = "art_copies_backfill"
+JOB_LIBRARY_ID_BACKFILL = "library_id_backfill"
 JOB_MOVIE_GENRES = "movie_genres_backfill"
 JOB_ARTIST_ART = "artist_art_autofill"
 JOB_ARTIST_BIOS = "artist_bios_backfill"
@@ -195,6 +196,10 @@ def _scan_folders(only: Optional[list] = None) -> bool:
         # Connect any saved NAS sign-ins before walking folders, so a UNC
         # share is readable for this scan. Cheap when already connected.
         nas_auth.ensure_all(db)
+        # On an env-only install, make one library per kind so library_id is
+        # assignable during the scan. A no-op once an admin manages folders.
+        if library_folders.ensure_seeded(db):
+            db.commit()
         if only is None:
             scan_library.scan_all(db, on_progress=progress)
         else:
@@ -291,6 +296,24 @@ def _run_art_copies_backfill() -> None:
         log.info("art copies backfill: %d created", made)
     except Exception:
         log.exception("art copies backfill raised")
+
+
+def _run_library_id_backfill() -> None:
+    """Fill media_files.library_id for rows scanned before libraries existed.
+    Batched and rerunnable; own session; never raises. Keeps going until a pass
+    fills nothing (a path that matches no folder stays null, visible to all)."""
+    try:
+        with db_session() as db:
+            total = 0
+            while True:
+                filled = library_folders.backfill_media_file_library_id(db)
+                db.commit()
+                total += filled
+                if filled == 0:
+                    break
+        log.info("library_id backfill: %d media files stamped", total)
+    except Exception:
+        log.exception("library_id backfill raised")
 
 
 def _run_movie_genres_backfill() -> None:
@@ -587,6 +610,17 @@ def start() -> BackgroundScheduler:
         coalesce=True,
         replace_existing=True,
         next_run_time=datetime.now(timezone.utc) + timedelta(seconds=60),
+    )
+    # One-shot after boot: stamp library_id on media files scanned before
+    # libraries existed. Rerunnable; a later boot fills nothing new.
+    sched.add_job(
+        _run_library_id_backfill,
+        id=JOB_LIBRARY_ID_BACKFILL,
+        name="stamp media files with their library",
+        max_instances=1,
+        coalesce=True,
+        replace_existing=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=75),
     )
     # Also once after boot, a bit later than the art job. Folder scans and a
     # saved TMDB key queue it again (same job id, so it never stacks).

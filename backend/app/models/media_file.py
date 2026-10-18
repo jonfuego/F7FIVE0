@@ -7,7 +7,8 @@ from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import (
-    BigInteger, CheckConstraint, DateTime, Enum, Index, Integer, String,
+    BigInteger, CheckConstraint, DateTime, Enum, ForeignKey, Index, Integer,
+    String,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -41,6 +42,16 @@ class MediaFile(UUIDPKMixin, TimestampMixin, Base):
     )
     ref_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
 
+    # The named library this file belongs to (the library whose folder holds
+    # it). Nullable: a file scanned before the backfill, or on an install with no
+    # libraries configured, has none and is treated as visible to all. New files
+    # always get one at scan/sync time. See app/services/library_access.py.
+    library_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("libraries.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
     # Filesystem
     path: Mapped[str] = mapped_column(String(2048), nullable=False, unique=True)
     container: Mapped[Optional[str]] = mapped_column(String(32))
@@ -65,6 +76,7 @@ class MediaFile(UUIDPKMixin, TimestampMixin, Base):
     __table_args__ = (
         Index("ix_media_files_kind_ref", "kind", "ref_id"),
         Index("ix_media_files_scan_state", "scan_state"),
+        Index("ix_media_files_library", "library_id"),
         CheckConstraint(
             "(width IS NULL AND height IS NULL) OR (width > 0 AND height > 0)",
             name="ck_media_files_dims_positive",
