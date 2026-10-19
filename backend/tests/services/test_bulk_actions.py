@@ -123,3 +123,38 @@ def test_second_run_returns_when_locked(db_session):
         assert row is None
     finally:
         ba._lock.release()
+
+
+# ---------------------------------------------------------------------------
+# run_bulk_action: refresh_metadata forces a provider call even when fresh
+# ---------------------------------------------------------------------------
+
+def test_run_bulk_refresh_metadata_forces_enrichment(db_session):
+    """refresh_metadata must call the TMDB provider even when metadata_synced_at
+    is already set (force=True bypasses the TTL skip in enrich_movie)."""
+    from datetime import datetime, timezone
+    from unittest.mock import patch
+
+    m = Movie(title="Already Synced", tmdb_id=99,
+              metadata_synced_at=datetime.now(timezone.utc),
+              metadata_status="ok")
+    db_session.add(m)
+    db_session.commit()
+
+    with patch("app.services.metadata.runner.TMDBClient") as MockClient:
+        instance = MockClient.return_value.__enter__.return_value
+        instance.get_movie.return_value = {
+            "id": 99,
+            "title": "Already Synced Updated",
+        }
+        ba.run_bulk_action("refresh_metadata", "movie", [m.id])
+
+    # Provider was called despite metadata_synced_at being fresh (force=True).
+    assert instance.get_movie.call_count == 1
+
+    db_session.expire_all()
+    row = db_session.get(AppSetting, ba.BULK_JOB_KEY)
+    assert row is not None
+    assert row.value["state"] == "done"
+    assert row.value["done"] == 1
+    assert row.value["errors"] == 0

@@ -10,6 +10,7 @@ import { MarqueeHeader } from "@/ui/MarqueeHeader";
 import { PosterCard } from "@/ui/PosterCard";
 import { Rail } from "@/ui/Rail";
 import { Tile } from "@/ui/Tile";
+import CollectionsScreen from "@/screens/CollectionsScreen";
 import { MoviesLibrary } from "./movies";
 import { MusicVideosLibrary } from "./music-videos";
 import { ShowsLibrary } from "./shows";
@@ -92,7 +93,7 @@ function VideoAll({ select }: { select: (key: string) => void }): React.ReactEle
   );
 }
 
-const VIDEO_TABS = ["all", "movies", "shows", "videos"];
+const VIDEO_TABS = ["all", "movies", "shows", "videos", "collections"];
 function isVideoTab(v: unknown): v is string {
   return typeof v === "string" && VIDEO_TABS.includes(v);
 }
@@ -112,6 +113,7 @@ export default function MoviesHome(): React.ReactElement {
         { key: "movies", label: "Movies", title: "Movies", render: () => <MoviesLibrary /> },
         { key: "shows", label: "TV Shows", title: "Television", render: () => <ShowsLibrary /> },
         { key: "videos", label: "Music Videos", title: "Music Videos", render: () => <MusicVideosLibrary /> },
+        { key: "collections", label: "Collections", title: "Collections", render: () => <CollectionsScreen /> },
       ]}
     />
   );

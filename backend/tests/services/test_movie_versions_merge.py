@@ -1,6 +1,7 @@
 """Unit tests for services/movie_versions.merge_twins."""
 from __future__ import annotations
 
+import os
 import uuid
 
 from app.models.library import Library, LibraryKind
@@ -133,3 +134,90 @@ def test_merge_twins_moves_media_files(db_session):
         select(MediaFile).where(MediaFile.kind == MediaKind.movie, MediaFile.ref_id == survivors[0].id)
     ).all()
     assert len(all_files) == 2
+
+
+def test_merge_twins_idempotent(db_session):
+    """Running merge_twins a second time on already-merged data changes nothing."""
+    lib = _lib(db_session)
+    primary = _movie(db_session, "Idempotent Film", year=2021, tmdb_id=54321)
+    secondary = _movie(db_session, "Idempotent Film", year=2021)
+    _mf(db_session, primary, library=lib)
+    _mf(db_session, secondary, library=lib)
+    db_session.commit()
+
+    first = mv.merge_twins(db_session)
+    assert first == 1
+
+    # Second run: nothing left to merge.
+    second = mv.merge_twins(db_session)
+    assert second == 0
+
+
+def test_scan_attach_second_file_same_library(db_session, tmp_path, monkeypatch):
+    """The folder scan attaches a second file to an existing movie (matched by
+    tmdb_id in the same root) instead of creating a separate twin Movie row."""
+    from app.config import settings
+    from app.models.user import User
+    from app.services import ffprobe, scan_library
+    from app.services.art import SYSTEM_USER_ID
+
+    movies_root = tmp_path / "movies"
+    movies_root.mkdir()
+    monkeypatch.setattr(settings, "library_root_movies", str(movies_root))
+    monkeypatch.setattr(settings, "radarr_api_key", "")
+    monkeypatch.setattr(settings, "tmdb_api_key", "")
+    monkeypatch.setattr(settings, "art_root", tmp_path / "art")
+    monkeypatch.setattr(settings, "path_rewrite_rules", "")
+
+    def _probe(path, timeout=30.0):
+        if not os.path.exists(path):
+            return None
+        return ffprobe.ProbeResult(
+            container="mkv", size_bytes=os.path.getsize(path), duration_sec=120,
+            bitrate_kbps=1000, video_codec="h264", audio_codec="aac",
+            audio_channels=2, width=1920, height=1080,
+        )
+
+    monkeypatch.setattr(ffprobe, "probe", _probe)
+    monkeypatch.setattr(scan_library.scheduler, "schedule_enrich_movie", lambda *a, **k: None)
+    monkeypatch.setattr(scan_library.scheduler, "schedule_enrich_artist", lambda *a, **k: None)
+    monkeypatch.setattr(scan_library.scheduler, "schedule_enrich_album", lambda *a, **k: None)
+
+    # system user is required for art-save code in the scan path.
+    db_session.add(User(id=SYSTEM_USER_ID, username="system", display_name="System",
+                        password_hash="!", role="admin", is_active=False))
+    db_session.flush()
+
+    # First scan: one file with a {tmdb-7777} tag in the folder name.
+    p1 = movies_root / "Scan Movie (2005) {tmdb-7777}" / "Scan Movie.mkv"
+    p1.parent.mkdir(parents=True)
+    p1.write_bytes(b"\0" * 100)
+
+    scan_library.scan_movies(db_session)
+
+    from sqlalchemy import select as _select
+    movies_after_first = db_session.scalars(_select(Movie)).all()
+    assert len(movies_after_first) == 1
+    movie = movies_after_first[0]
+    assert movie.tmdb_id == 7777
+
+    # Second scan: another folder with the same tmdb tag (same library root).
+    p2 = movies_root / "Scan Movie (2005) {tmdb-7777} Bluray" / "Scan Movie Bluray.mkv"
+    p2.parent.mkdir(parents=True)
+    p2.write_bytes(b"\0" * 200)
+
+    scan_library.scan_movies(db_session)
+    db_session.expire_all()
+
+    movies_after_second = db_session.scalars(_select(Movie)).all()
+    assert len(movies_after_second) == 1, (
+        "second file must attach to existing movie, not create a new Movie row"
+    )
+
+    files = db_session.scalars(
+        _select(MediaFile).where(
+            MediaFile.kind == MediaKind.movie,
+            MediaFile.ref_id == movie.id,
+        )
+    ).all()
+    assert len(files) == 2, "both files must be media_files of the one movie"

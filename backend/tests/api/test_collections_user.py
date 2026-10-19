@@ -105,3 +105,65 @@ def test_get_collection_detail_404_no_visible_items(client, db_session):
 
     r = client.get(f"/api/library/collections/{c.id}")
     assert r.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Hidden-library filtering (member user)
+# ---------------------------------------------------------------------------
+
+def test_list_collections_hidden_library_omits_collection(db_session):
+    """A member user with a library hidden does not see collections whose only
+    items are in that library (exercises the library-access filter path)."""
+    from fastapi.testclient import TestClient
+
+    from app.api.deps import current_user, get_db
+    from app.main import app
+    from app.models.library import Library, LibraryKind, UserLibraryAccess
+    from app.models.user import User
+
+    lib = Library(id=uuid.uuid4(), name="Hidden Lib", kind=LibraryKind.movies)
+    db_session.add(lib)
+    db_session.flush()
+
+    member = User(id=uuid.uuid4(), username="member-hidden", display_name="M",
+                  password_hash="x", role="member", is_active=True)
+    db_session.add(member)
+    db_session.flush()
+
+    # Hide the library from this member.
+    db_session.add(UserLibraryAccess(id=uuid.uuid4(),
+                                     user_id=member.id, library_id=lib.id))
+
+    m = _movie(db_session)
+    hidden_mf = MediaFile(kind=MediaKind.movie, ref_id=m.id,
+                          path=f"/movies/{uuid.uuid4().hex}.mkv",
+                          scan_state=ScanState.ready, library_id=lib.id)
+    db_session.add(hidden_mf)
+
+    c = _collection(db_session, "Only Hidden")
+    _item(db_session, c, m)
+    db_session.commit()
+
+    def _db():
+        try:
+            yield db_session
+        finally:
+            pass
+
+    def _user():
+        return member
+
+    app.dependency_overrides[get_db] = _db
+    app.dependency_overrides[current_user] = _user
+    try:
+        tc = TestClient(app)
+        # Collection must not appear for this user.
+        r = tc.get("/api/library/collections/")
+        assert r.status_code == 200
+        assert r.json() == []
+
+        # Detail endpoint also returns 404.
+        r = tc.get(f"/api/library/collections/{c.id}")
+        assert r.status_code == 404
+    finally:
+        app.dependency_overrides.clear()

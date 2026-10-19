@@ -153,6 +153,39 @@ def test_get_for_user_excludes_empty_collection(db_session):
     assert not any(r["id"] == c.id for r in results)
 
 
+def test_get_for_user_hidden_library_excludes_collection(db_session):
+    """get_for_user does not return a collection whose only item is in a library
+    the user has hidden (the library-access filter path)."""
+    from app.models.library import Library, LibraryKind, UserLibraryAccess
+
+    lib = Library(id=uuid.uuid4(), name="Private Lib", kind=LibraryKind.movies)
+    db_session.add(lib)
+    db_session.flush()
+
+    u = _make_user(db_session)
+    # A UserLibraryAccess row hides the library from this user.
+    db_session.add(UserLibraryAccess(id=uuid.uuid4(), user_id=u.id, library_id=lib.id))
+
+    m = _make_movie(db_session)
+    # The only ready file for this movie is in the hidden library.
+    hidden_mf = MediaFile(
+        kind=MediaKind.movie, ref_id=m.id,
+        path=f"/movies/{uuid.uuid4().hex}.mkv",
+        scan_state=ScanState.ready,
+        library_id=lib.id,
+    )
+    db_session.add(hidden_mf)
+
+    c = _make_collection(db_session, name="Hidden Only")
+    db_session.add(CollectionItem(id=uuid.uuid4(), collection_id=c.id,
+                                  entity_kind="movie", entity_id=m.id))
+    db_session.commit()
+
+    # User cannot see the library, so the collection must be absent.
+    results = svc.get_for_user(db_session, u)
+    assert not any(r["id"] == c.id for r in results)
+
+
 # ---------------------------------------------------------------------------
 # add_items / remove_items
 # ---------------------------------------------------------------------------
