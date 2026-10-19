@@ -66,6 +66,13 @@ class Movie(UUIDPKMixin, TimestampMixin, Base):
         default=dict,
     )
 
+    # TMDB collection fields (not lockable, always written by enrich_movie)
+    tmdb_collection_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    tmdb_collection_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    tmdb_collection_checked_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     __table_args__ = (
         Index("ix_movies_title_year", "title", "year"),
     )

@@ -99,11 +99,13 @@ def _insert_fixtures(conn) -> dict:
     }
 
 
-def test_0031_is_the_single_head():
+def test_0031_has_a_successor():
     cfg = _config("sqlite://")
     script = ScriptDirectory.from_config(cfg)
-    heads = list(script.get_heads())
-    assert heads == ["0031"], heads
+    rev = script.get_revision("0031")
+    assert rev is not None
+    # 0031 is not the head now that 0032 was added.
+    assert "0031" not in script.get_heads()
 
 
 def test_0031_upgrade_then_downgrade_round_trip(tmp_path, monkeypatch):

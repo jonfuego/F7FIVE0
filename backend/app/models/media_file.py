@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import (
-    BigInteger, CheckConstraint, DateTime, Enum, ForeignKey, Index, Integer,
+    BigInteger, Boolean, CheckConstraint, DateTime, Enum, ForeignKey, Index, Integer,
     String,
 )
 from sqlalchemy.dialects.postgresql import UUID
@@ -75,6 +75,12 @@ class MediaFile(UUIDPKMixin, TimestampMixin, Base):
     # Set when the file is first seen as missing; cleared when it reappears.
     # The health endpoint uses this (not updated_at) for the 7-day eligibility check.
     missing_since: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+    # Admin-pinned preferred version. At most one file per (kind, ref_id) has this
+    # set to True; all siblings have NULL. bool(None) == False so _mf_out is safe.
+    is_preferred_version: Mapped[Optional[bool]] = mapped_column(
+        Boolean, nullable=True
+    )
 
     __table_args__ = (
         Index("ix_media_files_kind_ref", "kind", "ref_id"),

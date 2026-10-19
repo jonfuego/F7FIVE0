@@ -40,6 +40,8 @@ JOB_ARTIST_BIOS = "artist_bios_backfill"
 JOB_PODCAST_REFRESH = "podcast_refresh"
 JOB_PODCAST_DOWNLOAD = "podcast_download"
 JOB_DUCKDNS = "duckdns_refresh"
+JOB_COLLECTIONS_SYNC = "collections_sync"
+JOB_BULK_ACTION = "bulk_action"
 
 # Once a day, give or take an hour, so a fleet of servers doesn't hit GitHub
 # at the same second. Checking never installs anything.
@@ -71,6 +73,8 @@ _artist_art_lock = threading.Lock()
 # One podcast feed refresh at a time in this process: the hourly job, Admin's
 # "Refresh feeds" and an OPML import can all be queued together.
 _podcast_refresh_lock = threading.Lock()
+
+# Bulk action lock is owned by bulk_actions.py (module-level); we just queue the job here.
 
 # At most two episode downloads at once, however many are queued (auto-download
 # can queue a whole back catalogue's worth of new episodes on a busy day).
@@ -133,6 +137,8 @@ def _run_full_sync(apps: Optional[list] = None) -> None:
         _arr_sync_lock.release()
     # The session has committed; the rows are visible to the enrichment jobs.
     sync.schedule_pending_enrichment(stats)
+    # Sync collections after *arr sync commits new movies.
+    trigger_collections_sync(delay_sec=ENRICH_DELAY_SEC)
 
 
 def _run_music_videos_scan() -> None:
@@ -218,6 +224,8 @@ def _scan_folders(only: Optional[list] = None) -> bool:
         trigger_artist_art_autofill(delay_sec=ENRICH_DELAY_SEC)
         # Artists with a saved Wikipedia or Wikidata link and no bio yet.
         trigger_artist_bios_backfill(delay_sec=ENRICH_DELAY_SEC)
+        # Sync TMDB collection memberships after the scan commits new movies.
+        trigger_collections_sync(delay_sec=ENRICH_DELAY_SEC)
     except Exception as exc:
         log.exception("folder scan raised")
         db.rollback()
@@ -667,6 +675,18 @@ def start() -> BackgroundScheduler:
         replace_existing=True,
         next_run_time=datetime.now(timezone.utc) + timedelta(seconds=180),
     )
+    # Collections sync: once after boot (20 s delay) so TMDB-sourced collection
+    # memberships are populated for movies already in the library. Each folder scan
+    # and *arr sync queues it again (same job id, never stacks).
+    sched.add_job(
+        _run_collections_sync,
+        id=JOB_COLLECTIONS_SYNC,
+        name="sync TMDB collections",
+        max_instances=1,
+        coalesce=True,
+        replace_existing=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=175),
+    )
     # DuckDNS: only when Setup wrote both DUCKDNS_DOMAIN and DUCKDNS_TOKEN into
     # .env (port forwarding with a DuckDNS name). First update shortly after
     # boot, then every 5 minutes.
@@ -839,6 +859,54 @@ def trigger_marker_analysis_now(
         id=f"marker_analysis_{suffix}",
         replace_existing=True,
     )
+
+
+def _run_collections_sync() -> None:
+    """Sync TMDB auto-collections from movies that have a tmdb_collection_id."""
+    try:
+        from app.services.collections import sync_tmdb_collections
+        with db_session() as db:
+            count = sync_tmdb_collections(db)
+        log.info("collections sync: %d rows upserted", count)
+    except Exception:
+        log.exception("collections sync raised")
+
+
+def trigger_collections_sync(delay_sec: int = 0) -> None:
+    """Queue the TMDB collections sync. One job id so it never stacks."""
+    if _scheduler is None:
+        return
+    _scheduler.add_job(
+        _run_collections_sync,
+        id=JOB_COLLECTIONS_SYNC,
+        name="sync TMDB collections",
+        max_instances=1,
+        coalesce=True,
+        replace_existing=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=delay_sec),
+    )
+
+
+def _run_bulk_action_job(action: str, kind: str, ids: list, params: Optional[dict] = None) -> None:
+    """Scheduler-invoked bulk action runner."""
+    try:
+        from app.services.bulk_actions import run_bulk_action
+        run_bulk_action(action, kind, [uuid.UUID(str(i)) for i in ids], params)
+    except Exception:
+        log.exception("bulk action raised (action=%s kind=%s)", action, kind)
+
+
+def queue_bulk_action(action: str, kind: str, ids: list, params: Optional[dict] = None) -> bool:
+    """Queue a bulk action. Returns False when the scheduler is not running."""
+    if _scheduler is None:
+        return False
+    _scheduler.add_job(
+        _run_bulk_action_job,
+        args=[action, kind, ids, params],
+        id=JOB_BULK_ACTION,
+        replace_existing=True,
+    )
+    return True
 
 
 def trigger_series_rescan_now(sonarr_id: int) -> None:

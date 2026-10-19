@@ -204,6 +204,9 @@ export type AttentionKind = "reminder" | "transcode" | "scan" | "root" | "update
 export type LibraryHealthLike = {
   missing_files_eligible: number;
   unreachable_folders: number;
+  duplicate_movie_versions?: number;
+  duplicate_episode_versions?: number;
+  music_duplicates?: number;
 };
 
 export type AttentionItem = {
@@ -339,6 +342,36 @@ export function buildAttentionItems(inputs: AttentionInputs): AttentionItem[] {
       id: "health:unreachable",
       kind: "health",
       text: `${plural(lh.unreachable_folders, "library folder", "library folders")} unreachable`,
+      detail: null,
+      linkLabel: "Open Library health",
+      href: "/admin/library-health",
+    });
+  }
+  if (lh && (lh.duplicate_movie_versions ?? 0) > 0) {
+    items.push({
+      id: "health:dup-movie-versions",
+      kind: "health",
+      text: `${plural(lh.duplicate_movie_versions!, "movie", "movies")} have duplicate versions`,
+      detail: null,
+      linkLabel: "Open Library health",
+      href: "/admin/library-health",
+    });
+  }
+  if (lh && (lh.duplicate_episode_versions ?? 0) > 0) {
+    items.push({
+      id: "health:dup-ep-versions",
+      kind: "health",
+      text: `${plural(lh.duplicate_episode_versions!, "episode", "episodes")} have duplicate versions`,
+      detail: null,
+      linkLabel: "Open Library health",
+      href: "/admin/library-health",
+    });
+  }
+  if (lh && (lh.music_duplicates ?? 0) > 0) {
+    items.push({
+      id: "health:music-dupes",
+      kind: "health",
+      text: `${plural(lh.music_duplicates!, "duplicate track", "duplicate tracks")} flagged`,
       detail: null,
       linkLabel: "Open Library health",
       href: "/admin/library-health",

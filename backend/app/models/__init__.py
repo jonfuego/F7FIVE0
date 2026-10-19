@@ -56,4 +56,7 @@ from app.models.app_setting import AppSetting  # noqa: F401
 # Saved library views, per user
 from app.models.view_pref import UserViewPref  # noqa: F401
 
+# Collections (TMDB-auto and admin-manual groups of media)
+from app.models.collection import Collection, CollectionItem  # noqa: F401
+
 __all__ = ["Base"]

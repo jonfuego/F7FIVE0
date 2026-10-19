@@ -33,6 +33,9 @@ from app.api import passkeys as passkeys_routes
 from app.api import podcasts as podcasts_routes
 from app.api import queue as queue_routes
 from app.api import view_prefs as view_prefs_routes
+from app.api import admin_bulk as admin_bulk_routes
+from app.api import admin_collections as admin_collections_routes
+from app.api import collections as collections_routes
 from app.api import remote_access as remote_access_routes
 from app.api import tracks as tracks_routes
 from app.api import requests as requests_routes
@@ -185,6 +188,9 @@ app.include_router(admin_arr_routes.router, prefix="/api/admin/arr", tags=["admi
 app.include_router(admin_path_mappings_routes.router, prefix="/api/admin/path-mappings", tags=["admin", "path-mappings"])
 app.include_router(admin_metadata_editor_routes.router, prefix="/api/admin", tags=["admin", "metadata-editor"])
 app.include_router(admin_library_health_routes.router, prefix="/api/admin/library", tags=["admin", "library-health"])
+app.include_router(admin_bulk_routes.router, prefix="/api/admin/library", tags=["admin", "bulk"])
+app.include_router(admin_collections_routes.router, prefix="/api/admin", tags=["admin", "collections"])
+app.include_router(collections_routes.router, prefix="/api", tags=["collections"])
 app.include_router(admin_routes.router, prefix="/api/admin", tags=["admin"])
 app.include_router(art_routes.admin_router, prefix="/api/admin/art", tags=["admin", "art"])
 app.include_router(art_routes.read_router, prefix="/api/art", tags=["art"])

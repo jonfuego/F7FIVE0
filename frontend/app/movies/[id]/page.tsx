@@ -155,6 +155,32 @@ export default function MovieDetailPage() {
   );
 }
 
+function _versionLabel(f: MediaFile): string {
+  const res = f.height ? `${f.height}p` : null;
+  const codec = f.video_codec ? f.video_codec.toUpperCase() : null;
+  if (res && codec) return `${res} ${codec}`;
+  if (res) return res;
+  if (codec) return codec;
+  return "Unknown";
+}
+
+function _bestFile(files: MediaFile[]): MediaFile | null {
+  if (!files.length) return null;
+  const codecScore = (c: string | null | undefined): number => {
+    if (!c) return 0;
+    const n = c.toLowerCase().replace(/[-\.]/g, "");
+    if (n === "hevc" || n === "h265") return 2;
+    if (n === "avc" || n === "h264") return 1;
+    return 0;
+  };
+  return [...files].sort((a, b) => {
+    if (a.is_preferred_version !== b.is_preferred_version) return a.is_preferred_version ? -1 : 1;
+    if ((b.height ?? 0) !== (a.height ?? 0)) return (b.height ?? 0) - (a.height ?? 0);
+    if ((b.bitrate_kbps ?? 0) !== (a.bitrate_kbps ?? 0)) return (b.bitrate_kbps ?? 0) - (a.bitrate_kbps ?? 0);
+    return codecScore(b.video_codec) - codecScore(a.video_codec);
+  })[0];
+}
+
 function MovieHero({
   movie,
   isAdmin,
@@ -178,7 +204,17 @@ function MovieHero({
       ? `★ ${movie.tmdb_rating.toFixed(1)}`
       : null;
   const meta = joinMeta([movie.year, runtime, rating]);
-  const primary = movie.media_files[0] ?? null;
+
+  const readyFiles = useMemo(
+    () => (movie.media_files ?? []).filter((f) => f.scan_state === "ready"),
+    [movie.media_files],
+  );
+  const defaultFile = useMemo(() => _bestFile(readyFiles), [readyFiles]);
+  const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
+  const primary =
+    readyFiles.find((f) => f.id === (selectedFileId ?? defaultFile?.id)) ??
+    defaultFile ??
+    (movie.media_files[0] ?? null);
   const playHref = primary ? `/watch/${primary.id}` : null;
   const sortedCast = useMemo(
     () =>
@@ -235,6 +271,35 @@ function MovieHero({
           <ActivityLine file={primary} />
           {meta ? <MetaRow text={meta} /> : null}
           {movie.overview ? <Blurb text={movie.overview} /> : null}
+          {readyFiles.length > 1 ? (
+            <div style={{ marginBottom: 8 }}>
+              <label
+                htmlFor="version-select"
+                style={{ fontSize: 12, color: "var(--text-2)", marginRight: 8 }}
+              >
+                Version
+              </label>
+              <select
+                id="version-select"
+                value={selectedFileId ?? defaultFile?.id ?? ""}
+                onChange={(e) => setSelectedFileId(e.target.value)}
+                style={{
+                  fontSize: 13,
+                  background: "var(--surface-2, #181818)",
+                  color: "inherit",
+                  border: "1px solid var(--ink-3)",
+                  borderRadius: 4,
+                  padding: "4px 8px",
+                }}
+              >
+                {readyFiles.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {_versionLabel(f)}{f.is_preferred_version ? " (preferred)" : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : null}
           <div className="ctas">
             {playHref ? (
               <Link className="btn play" href={playHref}>

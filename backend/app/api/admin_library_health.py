@@ -51,6 +51,9 @@ class HealthCounts(BaseModel):
     unreachable_folders: int
     unmatched: dict[str, int]
     missing_art: dict[str, int]
+    duplicate_movie_versions: int = 0
+    duplicate_episode_versions: int = 0
+    music_duplicates: int = 0
 
 
 class MissingFileItem(BaseModel):
@@ -308,6 +311,28 @@ def get_health(
         ) or 0,
     }
 
+    # Duplicate versions: movies/episodes with 2+ ready media_files.
+    from sqlalchemy import text as _text
+    dup_movie_ids = db.scalars(
+        select(MediaFile.ref_id).where(
+            MediaFile.kind == MediaKind.movie,
+            MediaFile.scan_state == ScanState.ready,
+        ).group_by(MediaFile.ref_id).having(func.count(MediaFile.id) >= 2)
+    ).all()
+    duplicate_movie_versions = len(dup_movie_ids)
+
+    dup_ep_ids = db.scalars(
+        select(MediaFile.ref_id).where(
+            MediaFile.kind == MediaKind.episode,
+            MediaFile.scan_state == ScanState.ready,
+        ).group_by(MediaFile.ref_id).having(func.count(MediaFile.id) >= 2)
+    ).all()
+    duplicate_episode_versions = len(dup_ep_ids)
+
+    # Music duplicates: tracks with matching normalized tags and duration within 5s.
+    music_dup_track_ids = _music_duplicate_track_ids(db)
+    music_duplicates = len(music_dup_track_ids)
+
     return HealthCounts(
         missing_files_total=missing_total,
         missing_files_eligible=eligible,
@@ -315,6 +340,9 @@ def get_health(
         unreachable_folders=unreachable,
         unmatched=unmatched,
         missing_art=missing_art,
+        duplicate_movie_versions=duplicate_movie_versions,
+        duplicate_episode_versions=duplicate_episode_versions,
+        music_duplicates=music_duplicates,
     )
 
 
@@ -387,4 +415,219 @@ def delete_missing_file(
     from app.models.playback import WatchHistory
     db.execute(update(WatchHistory).where(WatchHistory.media_file_id == mf.id).values(media_file_id=None))
     db.delete(mf)
+    db.commit()
+
+
+# ---------------------------------------------------------------------------
+# Music duplicate detection helpers
+# ---------------------------------------------------------------------------
+def _music_duplicate_track_ids(db: Session) -> set[uuid.UUID]:
+    """Return the set of track ids involved in any same-tags duplicate group."""
+    from app.services.art_sources.names import match_key
+
+    rows = db.execute(
+        select(
+            Track.id,
+            Track.title,
+            Track.duration_sec,
+            Artist.name.label("artist_name"),
+            Album.title.label("album_title"),
+        )
+        .join(Album, Track.album_id == Album.id)
+        .join(Artist, Album.artist_id == Artist.id)
+        .where(
+            exists(
+                select(MediaFile.id).where(
+                    MediaFile.kind == MediaKind.track,
+                    MediaFile.ref_id == Track.id,
+                    MediaFile.scan_state == ScanState.ready,
+                )
+            )
+        )
+    ).all()
+
+    # Build normalized key -> list of (track_id, duration_sec)
+    from collections import defaultdict
+    by_key: dict[str, list] = defaultdict(list)
+    for row in rows:
+        key = (
+            match_key(row.title or "")
+            + "|" + match_key(row.artist_name or "")
+            + "|" + match_key(row.album_title or "")
+        )
+        by_key[key].append((row.id, row.duration_sec))
+
+    dup_ids: set[uuid.UUID] = set()
+    for key, entries in by_key.items():
+        if len(entries) < 2:
+            continue
+        # Find pairs within 5 s of each other
+        for i, (tid_a, dur_a) in enumerate(entries):
+            for tid_b, dur_b in entries[i + 1:]:
+                if dur_a is None or dur_b is None:
+                    if dur_a is None and dur_b is None:
+                        dup_ids.add(tid_a)
+                        dup_ids.add(tid_b)
+                elif abs(dur_a - dur_b) <= 5:
+                    dup_ids.add(tid_a)
+                    dup_ids.add(tid_b)
+    return dup_ids
+
+
+# ---------------------------------------------------------------------------
+# New endpoints
+# ---------------------------------------------------------------------------
+class MusicDuplicateTrack(BaseModel):
+    track_id: uuid.UUID
+    title: Optional[str]
+    artist: Optional[str]
+    album: Optional[str]
+    duration_sec: Optional[int]
+    path: Optional[str]
+    media_file_id: Optional[uuid.UUID]
+
+
+class MusicDuplicateGroup(BaseModel):
+    reason: str
+    tracks: list[MusicDuplicateTrack]
+
+
+@router.get("/health/music-duplicates", response_model=list[MusicDuplicateGroup])
+def list_music_duplicates(
+    _admin: Annotated[User, Depends(require_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> list[MusicDuplicateGroup]:
+    """Groups of tracks with matching normalized title+artist+album and duration within 5 s."""
+    from app.services.art_sources.names import match_key
+    from collections import defaultdict
+
+    rows = db.execute(
+        select(
+            Track.id,
+            Track.title,
+            Track.duration_sec,
+            Artist.name.label("artist_name"),
+            Album.title.label("album_title"),
+        )
+        .join(Album, Track.album_id == Album.id)
+        .join(Artist, Album.artist_id == Artist.id)
+        .where(
+            exists(
+                select(MediaFile.id).where(
+                    MediaFile.kind == MediaKind.track,
+                    MediaFile.ref_id == Track.id,
+                    MediaFile.scan_state == ScanState.ready,
+                )
+            )
+        )
+    ).all()
+
+    # Build normalized key -> list of track info
+    by_key: dict[str, list] = defaultdict(list)
+    for row in rows:
+        key = (
+            match_key(row.title or "")
+            + "|" + match_key(row.artist_name or "")
+            + "|" + match_key(row.album_title or "")
+        )
+        by_key[key].append(row)
+
+    groups: list[MusicDuplicateGroup] = []
+    seen_groups: set[frozenset] = set()
+    for key, entries in by_key.items():
+        if len(entries) < 2:
+            continue
+        # Find clusters of tracks within 5 s of each other
+        clustered: list[list] = []
+        for entry in entries:
+            placed = False
+            for cluster in clustered:
+                rep = cluster[0]
+                dur_a = entry.duration_sec
+                dur_b = rep.duration_sec
+                if dur_a is None and dur_b is None:
+                    cluster.append(entry)
+                    placed = True
+                    break
+                if dur_a is not None and dur_b is not None and abs(dur_a - dur_b) <= 5:
+                    cluster.append(entry)
+                    placed = True
+                    break
+            if not placed:
+                clustered.append([entry])
+
+        for cluster in clustered:
+            if len(cluster) < 2:
+                continue
+            gkey = frozenset(r.id for r in cluster)
+            if gkey in seen_groups:
+                continue
+            seen_groups.add(gkey)
+            track_rows = []
+            for r in cluster:
+                mf = db.scalar(
+                    select(MediaFile).where(
+                        MediaFile.kind == MediaKind.track,
+                        MediaFile.ref_id == r.id,
+                        MediaFile.scan_state == ScanState.ready,
+                    ).limit(1)
+                )
+                track_rows.append(MusicDuplicateTrack(
+                    track_id=r.id,
+                    title=r.title,
+                    artist=r.artist_name,
+                    album=r.album_title,
+                    duration_sec=r.duration_sec,
+                    path=mf.path if mf else None,
+                    media_file_id=mf.id if mf else None,
+                ))
+            groups.append(MusicDuplicateGroup(reason="same_tags", tracks=track_rows))
+    return groups
+
+
+@router.post("/movies/{movie_id}/versions/{media_file_id}/prefer", status_code=204)
+def prefer_movie_version(
+    movie_id: uuid.UUID,
+    media_file_id: uuid.UUID,
+    _admin: Annotated[User, Depends(require_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> None:
+    """Set is_preferred_version = True on the given file, null on all siblings."""
+    movie = db.get(Movie, movie_id)
+    if movie is None:
+        raise HTTPException(status_code=404, detail="movie_not_found")
+    mf = db.get(MediaFile, media_file_id)
+    if mf is None or mf.kind != MediaKind.movie or mf.ref_id != movie_id:
+        raise HTTPException(status_code=404, detail="media_file_not_found")
+    # Clear siblings
+    db.execute(
+        update(MediaFile)
+        .where(MediaFile.kind == MediaKind.movie, MediaFile.ref_id == movie_id)
+        .values(is_preferred_version=None)
+    )
+    mf.is_preferred_version = True
+    db.commit()
+
+
+@router.post("/episodes/{episode_id}/versions/{media_file_id}/prefer", status_code=204)
+def prefer_episode_version(
+    episode_id: uuid.UUID,
+    media_file_id: uuid.UUID,
+    _admin: Annotated[User, Depends(require_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> None:
+    """Set is_preferred_version = True on the given file, null on all siblings."""
+    from app.models.tv import Episode
+    ep = db.get(Episode, episode_id)
+    if ep is None:
+        raise HTTPException(status_code=404, detail="episode_not_found")
+    mf = db.get(MediaFile, media_file_id)
+    if mf is None or mf.kind != MediaKind.episode or mf.ref_id != episode_id:
+        raise HTTPException(status_code=404, detail="media_file_not_found")
+    db.execute(
+        update(MediaFile)
+        .where(MediaFile.kind == MediaKind.episode, MediaFile.ref_id == episode_id)
+        .values(is_preferred_version=None)
+    )
+    mf.is_preferred_version = True
     db.commit()

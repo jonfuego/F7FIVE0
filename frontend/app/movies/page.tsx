@@ -19,6 +19,7 @@ import { useScanState } from "@/lib/use-scan-state";
 import { getList, pickListLoad, setList } from "@/lib/list-cache";
 import { useScrollRestoration } from "@/lib/scroll-restoration";
 import { useViewPref } from "@/lib/use-view-pref";
+import Link from "next/link";
 import type { Movie, OverrideOut } from "@/lib/types";
 
 type EditInitial = OverrideOut & { algorithmic_sort_hint: string };
@@ -52,6 +53,7 @@ export default function MoviesPage() {
   const [reloadTick, setReloadTick] = useState(0);
   const [editTarget, setEditTarget] = useState<Movie | null>(null);
   const [editInitial, setEditInitial] = useState<EditInitial | null>(null);
+  const [hasCollections, setHasCollections] = useState(false);
   const progress = useProgressMap();
   // While a folder scan runs the list reloads every few seconds, so movies
   // show up as the scan finds them.
@@ -97,6 +99,23 @@ export default function MoviesPage() {
       cancelled = true;
     };
   }, [reloadTick, scan.ticks]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/library/collections", { cache: "no-store" });
+        if (!res.ok) return;
+        const data = (await res.json()) as unknown[];
+        if (!cancelled) setHasCollections(Array.isArray(data) && data.length > 0);
+      } catch {
+        // no-op
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const onApplied = useCallback(() => setReloadTick((t) => t + 1), []);
 
@@ -174,6 +193,11 @@ export default function MoviesPage() {
             {o.label}
           </button>
         ))}
+        {hasCollections && (
+          <Link href="/collections" className="chip">
+            Collections
+          </Link>
+        )}
       </div>
 
       {error ? (

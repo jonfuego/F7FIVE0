@@ -219,6 +219,7 @@ def _mf_out(mf: MediaFile) -> MediaFileOut:
         duration_sec=mf.duration_sec,
         bitrate_kbps=mf.bitrate_kbps,
         scan_state=mf.scan_state.value,
+        is_preferred=bool(mf.is_preferred_version),
     )
 
 
