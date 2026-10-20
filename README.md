@@ -12,7 +12,7 @@
 
 <p align="center">
   <a href="../../releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/jonfuego/F7FIVE0?style=flat-square&label=release&labelColor=000000&color=9C0404"></a>
-  <a href="../../releases"><img alt="Setup downloads" src="https://img.shields.io/github/downloads/jonfuego/F7FIVE0/latest/F7FIVE0-Setup-1.0.16.exe?style=flat-square&label=Setup%20downloads&labelColor=000000&color=333333"></a>
+  <a href="../../releases"><img alt="Setup downloads" src="https://img.shields.io/github/downloads/jonfuego/F7FIVE0/latest/F7FIVE0-Setup-1.0.17.exe?style=flat-square&label=Setup%20downloads&labelColor=000000&color=333333"></a>
   <img alt="Windows 10 and 11" src="https://img.shields.io/badge/server-Windows%2010%20%7C%2011-333333?style=flat-square&labelColor=000000">
   <img alt="Android, Android TV, Android Auto" src="https://img.shields.io/badge/app-Android%20%7C%20TV%20%7C%20Auto-333333?style=flat-square&labelColor=000000">
   <a href="LICENSE"><img alt="License: Unlicense" src="https://img.shields.io/badge/license-Unlicense-333333?style=flat-square&labelColor=000000"></a>
