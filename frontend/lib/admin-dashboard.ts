@@ -23,11 +23,11 @@ import type { ScanRow } from "./scans-rows.ts";
 export type AdminAreaId =
   | "users" | "library-folders" | "scans" | "metadata" | "arr"
   | "audio-analysis" | "remote-access" | "updates" | "activity"
-  | "library-health";
+  | "library-health" | "organizer";
 
 export type AdminArea = { id: AdminAreaId; label: string; href: string };
 
-/** The ten settings areas, in the order of the section list and the tile grid. */
+/** The eleven settings areas, in the order of the section list and the tile grid. */
 export const ADMIN_AREAS: readonly AdminArea[] = [
   { id: "users", label: "Users", href: "/admin/users" },
   { id: "library-folders", label: "Libraries", href: "/admin/library-folders" },
@@ -36,6 +36,7 @@ export const ADMIN_AREAS: readonly AdminArea[] = [
   { id: "arr", label: "Radarr, Sonarr and Lidarr", href: "/admin/arr" },
   { id: "audio-analysis", label: "Audio analysis", href: "/admin/audio-analysis" },
   { id: "library-health", label: "Library health", href: "/admin/library-health" },
+  { id: "organizer", label: "Organizer", href: "/admin/organizer" },
   { id: "remote-access", label: "Remote access", href: "/admin/remote-access" },
   { id: "updates", label: "Updates", href: "/admin/updates" },
   { id: "activity", label: "Activity log", href: "/admin/activity" },
@@ -56,6 +57,7 @@ export const ADMIN_HASH_MAP: Readonly<Record<string, string>> = {
   arr: "/admin/arr",
   "audio-analysis": "/admin/audio-analysis",
   "library-health": "/admin/library-health",
+  organizer: "/admin/organizer",
   sessions: "/admin/activity",
   "auth-events": "/admin/activity",
   history: "/admin/activity",
@@ -207,6 +209,7 @@ export type LibraryHealthLike = {
   duplicate_movie_versions?: number;
   duplicate_episode_versions?: number;
   music_duplicates?: number;
+  flipflop_warnings?: string[];
 };
 
 export type AttentionItem = {
@@ -375,6 +378,17 @@ export function buildAttentionItems(inputs: AttentionInputs): AttentionItem[] {
       detail: null,
       linkLabel: "Open Library health",
       href: "/admin/library-health",
+    });
+  }
+  if (lh && (lh.flipflop_warnings?.length ?? 0) > 0) {
+    const n = lh.flipflop_warnings!.length;
+    items.push({
+      id: "health:flipflop",
+      kind: "health",
+      text: `Organizer: ${plural(n, "library ownership conflict", "library ownership conflicts")}`,
+      detail: null,
+      linkLabel: "Open Organizer",
+      href: "/admin/organizer",
     });
   }
 
@@ -706,6 +720,7 @@ export function settingsTiles(src: SettingsSources): SettingsTile[] {
     arr: { text: "", tone: "neutral" },
     "audio-analysis": { text: "", tone: "neutral" },
     "library-health": { text: "", tone: "neutral" },
+    organizer: { text: "Rename and retag library files", tone: "neutral" },
     "remote-access": { text: "", tone: "neutral" },
     updates: { text: "", tone: "neutral" },
     activity: { text: "Sessions, sign-ins, play history", tone: "neutral" },

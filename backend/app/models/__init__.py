@@ -59,4 +59,7 @@ from app.models.view_pref import UserViewPref  # noqa: F401
 # Collections (TMDB-auto and admin-manual groups of media)
 from app.models.collection import Collection, CollectionItem  # noqa: F401
 
+# Organizer journals (rename/retag run history)
+from app.models.organizer import OrganizerJournal, OrganizerJournalItem  # noqa: F401
+
 __all__ = ["Base"]

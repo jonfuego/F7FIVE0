@@ -286,8 +286,8 @@ test("old hashes: no hash, an unknown hash and the new anchor stay put", () => {
   assert.equal(adminRedirectForHash("#constructor"), null);
 });
 
-test("section list: ten areas, each reachable from its own path", () => {
-  assert.equal(ADMIN_AREAS.length, 10);
+test("section list: eleven areas, each reachable from its own path", () => {
+  assert.equal(ADMIN_AREAS.length, 11);
   for (const area of ADMIN_AREAS) {
     assert.equal(currentAreaId(area.href), area.id);
     assert.equal(currentAreaId(`${area.href}/`), area.id);
@@ -479,7 +479,7 @@ test("settings tiles: sources that did not load leave a blank status, not a cras
     users: null, folders: null, scanSummary: null, metadata: null,
     arr: null, audio: null, remote: null, updates: null,
   });
-  assert.equal(tiles.length, 10);
+  assert.equal(tiles.length, 11);
   assert.equal(tiles.find((t) => t.id === "users")?.status, "");
   assert.equal(tiles.find((t) => t.id === "activity")?.status, "Sessions, sign-ins, play history");
   assert.equal(

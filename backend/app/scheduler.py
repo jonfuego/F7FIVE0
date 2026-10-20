@@ -42,6 +42,9 @@ JOB_PODCAST_DOWNLOAD = "podcast_download"
 JOB_DUCKDNS = "duckdns_refresh"
 JOB_COLLECTIONS_SYNC = "collections_sync"
 JOB_BULK_ACTION = "bulk_action"
+JOB_ORGANIZER_PREVIEW = "organizer_preview"
+JOB_ORGANIZER_APPLY = "organizer_apply"
+JOB_ORGANIZER_UNDO = "organizer_undo"
 
 # Once a day, give or take an hour, so a fleet of servers doesn't hit GitHub
 # at the same second. Checking never installs anything.
@@ -248,6 +251,10 @@ def _run_folder_scan(only: Optional[list] = None) -> None:
     their own). Finally kick off one
     low-priority audio-analysis step so new music gets loudness / waveform /
     similarity filled in without an operator running the CLI."""
+    from app.services.organizer import is_organizer_running
+    if is_organizer_running():
+        log.warning("an organizer run is active; skipping folder scan")
+        return
     if not _folder_scan_lock.acquire(blocking=False):
         log.info("a folder scan is already running; skipping this one")
         return
@@ -907,6 +914,81 @@ def queue_bulk_action(action: str, kind: str, ids: list, params: Optional[dict] 
         replace_existing=True,
     )
     return True
+
+
+def _run_organizer_preview(library_id: uuid.UUID, user_id: uuid.UUID) -> None:
+    """Scheduler-invoked preview pass for a library. Writes a journal with
+    proposed changes. Does not touch any file on disk."""
+    try:
+        db = SessionLocal()
+        try:
+            from app.services import scan_status as ss
+            if ss.is_running(db) or ss.arr_is_running(db):
+                log.warning("organizer preview aborted: scan running")
+                return
+            from app.services.organizer import preview
+            preview(db, library_id, user_id)
+        finally:
+            db.close()
+    except Exception:
+        log.exception("organizer preview raised (library_id=%s)", library_id)
+
+
+def trigger_organizer_preview(library_id: uuid.UUID, user_id: uuid.UUID) -> None:
+    """Queue an organizer preview run. No-op when the scheduler is not running."""
+    if _scheduler is None:
+        log.warning("trigger_organizer_preview called but scheduler not started")
+        return
+    _scheduler.add_job(
+        _run_organizer_preview,
+        args=[library_id, user_id],
+        id=f"{JOB_ORGANIZER_PREVIEW}_{library_id}",
+        replace_existing=True,
+    )
+
+
+def _run_organizer_apply(journal_id: uuid.UUID, user_id: uuid.UUID) -> None:
+    """Scheduler-invoked apply pass for a journal. Renames files and writes tags."""
+    try:
+        from app.services.organizer import apply_run
+        apply_run(journal_id, user_id)
+    except Exception:
+        log.exception("organizer apply raised (journal_id=%s)", journal_id)
+
+
+def trigger_organizer_apply(journal_id: uuid.UUID, user_id: uuid.UUID) -> None:
+    """Queue an organizer apply run. No-op when the scheduler is not running."""
+    if _scheduler is None:
+        log.warning("trigger_organizer_apply called but scheduler not started")
+        return
+    _scheduler.add_job(
+        _run_organizer_apply,
+        args=[journal_id, user_id],
+        id=f"{JOB_ORGANIZER_APPLY}_{journal_id}",
+        replace_existing=True,
+    )
+
+
+def _run_organizer_undo(journal_id: uuid.UUID, user_id: uuid.UUID) -> None:
+    """Scheduler-invoked undo pass for a journal. Reverses renames and retags."""
+    try:
+        from app.services.organizer import undo_run
+        undo_run(journal_id, user_id)
+    except Exception:
+        log.exception("organizer undo raised (journal_id=%s)", journal_id)
+
+
+def trigger_organizer_undo(journal_id: uuid.UUID, user_id: uuid.UUID) -> None:
+    """Queue an organizer undo run. No-op when the scheduler is not running."""
+    if _scheduler is None:
+        log.warning("trigger_organizer_undo called but scheduler not started")
+        return
+    _scheduler.add_job(
+        _run_organizer_undo,
+        args=[journal_id, user_id],
+        id=f"{JOB_ORGANIZER_UNDO}_{journal_id}",
+        replace_existing=True,
+    )
 
 
 def trigger_series_rescan_now(sonarr_id: int) -> None:

@@ -93,6 +93,24 @@ class _ArrClient:
             return None
         return resp.json()
 
+    def _put(self, path: str, json: Optional[dict] = None) -> Any:
+        if not self.configured:
+            raise ArrClientError(f"{self.service_name} not configured (missing api key)")
+        try:
+            resp = self._client.put(path, json=json or {})
+        except httpx.HTTPError as exc:
+            raise ArrUnreachableError(f"{self.service_name} PUT {path} failed: {exc}") from exc
+        if resp.status_code == 401:
+            raise ArrAuthError(f"{self.service_name} rejected API key (401)", status_code=401)
+        if resp.status_code >= 400:
+            raise ArrClientError(
+                f"{self.service_name} PUT {path} returned {resp.status_code}: {resp.text[:200]}",
+                status_code=resp.status_code,
+            )
+        if not resp.content:
+            return None
+        return resp.json()
+
     def system_status(self) -> dict:
         """GET system/status: version and app name. Used by the Admin Test button."""
         data = self._get("system/status")

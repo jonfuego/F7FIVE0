@@ -100,3 +100,18 @@ class SonarrClient(_ArrClient):
             "command",
             json={"name": "ManualImport", "files": files, "importMode": import_mode},
         )
+
+    def get_media_management(self) -> dict[str, Any]:
+        """GET /api/v3/config/mediamanagement. Returns keys including renameEpisodes."""
+        data = self._get("config/mediamanagement")
+        return data if isinstance(data, dict) else {}
+
+    def update_series_path(self, sonarr_id: int, new_folder: str) -> dict[str, Any]:
+        """Update a series' path in Sonarr (move files off).
+
+        GETs the current series resource, updates `path`, then PUTs it back
+        so Sonarr knows the new location without triggering its own file move.
+        """
+        series = self.get_series(sonarr_id)
+        series["path"] = new_folder
+        return self._put(f"series/{sonarr_id}", json={**series, "moveFiles": False})

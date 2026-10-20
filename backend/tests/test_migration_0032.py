@@ -44,11 +44,12 @@ def _build_pre_0032(engine) -> None:
         ))
 
 
-def test_0032_is_the_single_head():
+def test_0032_is_in_the_revision_chain():
     cfg = _config("sqlite://")
     script = ScriptDirectory.from_config(cfg)
-    heads = list(script.get_heads())
-    assert heads == ["0032"], heads
+    # 0033 supersedes 0032 as the head; 0032 is still a valid revision.
+    all_revs = {r.revision for r in script.walk_revisions()}
+    assert "0032" in all_revs, all_revs
 
 
 def test_0032_upgrade_then_downgrade_round_trip(tmp_path, monkeypatch):

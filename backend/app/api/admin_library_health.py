@@ -54,6 +54,7 @@ class HealthCounts(BaseModel):
     duplicate_movie_versions: int = 0
     duplicate_episode_versions: int = 0
     music_duplicates: int = 0
+    flipflop_warnings: list[str] = []
 
 
 class MissingFileItem(BaseModel):
@@ -333,6 +334,11 @@ def get_health(
     music_dup_track_ids = _music_duplicate_track_ids(db)
     music_duplicates = len(music_dup_track_ids)
 
+    from app.services.flipflop_guard import check_flipflop
+    flipflop_warnings: list[str] = []
+    for kind_val in ["movies", "tv", "music"]:
+        flipflop_warnings.extend(check_flipflop(kind_val))
+
     return HealthCounts(
         missing_files_total=missing_total,
         missing_files_eligible=eligible,
@@ -343,6 +349,7 @@ def get_health(
         duplicate_movie_versions=duplicate_movie_versions,
         duplicate_episode_versions=duplicate_episode_versions,
         music_duplicates=music_duplicates,
+        flipflop_warnings=flipflop_warnings,
     )
 
 

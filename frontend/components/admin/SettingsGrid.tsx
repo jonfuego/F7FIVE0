@@ -9,7 +9,7 @@
 
 import Link from "next/link";
 import {
-  Activity, AudioLines, Download, FileWarning, FolderOpen, Globe, Plug, RefreshCw, Tags, TriangleAlert, Users,
+  Activity, AudioLines, Download, FileWarning, FolderOpen, Globe, Plug, RefreshCw, Tags, TriangleAlert, Users, Wand2,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Icon } from "@/components/Icon";
@@ -27,6 +27,7 @@ const TILE: Record<AdminAreaId, { icon: LucideIcon; href: string }> = {
   arr: { icon: Plug, href: "/admin/arr" },
   "audio-analysis": { icon: AudioLines, href: "/admin/audio-analysis" },
   "library-health": { icon: FileWarning, href: "/admin/library-health" },
+  organizer: { icon: Wand2, href: "/admin/organizer" },
   "remote-access": { icon: Globe, href: "/admin/remote-access" },
   updates: { icon: Download, href: "/admin/updates" },
   activity: { icon: Activity, href: "/admin/activity" },

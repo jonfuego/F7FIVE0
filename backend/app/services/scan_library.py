@@ -96,7 +96,7 @@ _SKIP_DIRS = {
     "extras", "featurettes", "behind the scenes", "deleted scenes",
     "interviews", "scenes", "shorts", "trailers", "other", "sample",
     "samples", "subs", "subtitles", "@eadir", "#recycle", "$recycle.bin",
-    ".trash", ".actors", "metadata",
+    ".trash", ".actors", "metadata", ".f7five0-recycle",
 }
 
 _TMDB_TAG_RE = re.compile(r"[\[{]\s*tmdb(?:id)?[-=\s]*(\d+)\s*[\]}]", re.IGNORECASE)
