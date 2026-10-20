@@ -731,6 +731,15 @@ INSTALL.md for the operator view.
   branch. CI still downloads the APK and its `.sha256` from the draft; GitHub
   documents no way to fetch an asset without counting it, and the badge no longer
   reads those counts.
+- Android native dependencies must not float. `react-native-google-cast` asks for
+  `play-services-cast-framework` with the version `+` unless the root project sets
+  `ext.castFrameworkVersion`; on 2026-10-20 `+` moved from 22.3.1 to 23.0.0, which
+  pulls `androidx.mediarouter` 1.9.0-beta01 (needs compileSdk 37 and Android Gradle
+  plugin 9.1) and failed `checkReleaseAarMetadata`. `plugins/withGoogleCast.js` pins
+  22.3.1 in the root build.gradle that `expo prebuild --clean` regenerates (test:
+  `src/cast/__tests__/castFrameworkPin.test.ts`). Move the pin only with the Expo SDK
+  upgrade. A release build that fails at `checkReleaseAarMetadata` after a quiet week
+  means a floating version moved: look in `~/.gradle/caches/modules-2/files-2.1`.
 - Android downloads are stamped, never re-signed: the API adds the server's
   addresses (PUBLIC_URL, the address used, HOME_URL or LAN IP) as one pair in
   the APK Signing Block (`services/apk_stamp.py`, `services/android_app.py`,
@@ -860,6 +869,22 @@ is only proven by a real update on a VM: the tests use a stub Setup.
 
 ## Session log
 
+- 2026-10-20 (Code, v1.0.17 release of the Library Management merge): v1.0.17
+  (versionCode 18) is released from `main` `92bbf2f` (Setup, APK, zip, SBOMs and
+  `SHA256SUMS.txt`; CI, CodeQL, the test Setup and the tag's Release run green). It
+  ships `4143a29` Merge Library Management (phases 1 to 4: named libraries and
+  per-user access, metadata locks and library health, bulk actions and video versions
+  and collections, the organizer) with four migrations, 0030 to 0033. Those ran on
+  SQLite in tests only; no PostgreSQL run and no clean-VM install or upgrade from
+  1.0.16 (Jon waived the VM). The first APK build failed on a floating Cast SDK
+  version; `fix/pin-cast-framework` pins it (see the native dependencies rule).
+  Checks on `main` `a1ec102`: pytest 1424 passed (10 skipped), web build ok, lint 0
+  errors, web tests 370, mobile typecheck clean, jest 473, mobile lint 0 errors. CI
+  failed once on `a1ec102` in `test_organizer_roundtrip.py` (expected `undone`, got
+  `undoing`) and passed on the next commit and five local runs: a flaky timing
+  assumption in the organizer undo test, not chased. Logs in the vault
+  `projects\f7five0\smoke\release-1.0.17\`. The Library Management work has no
+  CLAUDE.md rules yet; add them. Still open from 1.0.16: Jon's Chromecast device check.
 - 2026-10-17 (Code, v1.0.16 wrap-up and Chromecast fix): v1.0.16 (versionCode 17) is
   released from `main` `a1bf13a` (Setup, APK, zip, SBOMs and `SHA256SUMS.txt`; CI,
   CodeQL and the Release run green; test Setup from the draft built first). Merged
