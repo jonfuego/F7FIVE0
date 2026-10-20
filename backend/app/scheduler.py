@@ -33,12 +33,18 @@ JOB_FOLDER_SCAN = "folder_scan"
 JOB_AUDIO_ANALYSIS = "audio_analysis"
 JOB_UPDATE_CHECK = "update_check"
 JOB_ART_COPIES = "art_copies_backfill"
+JOB_LIBRARY_ID_BACKFILL = "library_id_backfill"
 JOB_MOVIE_GENRES = "movie_genres_backfill"
 JOB_ARTIST_ART = "artist_art_autofill"
 JOB_ARTIST_BIOS = "artist_bios_backfill"
 JOB_PODCAST_REFRESH = "podcast_refresh"
 JOB_PODCAST_DOWNLOAD = "podcast_download"
 JOB_DUCKDNS = "duckdns_refresh"
+JOB_COLLECTIONS_SYNC = "collections_sync"
+JOB_BULK_ACTION = "bulk_action"
+JOB_ORGANIZER_PREVIEW = "organizer_preview"
+JOB_ORGANIZER_APPLY = "organizer_apply"
+JOB_ORGANIZER_UNDO = "organizer_undo"
 
 # Once a day, give or take an hour, so a fleet of servers doesn't hit GitHub
 # at the same second. Checking never installs anything.
@@ -70,6 +76,8 @@ _artist_art_lock = threading.Lock()
 # One podcast feed refresh at a time in this process: the hourly job, Admin's
 # "Refresh feeds" and an OPML import can all be queued together.
 _podcast_refresh_lock = threading.Lock()
+
+# Bulk action lock is owned by bulk_actions.py (module-level); we just queue the job here.
 
 # At most two episode downloads at once, however many are queued (auto-download
 # can queue a whole back catalogue's worth of new episodes on a busy day).
@@ -132,6 +140,8 @@ def _run_full_sync(apps: Optional[list] = None) -> None:
         _arr_sync_lock.release()
     # The session has committed; the rows are visible to the enrichment jobs.
     sync.schedule_pending_enrichment(stats)
+    # Sync collections after *arr sync commits new movies.
+    trigger_collections_sync(delay_sec=ENRICH_DELAY_SEC)
 
 
 def _run_music_videos_scan() -> None:
@@ -195,6 +205,10 @@ def _scan_folders(only: Optional[list] = None) -> bool:
         # Connect any saved NAS sign-ins before walking folders, so a UNC
         # share is readable for this scan. Cheap when already connected.
         nas_auth.ensure_all(db)
+        # On an env-only install, make one library per kind so library_id is
+        # assignable during the scan. A no-op once an admin manages folders.
+        if library_folders.ensure_seeded(db):
+            db.commit()
         if only is None:
             scan_library.scan_all(db, on_progress=progress)
         else:
@@ -213,6 +227,8 @@ def _scan_folders(only: Optional[list] = None) -> bool:
         trigger_artist_art_autofill(delay_sec=ENRICH_DELAY_SEC)
         # Artists with a saved Wikipedia or Wikidata link and no bio yet.
         trigger_artist_bios_backfill(delay_sec=ENRICH_DELAY_SEC)
+        # Sync TMDB collection memberships after the scan commits new movies.
+        trigger_collections_sync(delay_sec=ENRICH_DELAY_SEC)
     except Exception as exc:
         log.exception("folder scan raised")
         db.rollback()
@@ -235,6 +251,10 @@ def _run_folder_scan(only: Optional[list] = None) -> None:
     their own). Finally kick off one
     low-priority audio-analysis step so new music gets loudness / waveform /
     similarity filled in without an operator running the CLI."""
+    from app.services.organizer import is_organizer_running
+    if is_organizer_running():
+        log.warning("an organizer run is active; skipping folder scan")
+        return
     if not _folder_scan_lock.acquire(blocking=False):
         log.info("a folder scan is already running; skipping this one")
         return
@@ -291,6 +311,24 @@ def _run_art_copies_backfill() -> None:
         log.info("art copies backfill: %d created", made)
     except Exception:
         log.exception("art copies backfill raised")
+
+
+def _run_library_id_backfill() -> None:
+    """Fill media_files.library_id for rows scanned before libraries existed.
+    Batched and rerunnable; own session; never raises. Keeps going until a pass
+    fills nothing (a path that matches no folder stays null, visible to all)."""
+    try:
+        with db_session() as db:
+            total = 0
+            while True:
+                filled = library_folders.backfill_media_file_library_id(db)
+                db.commit()
+                total += filled
+                if filled == 0:
+                    break
+        log.info("library_id backfill: %d media files stamped", total)
+    except Exception:
+        log.exception("library_id backfill raised")
 
 
 def _run_movie_genres_backfill() -> None:
@@ -588,6 +626,17 @@ def start() -> BackgroundScheduler:
         replace_existing=True,
         next_run_time=datetime.now(timezone.utc) + timedelta(seconds=60),
     )
+    # One-shot after boot: stamp library_id on media files scanned before
+    # libraries existed. Rerunnable; a later boot fills nothing new.
+    sched.add_job(
+        _run_library_id_backfill,
+        id=JOB_LIBRARY_ID_BACKFILL,
+        name="stamp media files with their library",
+        max_instances=1,
+        coalesce=True,
+        replace_existing=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=75),
+    )
     # Also once after boot, a bit later than the art job. Folder scans and a
     # saved TMDB key queue it again (same job id, so it never stacks).
     sched.add_job(
@@ -632,6 +681,18 @@ def start() -> BackgroundScheduler:
         coalesce=True,
         replace_existing=True,
         next_run_time=datetime.now(timezone.utc) + timedelta(seconds=180),
+    )
+    # Collections sync: once after boot (20 s delay) so TMDB-sourced collection
+    # memberships are populated for movies already in the library. Each folder scan
+    # and *arr sync queues it again (same job id, never stacks).
+    sched.add_job(
+        _run_collections_sync,
+        id=JOB_COLLECTIONS_SYNC,
+        name="sync TMDB collections",
+        max_instances=1,
+        coalesce=True,
+        replace_existing=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=175),
     )
     # DuckDNS: only when Setup wrote both DUCKDNS_DOMAIN and DUCKDNS_TOKEN into
     # .env (port forwarding with a DuckDNS name). First update shortly after
@@ -803,6 +864,129 @@ def trigger_marker_analysis_now(
         _run_marker_analysis,
         args=[series_id, force],
         id=f"marker_analysis_{suffix}",
+        replace_existing=True,
+    )
+
+
+def _run_collections_sync() -> None:
+    """Sync TMDB auto-collections from movies that have a tmdb_collection_id."""
+    try:
+        from app.services.collections import sync_tmdb_collections
+        with db_session() as db:
+            count = sync_tmdb_collections(db)
+        log.info("collections sync: %d rows upserted", count)
+    except Exception:
+        log.exception("collections sync raised")
+
+
+def trigger_collections_sync(delay_sec: int = 0) -> None:
+    """Queue the TMDB collections sync. One job id so it never stacks."""
+    if _scheduler is None:
+        return
+    _scheduler.add_job(
+        _run_collections_sync,
+        id=JOB_COLLECTIONS_SYNC,
+        name="sync TMDB collections",
+        max_instances=1,
+        coalesce=True,
+        replace_existing=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=delay_sec),
+    )
+
+
+def _run_bulk_action_job(action: str, kind: str, ids: list, params: Optional[dict] = None) -> None:
+    """Scheduler-invoked bulk action runner."""
+    try:
+        from app.services.bulk_actions import run_bulk_action
+        run_bulk_action(action, kind, [uuid.UUID(str(i)) for i in ids], params)
+    except Exception:
+        log.exception("bulk action raised (action=%s kind=%s)", action, kind)
+
+
+def queue_bulk_action(action: str, kind: str, ids: list, params: Optional[dict] = None) -> bool:
+    """Queue a bulk action. Returns False when the scheduler is not running."""
+    if _scheduler is None:
+        return False
+    _scheduler.add_job(
+        _run_bulk_action_job,
+        args=[action, kind, ids, params],
+        id=JOB_BULK_ACTION,
+        replace_existing=True,
+    )
+    return True
+
+
+def _run_organizer_preview(library_id: uuid.UUID, user_id: uuid.UUID) -> None:
+    """Scheduler-invoked preview pass for a library. Writes a journal with
+    proposed changes. Does not touch any file on disk."""
+    try:
+        db = SessionLocal()
+        try:
+            from app.services import scan_status as ss
+            if ss.is_running(db) or ss.arr_is_running(db):
+                log.warning("organizer preview aborted: scan running")
+                return
+            from app.services.organizer import preview
+            preview(db, library_id, user_id)
+        finally:
+            db.close()
+    except Exception:
+        log.exception("organizer preview raised (library_id=%s)", library_id)
+
+
+def trigger_organizer_preview(library_id: uuid.UUID, user_id: uuid.UUID) -> None:
+    """Queue an organizer preview run. No-op when the scheduler is not running."""
+    if _scheduler is None:
+        log.warning("trigger_organizer_preview called but scheduler not started")
+        return
+    _scheduler.add_job(
+        _run_organizer_preview,
+        args=[library_id, user_id],
+        id=f"{JOB_ORGANIZER_PREVIEW}_{library_id}",
+        replace_existing=True,
+    )
+
+
+def _run_organizer_apply(journal_id: uuid.UUID, user_id: uuid.UUID) -> None:
+    """Scheduler-invoked apply pass for a journal. Renames files and writes tags."""
+    try:
+        from app.services.organizer import apply_run
+        apply_run(journal_id, user_id)
+    except Exception:
+        log.exception("organizer apply raised (journal_id=%s)", journal_id)
+
+
+def trigger_organizer_apply(journal_id: uuid.UUID, user_id: uuid.UUID) -> None:
+    """Queue an organizer apply run. No-op when the scheduler is not running."""
+    if _scheduler is None:
+        log.warning("trigger_organizer_apply called but scheduler not started")
+        return
+    _scheduler.add_job(
+        _run_organizer_apply,
+        args=[journal_id, user_id],
+        id=f"{JOB_ORGANIZER_APPLY}_{journal_id}",
+        replace_existing=True,
+    )
+
+
+def _run_organizer_undo(journal_id: uuid.UUID, user_id: uuid.UUID) -> None:
+    """Scheduler-invoked undo pass for a journal. Reverses renames and retags."""
+    try:
+        from app.services.organizer import undo_run
+        undo_run(journal_id, user_id)
+    except Exception:
+        log.exception("organizer undo raised (journal_id=%s)", journal_id)
+
+
+def trigger_organizer_undo(journal_id: uuid.UUID, user_id: uuid.UUID) -> None:
+    """Queue an organizer undo run. No-op when the scheduler is not running."""
+    if _scheduler is None:
+        log.warning("trigger_organizer_undo called but scheduler not started")
+        return
+    _scheduler.add_job(
+        _run_organizer_undo,
+        args=[journal_id, user_id],
+        id=f"{JOB_ORGANIZER_UNDO}_{journal_id}",
         replace_existing=True,
     )
 

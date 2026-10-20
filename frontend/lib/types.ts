@@ -27,6 +27,7 @@ export type MediaFile = {
   duration_sec: number | null;
   bitrate_kbps: number | null;
   scan_state: "pending" | "ready" | "missing" | "error" | string;
+  is_preferred_version: boolean | null;
 };
 
 export type CastMember = {

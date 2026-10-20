@@ -150,6 +150,7 @@ class MediaFileOut(BaseModel):
     duration_sec: Optional[int] = None
     bitrate_kbps: Optional[int] = None
     scan_state: str
+    is_preferred: bool = False
 
 
 class MovieOut(BaseModel):

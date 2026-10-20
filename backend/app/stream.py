@@ -42,7 +42,7 @@ from app.db import SessionLocal
 from app.models.media_file import MediaFile, ScanState
 from app.models.podcast import PodcastEpisode
 from app.models.transcode import TranscodeSession
-from app.services import media_paths, nas_auth, net_guard, transcode_cache, transcoder
+from app.services import library_access, media_paths, nas_auth, net_guard, transcode_cache, transcoder
 from app.services.podcasts import media_types
 from app.services.playback import (
     VARIANT_LADDER,
@@ -118,6 +118,13 @@ async def lifespan(app: FastAPI):
         nas_auth.ensure_all()
     except Exception:
         log.warning("NAS ensure_all at stream startup raised", exc_info=True)
+    try:
+        from app.services import library_folders
+        with SessionLocal() as db:
+            if library_folders.ensure_seeded(db):
+                db.commit()
+    except Exception:
+        log.warning("library seed at stream startup raised", exc_info=True)
     _close_orphaned_sessions()
     transcoder.manager.start_janitor()
 
@@ -248,6 +255,11 @@ def verified_media_file(
         raise HTTPException(status_code=410, detail="file_missing")
     if mf.scan_state != ScanState.ready:
         raise HTTPException(status_code=409, detail="file_not_ready")
+    # Per-user library access, after the HMAC and session checks (never before).
+    # The issuing user is the signed `uid`; a file whose library they can no
+    # longer see is refused even with a still-valid signature.
+    if not library_access.can_user_access_library(db, uid, mf.library_id):
+        raise HTTPException(status_code=403, detail="library_forbidden")
     return mf
 
 
@@ -384,6 +396,12 @@ def verified_podcast_episode(
     ep = db.get(PodcastEpisode, episode_id)
     if ep is None:
         raise HTTPException(status_code=404, detail="episode_not_found")
+    # Per-user access to the podcasts library the server file belongs to. A relay
+    # (no server file) has no library id and is allowed.
+    if ep.media_file_id is not None:
+        mf = db.get(MediaFile, ep.media_file_id)
+        if mf is not None and not library_access.can_user_access_library(db, uid, mf.library_id):
+            raise HTTPException(status_code=403, detail="library_forbidden")
     return ep
 
 

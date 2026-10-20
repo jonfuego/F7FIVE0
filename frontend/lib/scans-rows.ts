@@ -23,7 +23,30 @@
 // the button stays off and says to add one, because there is nothing to scan.
 
 export type ScanRowId =
-  | "movies" | "tv" | "music" | "music_videos" | "podcasts" | "podcast_feeds";
+  | "movies" | "tv" | "music" | "music_videos" | "podcasts" | "podcast_feeds" | "bulk" | "organizer";
+
+/** Shape of GET /api/admin/library/organizer/journals?active=true. */
+export type OrganizerJobLike = {
+  state: string;
+  library_id: string | null;
+  action: string | null;
+  done: number;
+  total: number;
+  errors: number;
+  started_at: string | null;
+};
+
+/** Shape of GET /api/admin/library/bulk-action. */
+export type BulkJobLike = {
+  state: string;
+  action: string | null;
+  kind: string | null;
+  total: number;
+  done: number;
+  errors: number;
+  started_at: string | null;
+  finished_at: string | null;
+};
 export type ScanRowState = "idle" | "running" | "error" | "never";
 export type ArrApp = "radarr" | "sonarr" | "lidarr";
 export type ArrApps = Record<ArrApp, boolean>;

@@ -21,11 +21,13 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+import uuid
+
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.models.library import Library, LibraryKind
+from app.models.library import Library, LibraryFolder, LibraryKind
 from app.models.media_file import MediaFile, MediaKind, ScanState
 from app.services import arr_settings
 from app.services.path_map import translate as translate_path
@@ -68,17 +70,121 @@ def db_managed(db: Session) -> bool:
 
 
 def folders(db: Optional[Session], kind: str) -> list[str]:
-    """Effective folders for one library."""
+    """Effective folders for one kind, across every library of that kind.
+
+    Reads `library_folders` joined to `libraries` by kind once any library
+    exists; otherwise falls back to the `LIBRARY_ROOT_*` env keys."""
     if db is not None and db_managed(db):
-        rows = db.scalars(
-            select(Library).where(Library.kind == LibraryKind(kind)).order_by(Library.created_at, Library.root_path)
+        rows = db.execute(
+            select(LibraryFolder.path)
+            .join(Library, Library.id == LibraryFolder.library_id)
+            .where(Library.kind == LibraryKind(kind))
+            .order_by(Library.sort_order, Library.created_at, LibraryFolder.created_at, LibraryFolder.path)
         ).all()
-        return [r.root_path for r in rows]
+        return [r[0] for r in rows]
     return env_folders(kind)
 
 
 def all_folders(db: Optional[Session]) -> dict[str, list[str]]:
     return {k: folders(db, k) for k in KINDS}
+
+
+def _library_for_kind(db: Session, kind: str) -> Optional[Library]:
+    """The first (lowest sort_order) library of a kind, or None."""
+    return db.scalars(
+        select(Library).where(Library.kind == LibraryKind(kind))
+        .order_by(Library.sort_order, Library.created_at)
+    ).first()
+
+
+def library_for_path(db: Session, path: Optional[str]) -> Optional[uuid.UUID]:
+    """The id of the library whose folder contains `path` (longest match), or
+    None. Compares the stored path (already drive->UNC translated by the scanner)
+    against each folder in both its raw and translated form, so a folder typed as
+    a drive letter still matches a media path stored as a UNC path."""
+    if not path:
+        return None
+    rows = db.execute(select(LibraryFolder.library_id, LibraryFolder.path)).all()
+    if not rows:
+        return None
+    target = _key(path)
+    best_id: Optional[uuid.UUID] = None
+    best_len = -1
+    for lib_id, folder in rows:
+        for cand in (folder, translate_path(folder, db) or folder):
+            fk = _key(cand)
+            if target == fk or target.startswith(fk + "\\"):
+                if len(fk) > best_len:
+                    best_id, best_len = lib_id, len(fk)
+    return best_id
+
+
+def backfill_media_file_library_id(db: Session, batch_size: int = 500) -> int:
+    """Fill `media_files.library_id` for rows that still have none, by matching
+    the stored path to a library folder. Batched and rerunnable: a row whose path
+    matches no folder is left null (visible to all) and tried again next run.
+    Returns the number of rows stamped. The caller commits."""
+    folder_rows = db.execute(select(LibraryFolder.library_id, LibraryFolder.path)).all()
+    if not folder_rows:
+        return 0
+    # Pre-compute normalized folder prefixes (raw and translated) per library.
+    prefixes: list[tuple[str, uuid.UUID]] = []
+    for lib_id, folder in folder_rows:
+        for cand in {folder, translate_path(folder, db) or folder}:
+            prefixes.append((_key(cand), lib_id))
+
+    def match(path: str) -> Optional[uuid.UUID]:
+        target = _key(path)
+        best_id: Optional[uuid.UUID] = None
+        best_len = -1
+        for fk, lib_id in prefixes:
+            if target == fk or target.startswith(fk + "\\"):
+                if len(fk) > best_len:
+                    best_id, best_len = lib_id, len(fk)
+        return best_id
+
+    filled = 0
+    rows = db.scalars(
+        select(MediaFile).where(MediaFile.library_id.is_(None)).limit(batch_size)
+    ).all()
+    for mf in rows:
+        lib_id = match(mf.path or "")
+        if lib_id is not None:
+            mf.library_id = lib_id
+            filled += 1
+    if filled:
+        db.flush()
+    return filled
+
+
+def ensure_seeded(db: Session) -> int:
+    """Create one library per kind that has env folders but no library row yet.
+
+    A no-op once the table is managed (an admin saved folders): the env fallback
+    is off from then on, so there is nothing to seed. On an install still running
+    from `LIBRARY_ROOT_*`, this makes one library per kind from the env folders at
+    startup and before each scan, so `library_id` is always assignable and access
+    control is consistent. Returns the number of libraries created. The caller
+    commits."""
+    if db_managed(db):
+        return 0
+    created = 0
+    base = datetime.now(timezone.utc)
+    for i, kind in enumerate(KINDS):
+        paths = env_folders(kind)
+        if not paths:
+            continue
+        lib = Library(name=LABELS[kind], kind=LibraryKind(kind), sort_order=0,
+                      created_at=base + timedelta(microseconds=i))
+        db.add(lib)
+        db.flush()
+        for j, p in enumerate(paths):
+            db.add(LibraryFolder(library_id=lib.id, path=p,
+                                 created_at=base + timedelta(microseconds=i * 100 + j)))
+        created += 1
+    if created:
+        db.flush()
+    return created
 
 
 def source(db: Session) -> str:
@@ -154,16 +260,21 @@ def save(db: Session, proposed: dict[str, list[str]]) -> dict[str, list[str]]:
         removed = [p for p in before[kind] if _key(p) not in {_key(n) for n in clean[kind]}]
         if removed and not arr_managed(kind):
             _hide_files_under(db, kind, removed, keep=clean[kind])
-    db.execute(delete(Library))
-    db.flush()
-    # created_at carries the order the admin gave (rows share one transaction,
-    # so the server default would make them all equal).
+    # One named library per kind owns its folders. Keep the library row (and its
+    # id, so user access and sort order survive an edit) and replace its folders.
     base = datetime.now(timezone.utc)
     n = 0
-    for kind in KINDS:
+    for i, kind in enumerate(KINDS):
+        lib = _library_for_kind(db, kind)
+        if lib is None:
+            lib = Library(name=LABELS[kind], kind=LibraryKind(kind), sort_order=0,
+                          created_at=base + timedelta(microseconds=i))
+            db.add(lib)
+            db.flush()
+        db.execute(delete(LibraryFolder).where(LibraryFolder.library_id == lib.id))
         for p in clean[kind]:
-            db.add(Library(name=LABELS[kind], kind=LibraryKind(kind), root_path=p,
-                           created_at=base + timedelta(microseconds=n)))
+            db.add(LibraryFolder(library_id=lib.id, path=p,
+                                 created_at=base + timedelta(microseconds=1000 + n)))
             n += 1
     db.flush()
     return clean

@@ -44,7 +44,7 @@ from app.models.media_file import MediaFile, MediaKind, ScanState
 from app.models.movie import Movie
 from app.models.music import Album, Artist, Track
 from app.models.tv import Episode, Season, Series
-from app.services import arr_settings, ffprobe
+from app.services import arr_library_map, arr_settings, ffprobe, history_keys, metadata_locks
 from app.services.credits import resolve_artist
 from app.services.arr import LidarrClient, RadarrClient, SonarrClient
 from app.services.arr._base import ArrClientError
@@ -382,11 +382,17 @@ def _upsert_movie(
     movie.radarr_id = radarr_id
     movie.tmdb_id = tmdb_id
     movie.imdb_id = imdb_id
-    movie.title = payload.get("title") or movie.title or "Untitled"
-    movie.year = payload.get("year")
-    movie.overview = payload.get("overview")
-    movie.runtime_min = payload.get("runtime")
-    movie.genres = payload.get("genres")
+    locked = metadata_locks.locked_fields(db, "movie", movie.id)
+    if "title" not in locked:
+        movie.title = payload.get("title") or movie.title or "Untitled"
+    if "year" not in locked:
+        movie.year = payload.get("year")
+    if "overview" not in locked:
+        movie.overview = payload.get("overview")
+    if "runtime_min" not in locked:
+        movie.runtime_min = payload.get("runtime")
+    if "genres" not in locked:
+        movie.genres = payload.get("genres")
 
     images = payload.get("images") or []
 
@@ -434,6 +440,7 @@ def _upsert_movie(
             path=path,
             arr_file=mf,
             stats=stats,
+            app="radarr",
         )
     else:
         _mark_missing_for_ref(db, MediaKind.movie, movie.id, stats)
@@ -497,13 +504,16 @@ def _upsert_series(
     series.sonarr_id = sonarr_id
     series.tvdb_id = tvdb_id
     series.tmdb_id = tmdb_id
-    series.title = payload.get("title") or series.title or "Untitled"
-    series.overview = payload.get("overview")
+    locked = metadata_locks.locked_fields(db, "series", series.id)
+    if "title" not in locked:
+        series.title = payload.get("title") or series.title or "Untitled"
+    if "overview" not in locked:
+        series.overview = payload.get("overview")
 
     images = payload.get("images") or []
 
     first_aired = payload.get("firstAired")
-    if first_aired:
+    if first_aired and "first_aired" not in locked:
         series.first_aired = _parse_iso(first_aired).date() if "T" in first_aired else _parse_iso(first_aired + "T00:00:00Z").date()
 
     added = payload.get("added")
@@ -568,11 +578,14 @@ def _upsert_episode(
         )
         db.add(episode)
 
-    episode.title = payload.get("title")
-    episode.overview = payload.get("overview")
+    locked = metadata_locks.locked_fields(db, "episode", episode.id)
+    if "title" not in locked:
+        episode.title = payload.get("title")
+    if "overview" not in locked:
+        episode.overview = payload.get("overview")
     episode.tvdb_id = payload.get("tvdbId")
     air = payload.get("airDateUtc") or payload.get("airDate")
-    if air:
+    if air and "air_date" not in locked:
         try:
             episode.air_date = _parse_iso(air).date() if "T" in air else _parse_iso(air + "T00:00:00Z").date()
         except ValueError:
@@ -593,6 +606,7 @@ def _upsert_episode(
                 path=path,
                 arr_file=mf,
                 stats=stats,
+                app="sonarr",
             )
     else:
         _mark_missing_for_ref(db, MediaKind.episode, episode.id, stats)
@@ -657,8 +671,11 @@ def _upsert_artist(
 
     artist.lidarr_id = lidarr_id
     artist.mbid = mbid
-    artist.name = payload.get("artistName") or artist.name or "Unknown Artist"
-    artist.overview = payload.get("overview")
+    locked = metadata_locks.locked_fields(db, "artist", artist.id)
+    if "name" not in locked:
+        artist.name = payload.get("artistName") or artist.name or "Unknown Artist"
+    if "overview" not in locked:
+        artist.overview = payload.get("overview")
     artist.genres = _genres(payload)
 
     db.flush()
@@ -704,14 +721,17 @@ def _upsert_album(
 
     album.artist_id = artist.id
     album.mbid = mbid
-    album.title = payload.get("title") or album.title or "Untitled"
+    locked = metadata_locks.locked_fields(db, "album", album.id)
+    if "title" not in locked:
+        album.title = payload.get("title") or album.title or "Untitled"
     release = payload.get("releaseDate")
-    if release:
+    if release and "release_date" not in locked:
         try:
             album.release_date = _parse_iso(release).date() if "T" in release else _parse_iso(release + "T00:00:00Z").date()
         except ValueError:
             pass
-    album.genres = _genres(payload)
+    if "genres" not in locked:
+        album.genres = _genres(payload)
 
     # Copy Lidarr-supplied metadata fields the metadata-enrichment runner
     # may also touch on its MB pass. Doing it here means the row carries
@@ -790,9 +810,13 @@ def _upsert_track(
         db.add(track)
 
     track.mbid = mbid
-    track.title = payload.get("title") or track.title or "Untitled"
-    track.track_number = track_number
-    track.disc_number = disc_number
+    locked = metadata_locks.locked_fields(db, "track", track.id)
+    if "title" not in locked:
+        track.title = payload.get("title") or track.title or "Untitled"
+    if "track_number" not in locked:
+        track.track_number = track_number
+    if "disc_number" not in locked:
+        track.disc_number = disc_number
     track.duration_sec = _ms_to_seconds(payload.get("duration"))
 
     db.flush()
@@ -810,6 +834,7 @@ def _upsert_track(
                 path=path,
                 arr_file=mf,
                 stats=stats,
+                app="lidarr",
             )
     else:
         _mark_missing_for_ref(db, MediaKind.track, track.id, stats)
@@ -828,6 +853,7 @@ def _upsert_media_file(
     path: str,
     arr_file: dict[str, Any],
     stats: SyncStats,
+    app: Optional[str] = None,
 ) -> Optional[MediaFile]:
     # Rewrite any user-session-only drive letters (e.g. `N:\\`) to the UNC
     # path before the UNIQUE lookup. Keeps stored paths canonical and makes
@@ -845,13 +871,21 @@ def _upsert_media_file(
         )
         return None
     existing = db.scalar(select(MediaFile).where(MediaFile.path == path))
-    if existing is None:
+    is_new = existing is None
+    if is_new:
         mf = MediaFile(kind=kind, ref_id=ref_id, path=path)
         db.add(mf)
     else:
         mf = existing
         mf.kind = kind
         mf.ref_id = ref_id
+
+    # Stamp the library this *arr root folder maps to (per-library *arr mapping,
+    # defaulting to the first library of the app's kind).
+    if app is not None:
+        lib_id = arr_library_map.library_for(db, app, path)
+        if lib_id is not None:
+            mf.library_id = lib_id
 
     mf.size_bytes = arr_file.get("size") or mf.size_bytes
 
@@ -870,6 +904,8 @@ def _upsert_media_file(
         mf.container = ext or None
 
     db.flush()
+    if is_new:
+        history_keys.relink_history(db, mf)
     stats.files_upserted += 1
 
     # Probe when we haven't yet, or when the file isn't in 'ready' state.
@@ -905,6 +941,8 @@ def _probe_and_update(db: Session, mf: MediaFile, stats: SyncStats) -> None:
     if result is None:
         if not os.path.exists(mf.path):
             mf.scan_state = ScanState.missing
+            if mf.missing_since is None:
+                mf.missing_since = datetime.now(timezone.utc)
             stats.files_missing += 1
             drive = drive_of(mf.path)
             # Only a drive letter this process cannot open counts: a file missing
@@ -927,6 +965,7 @@ def _probe_and_update(db: Session, mf: MediaFile, stats: SyncStats) -> None:
     mf.height = result.height or mf.height
     mf.probed_at = datetime.now(timezone.utc)
     mf.scan_state = ScanState.ready
+    mf.missing_since = None
     stats.files_probed += 1
 
 
@@ -934,12 +973,15 @@ def _mark_missing_for_ref(
     db: Session, kind: MediaKind, ref_id, stats: SyncStats,
 ) -> None:
     """If *arr says no file for this record, mark any existing media_file missing."""
+    now = datetime.now(timezone.utc)
     rows = db.scalars(
         select(MediaFile).where(MediaFile.kind == kind, MediaFile.ref_id == ref_id)
     ).all()
     for mf in rows:
         if mf.scan_state != ScanState.missing:
             mf.scan_state = ScanState.missing
+            if mf.missing_since is None:
+                mf.missing_since = now
             stats.files_missing += 1
 
 

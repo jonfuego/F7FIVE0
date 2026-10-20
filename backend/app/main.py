@@ -19,6 +19,8 @@ from app.services.trusted_proxy import real_client_ip
 from app import scheduler
 from app.api import admin as admin_routes
 from app.api import admin_arr as admin_arr_routes
+from app.api import admin_library_health as admin_library_health_routes
+from app.api import admin_metadata_editor as admin_metadata_editor_routes
 from app.api import admin_path_mappings as admin_path_mappings_routes
 from app.api import art as art_routes
 from app.api import auth as auth_routes
@@ -31,6 +33,10 @@ from app.api import passkeys as passkeys_routes
 from app.api import podcasts as podcasts_routes
 from app.api import queue as queue_routes
 from app.api import view_prefs as view_prefs_routes
+from app.api import admin_bulk as admin_bulk_routes
+from app.api import admin_collections as admin_collections_routes
+from app.api import admin_organizer as admin_organizer_routes
+from app.api import collections as collections_routes
 from app.api import remote_access as remote_access_routes
 from app.api import tracks as tracks_routes
 from app.api import requests as requests_routes
@@ -73,6 +79,16 @@ async def lifespan(app: FastAPI):
         nas_auth.ensure_all()
     except Exception:
         log.warning("NAS ensure_all at API startup raised", exc_info=True)
+    # Seed one library per kind from the env folders on an install that has no
+    # libraries configured, so library_id is assignable and access control is
+    # consistent. A no-op once an admin manages folders in Admin.
+    try:
+        from app.services import library_folders
+        with db_session() as db:
+            if library_folders.ensure_seeded(db):
+                db.commit()
+    except Exception:
+        log.warning("library seed at API startup raised", exc_info=True)
     # Start the *arr sync scheduler. Jobs run every 5 minutes, starting on
     # the first fire interval (not immediately on boot) so startup stays fast.
     scheduler.start()
@@ -171,6 +187,12 @@ app.include_router(webhook_routes.router, prefix="/api/webhooks", tags=["webhook
 app.include_router(remote_access_routes.router, prefix="/api/admin/remote-access", tags=["admin", "remote-access"])
 app.include_router(admin_arr_routes.router, prefix="/api/admin/arr", tags=["admin", "arr"])
 app.include_router(admin_path_mappings_routes.router, prefix="/api/admin/path-mappings", tags=["admin", "path-mappings"])
+app.include_router(admin_metadata_editor_routes.router, prefix="/api/admin", tags=["admin", "metadata-editor"])
+app.include_router(admin_library_health_routes.router, prefix="/api/admin/library", tags=["admin", "library-health"])
+app.include_router(admin_bulk_routes.router, prefix="/api/admin/library", tags=["admin", "bulk"])
+app.include_router(admin_collections_routes.router, prefix="/api/admin", tags=["admin", "collections"])
+app.include_router(admin_organizer_routes.router, prefix="/api/admin/library/organizer", tags=["admin", "organizer"])
+app.include_router(collections_routes.router, prefix="/api", tags=["collections"])
 app.include_router(admin_routes.router, prefix="/api/admin", tags=["admin"])
 app.include_router(art_routes.admin_router, prefix="/api/admin/art", tags=["admin", "art"])
 app.include_router(art_routes.read_router, prefix="/api/art", tags=["art"])

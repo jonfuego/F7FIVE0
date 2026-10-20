@@ -44,7 +44,7 @@ from app.api.deps import current_session_id, current_user, get_bearer_token, get
 from app.config import settings
 from app.models.media_file import MediaFile, ScanState
 from app.models.user import User
-from app.services import media_paths, media_streams, playback
+from app.services import library_access, media_paths, media_streams, playback
 from app.services import security as security_service
 from app.services.range_response import serve_file_range
 from app.services.signed_urls import session_authorizes
@@ -91,6 +91,20 @@ def _resolved_path(db: Session, mf: MediaFile) -> Path:
     return media_paths.resolve_contained_media_path(db, mf)
 
 
+def _enforce_library_access(
+    db: Session, mf: MediaFile, user: Optional[User], uid: Optional[str],
+) -> None:
+    """404 for a file in a library the caller cannot see. A bearer caller is
+    checked by user; a signed-query caller by the `uid` in the signature (the
+    gateway form). A null library is visible to all."""
+    if user is not None:
+        ok = library_access.can_access_media_file(db, user, mf)
+    else:
+        ok = library_access.can_user_access_library(db, uid, mf.library_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="media_file_not_found")
+
+
 # ---------------------------------------------------------------------------
 # GET /api/media-files/{id}/streams  (bearer auth)
 # ---------------------------------------------------------------------------
@@ -103,6 +117,7 @@ def get_streams(
     db: Annotated[Session, Depends(get_db)],
 ) -> dict:
     mf = _require_ready_media_file(db, media_file_id)
+    _enforce_library_access(db, mf, _user, None)
     result = media_streams.probe_streams(str(_resolved_path(db, mf)))
     if result is None:
         raise HTTPException(status_code=409, detail="probe_failed")
@@ -170,6 +185,7 @@ def download_url(
     if quality not in VALID_DOWNLOAD_QUALITIES:
         raise HTTPException(status_code=422, detail="invalid_quality")
     mf = _require_ready_media_file(db, media_file_id)
+    _enforce_library_access(db, mf, user, None)
     if not _download_available(mf, quality):
         raise HTTPException(status_code=409, detail={"reason": "not_available_offline"})
     return {
@@ -221,6 +237,7 @@ def get_subtitle_vtt(
             raise HTTPException(status_code=403, detail="session_revoked")
 
     mf = _require_ready_media_file(db, media_file_id)
+    _enforce_library_access(db, mf, user, uid)
     path = str(_resolved_path(db, mf))
 
     # Identify the target stream so we can reject image subs before spending an
@@ -294,6 +311,7 @@ def download(
             raise HTTPException(status_code=403, detail="session_revoked")
 
     mf = _require_ready_media_file(db, media_file_id)
+    _enforce_library_access(db, mf, user, uid)
     path = _resolved_path(db, mf)
 
     ok_direct, _reason = playback.can_direct_play(mf)
@@ -356,8 +374,10 @@ def next_episode_for(
     mf = db.get(MediaFile, media_file_id)
     if mf is None:
         raise HTTPException(status_code=404, detail="media_file_not_found")
+    _enforce_library_access(db, mf, _user, None)
     if mf.kind != MediaKind.episode:
         return None
+    hidden = library_access.hidden_library_ids(db, _user)
     ep = db.get(Episode, mf.ref_id)
     if ep is None:
         return None
@@ -376,6 +396,7 @@ def next_episode_for(
                 MediaFile.kind == MediaKind.episode,
                 MediaFile.ref_id == nxt.id,
                 MediaFile.scan_state == ScanState.ready,
+                library_access.visible_media_file_clause(hidden),
             )
         ).first()
         if nf is None:

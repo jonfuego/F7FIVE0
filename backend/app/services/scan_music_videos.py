@@ -119,7 +119,8 @@ def count_video_files(roots: Iterable[str]) -> int:
     for root in roots:
         if not root or not os.path.isdir(root):
             continue
-        for _dirpath, _dirnames, filenames in os.walk(root):
+        for _dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = [d for d in dirnames if d.lower() != ".f7five0-recycle"]
             for name in filenames:
                 ext = os.path.splitext(name)[1].lstrip(".").lower()
                 if ext in _VIDEO_EXTS:
@@ -323,7 +324,9 @@ def scan(db: Session, on_progress: Optional[ProgressFn] = None) -> ScanStats:
             skipped.append(root)
             continue
         try:
-            artist_entries = sorted(os.listdir(root))
+            artist_entries = sorted(
+                e for e in os.listdir(root) if e.lower() != ".f7five0-recycle"
+            )
         except OSError:
             log.exception("failed to list music videos folder %s", root)
             stats.errors += 1

@@ -49,3 +49,23 @@ class RadarrClient(_ArrClient):
         movie["minimumAvailability"] = "released"
         movie["addOptions"] = {"searchForMovie": search}
         return self._post("movie", json=movie)
+
+    def rescan_movie(self, radarr_id: int) -> dict[str, Any]:
+        """Queue a RescanMovie command on Radarr."""
+        return self._post("command", json={"name": "RescanMovie", "movieIds": [radarr_id]})
+
+    def get_media_management(self) -> dict[str, Any]:
+        """GET /api/v3/config/mediamanagement. Returns keys including renameMovies."""
+        data = self._get("config/mediamanagement")
+        return data if isinstance(data, dict) else {}
+
+    def update_movie_path(self, radarr_id: int, new_folder: str) -> dict[str, Any]:
+        """Update a movie's rootFolderPath in Radarr (move files off).
+
+        GETs the current movie resource, updates `rootFolderPath` and
+        `moveFiles=false`, then PUTs it back so Radarr knows the new location
+        without triggering its own file move.
+        """
+        movie = self.get_movie(radarr_id)
+        movie["rootFolderPath"] = new_folder
+        return self._put(f"movie/{radarr_id}", json={**movie, "moveFiles": False})

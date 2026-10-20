@@ -480,3 +480,76 @@ def test_music_videos_two_folders_and_offline(db_session, tmp_path, fake_probe, 
     scan_music_videos.scan(db_session)
     states = [mf.scan_state for mf in db_session.scalars(select(MediaFile).where(MediaFile.kind == MediaKind.music_video)).all()]
     assert ScanState.missing not in states
+
+
+# ---------------------------------------------------------------------------
+# Recycle folder is never scanned (criterion 19)
+# ---------------------------------------------------------------------------
+
+def test_movies_scan_skips_recycle_folder(db_session, libs, fake_probe, system_user):
+    """Files inside .f7five0-recycle are never imported by the movies scan."""
+    root = libs["movies"]
+    # Normal movie
+    _touch(root / "Heat (1995)" / "Heat (1995).mkv", 100)
+    # File inside the recycle folder -- must not be imported
+    _touch(root / ".f7five0-recycle" / "20991231T000000_old.mkv", 100)
+
+    scan_library.scan_movies(db_session)
+    movies = db_session.scalars(select(Movie)).all()
+    assert len(movies) == 1
+    assert movies[0].title == "Heat"
+    # Only one media file should exist
+    mfs = db_session.scalars(select(MediaFile)).all()
+    assert len(mfs) == 1
+    assert ".f7five0-recycle" not in mfs[0].path
+
+
+def test_tv_scan_skips_recycle_folder(db_session, libs, fake_probe, system_user):
+    """Files inside .f7five0-recycle are never imported by the TV scan."""
+    root = libs["tv"]
+    show = root / "Some Show (2020)"
+    _touch(show / "Season 01" / "Some Show - S01E01 - Pilot.mkv")
+    # File inside the recycle folder -- must not be imported
+    _touch(root / ".f7five0-recycle" / "20991231T000000_old.mkv")
+
+    scan_library.scan_tv(db_session)
+    episodes = db_session.scalars(select(Episode)).all()
+    assert len(episodes) == 1
+    mfs = db_session.scalars(select(MediaFile)).all()
+    recycle_paths = [mf.path for mf in mfs if ".f7five0-recycle" in mf.path]
+    assert recycle_paths == []
+
+
+def test_music_scan_skips_recycle_folder(db_session, libs, fake_probe, system_user):
+    """Files inside .f7five0-recycle are never imported by the music scan."""
+    from app.models.music import Track
+    root = libs["music"]
+    _touch(root / "Artist" / "Album (2020)" / "01 - Track.flac")
+    # File inside the recycle folder -- must not be imported
+    _touch(root / ".f7five0-recycle" / "20991231T000000_track.flac")
+
+    scan_library.scan_music(db_session)
+    tracks = db_session.scalars(select(Track)).all()
+    assert len(tracks) == 1
+    mfs = db_session.scalars(select(MediaFile)).all()
+    recycle_paths = [mf.path for mf in mfs if ".f7five0-recycle" in mf.path]
+    assert recycle_paths == []
+
+
+def test_music_videos_scan_skips_recycle_folder(db_session, tmp_path, fake_probe, system_user, monkeypatch):
+    """Files inside .f7five0-recycle are never imported by the music videos scan."""
+    from app.models.music import MusicVideo
+    from app.services import scan_music_videos
+    monkeypatch.setattr(settings, "path_rewrite_rules", "")
+    root = tmp_path / "mv-root"
+    monkeypatch.setattr(settings, "library_root_music_videos", str(root))
+    _touch(root / "Band" / "Live (2010)" / "01 - Song.mkv")
+    # File inside the recycle folder -- must not be imported
+    _touch(root / ".f7five0-recycle" / "20991231T000000_video.mkv")
+
+    scan_music_videos.scan(db_session)
+    mfs = db_session.scalars(select(MediaFile).where(MediaFile.kind == MediaKind.music_video)).all()
+    recycle_paths = [mf.path for mf in mfs if ".f7five0-recycle" in mf.path]
+    assert recycle_paths == []
+    # The real video is still imported
+    assert len(mfs) >= 1

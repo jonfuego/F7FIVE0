@@ -68,7 +68,7 @@ from app.models.media_file import MediaFile, MediaKind, ScanState
 from app.models.movie import Movie
 from app.models.music import Album, Artist, Track
 from app.models.tv import Episode, Season, Series
-from app.services import arr_settings, ffprobe, library_folders, tmdb_key
+from app.services import arr_settings, ffprobe, history_keys, library_folders, metadata_locks, tmdb_key
 from app.services.credits import parse_credit, resolve_artist
 from app.services.path_map import translate as translate_path
 
@@ -96,7 +96,7 @@ _SKIP_DIRS = {
     "extras", "featurettes", "behind the scenes", "deleted scenes",
     "interviews", "scenes", "shorts", "trailers", "other", "sample",
     "samples", "subs", "subtitles", "@eadir", "#recycle", "$recycle.bin",
-    ".trash", ".actors", "metadata",
+    ".trash", ".actors", "metadata", ".f7five0-recycle",
 }
 
 _TMDB_TAG_RE = re.compile(r"[\[{]\s*tmdb(?:id)?[-=\s]*(\d+)\s*[\]}]", re.IGNORECASE)
@@ -535,24 +535,33 @@ def _existing_ref(db: Session, path: str, kind: MediaKind):
     return None
 
 
-def _upsert_file(db: Session, *, kind: MediaKind, ref_id, path: str, stats: FolderScanStats) -> MediaFile:
+def _upsert_file(
+    db: Session, *, kind: MediaKind, ref_id, path: str, stats: FolderScanStats,
+    library_id=None,
+) -> MediaFile:
     mf = db.scalar(select(MediaFile).where(MediaFile.path == path))
     try:
         size = os.path.getsize(path)
     except OSError:
         size = None
-    if mf is None:
+    is_new = mf is None
+    if is_new:
         mf = MediaFile(kind=kind, ref_id=ref_id, path=path)
         db.add(mf)
     else:
         mf.kind = kind
         mf.ref_id = ref_id
+    # Stamp the library this folder belongs to, so per-user access can filter it.
+    if library_id is not None:
+        mf.library_id = library_id
     if not mf.container:
         mf.container = _ext(path) or None
     changed = size is not None and mf.size_bytes != size
     if size is not None:
         mf.size_bytes = size
     db.flush()
+    if is_new:
+        history_keys.relink_history(db, mf)
     stats.files_seen += 1
     if changed or mf.scan_state != ScanState.ready or mf.probed_at is None:
         _probe(mf, stats)
@@ -564,6 +573,8 @@ def _probe(mf: MediaFile, stats: FolderScanStats) -> None:
     if result is None:
         if not os.path.exists(mf.path):
             mf.scan_state = ScanState.missing
+            if mf.missing_since is None:
+                mf.missing_since = datetime.now(timezone.utc)
             stats.files_missing += 1
         else:
             mf.scan_state = ScanState.error
@@ -580,6 +591,7 @@ def _probe(mf: MediaFile, stats: FolderScanStats) -> None:
     mf.height = result.height or mf.height
     mf.probed_at = datetime.now(timezone.utc)
     mf.scan_state = ScanState.ready
+    mf.missing_since = None
     stats.files_probed += 1
 
 
@@ -593,6 +605,8 @@ def _mark_missing_under(db: Session, kind: MediaKind, root: str, seen: set[str],
             continue
         if p not in seen and mf.scan_state != ScanState.missing:
             mf.scan_state = ScanState.missing
+            if mf.missing_since is None:
+                mf.missing_since = datetime.now(timezone.utc)
             stats.files_missing += 1
 
 
@@ -864,6 +878,7 @@ def _scan_movies_root(
     db: Session, root: str, ri: int, prefixes: list[str], stats: FolderScanStats, batch: _Batcher,
 ) -> None:
     seen: set[str] = set()
+    lib_id = library_folders.library_for_path(db, root)
     for found in discover_movies(root):
         path = _store_path(found.path)
         seen.add(path)
@@ -907,7 +922,7 @@ def _scan_movies_root(
         if movie.tmdb_id and new:
             batch.enrich_movie(movie.id)
 
-        _upsert_file(db, kind=MediaKind.movie, ref_id=movie.id, path=path, stats=stats)
+        _upsert_file(db, kind=MediaKind.movie, ref_id=movie.id, path=path, stats=stats, library_id=lib_id)
 
         folder = found.folder
         stem = os.path.splitext(os.path.basename(found.path))[0]
@@ -970,6 +985,7 @@ def scan_tv(
 
 def _scan_tv_root(db: Session, root: str, art_done: set, stats: FolderScanStats, batch: _Batcher) -> None:
     seen: set[str] = set()
+    lib_id = library_folders.library_for_path(db, root)
     for show_name in sorted(os.listdir(root)):
         show_dir = os.path.join(root, show_name)
         if not os.path.isdir(show_dir) or _is_skip_dir(show_name):
@@ -1056,7 +1072,7 @@ def _scan_tv_root(db: Session, root: str, art_done: set, stats: FolderScanStats,
             elif fe.title and not ep.title:
                 ep.title = fe.title
             seen.add(path)
-            _upsert_file(db, kind=MediaKind.episode, ref_id=ep.id, path=path, stats=stats)
+            _upsert_file(db, kind=MediaKind.episode, ref_id=ep.id, path=path, stats=stats, library_id=lib_id)
             batch.item_done()
 
         # One art pick per series per pass: with the show in two folders the
@@ -1217,6 +1233,7 @@ def _scan_music_root(db: Session, root: str, cache: _MusicCache, stats: FolderSc
     albums = cache.albums
     album_art_done = cache.album_art_done
     artist_art_done = cache.artist_art_done
+    lib_id = library_folders.library_for_path(db, root)
 
     for ft in discover_music(root):
         # Each file processes inside a SAVEPOINT. One bad file (for example a tag
@@ -1229,7 +1246,7 @@ def _scan_music_root(db: Session, root: str, cache: _MusicCache, stats: FolderSc
         album_keys_before = set(albums)
         sp = db.begin_nested()
         try:
-            _import_one_track(db, root, ft, cache, stats, batch, seen)
+            _import_one_track(db, root, ft, cache, stats, batch, seen, lib_id)
             sp.commit()
         except Exception as exc:  # noqa: BLE001
             sp.rollback()
@@ -1244,7 +1261,7 @@ def _scan_music_root(db: Session, root: str, cache: _MusicCache, stats: FolderSc
 
 def _import_one_track(
     db: Session, root: str, ft: "FoundTrack", cache: _MusicCache,
-    stats: FolderScanStats, batch: _Batcher, seen: set[str],
+    stats: FolderScanStats, batch: _Batcher, seen: set[str], library_id=None,
 ) -> None:
     """Import one music file: its artist, album, track, media file, and art.
     Runs inside the caller's savepoint so a failure undoes only this file."""
@@ -1325,12 +1342,16 @@ def _import_one_track(
         stats.tracks += 1
     else:
         track.album_id = album.id
-        track.title = ft.title or track.title
-        track.track_number = ft.track
-        track.disc_number = ft.disc
+        _locked = metadata_locks.locked_fields(db, "track", track.id)
+        if "title" not in _locked:
+            track.title = ft.title or track.title
+        if "track_number" not in _locked:
+            track.track_number = ft.track
+        if "disc_number" not in _locked:
+            track.disc_number = ft.disc
         if ft.credited_as and not track.credited_as:
             track.credited_as = ft.credited_as
-    mf = _upsert_file(db, kind=MediaKind.track, ref_id=track.id, path=path, stats=stats)
+    mf = _upsert_file(db, kind=MediaKind.track, ref_id=track.id, path=path, stats=stats, library_id=library_id)
     if mf.duration_sec and not track.duration_sec:
         track.duration_sec = mf.duration_sec
 

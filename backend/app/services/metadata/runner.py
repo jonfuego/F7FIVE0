@@ -32,6 +32,7 @@ from app.services.metadata._base import ProviderError
 from app.services.metadata.musicbrainz import MusicBrainzClient
 from app.services.metadata.tmdb import TMDBClient
 from app.services.metadata.wikipedia import WikipediaClient
+from app.services import metadata_locks
 
 
 log = logging.getLogger("f7five0.metadata.runner")
@@ -221,11 +222,17 @@ def enrich_movie(
         if (p.get("job") or "").lower() == "director"
     ]
 
+    locked = metadata_locks.locked_fields(db, "movie", movie.id)
+    if "title" not in locked:
+        title = payload.get("title")
+        if title:
+            movie.title = title
     # An empty answer never wipes genres Radarr (or an earlier run) saved.
     genres = tmdb_genre_names(payload)
-    if genres:
+    if genres and "genres" not in locked:
         movie.genres = genres
-    movie.tagline = payload.get("tagline") or None
+    if "tagline" not in locked:
+        movie.tagline = payload.get("tagline") or None
     movie.movie_cast = cast_top
     movie.directors = directors
     rating = payload.get("vote_average")
@@ -234,7 +241,24 @@ def enrich_movie(
     movie.tmdb_vote_count = int(votes) if isinstance(votes, (int, float)) else None
     movie.metadata_synced_at = datetime.now(timezone.utc)
     movie.metadata_status = "ok"
+
+    # Save TMDB collection membership (not lockable; always written).
+    coll = payload.get("belongs_to_collection")
+    if coll and isinstance(coll, dict) and coll.get("id"):
+        movie.tmdb_collection_id = int(coll["id"])
+        movie.tmdb_collection_name = coll.get("name") or None
+    else:
+        movie.tmdb_collection_id = None
+        movie.tmdb_collection_name = None
+    movie.tmdb_collection_checked_at = datetime.now(timezone.utc)
+
     db.commit()
+    # Sync collections after the commit so the new row is visible.
+    try:
+        from app import scheduler
+        scheduler.trigger_collections_sync(delay_sec=5)
+    except Exception:
+        pass
     return MetadataResult(status="ok", provider="tmdb")
 
 
@@ -281,9 +305,64 @@ def backfill_movie_genres(
                     log.warning("tmdb genres fetch failed for movie %s: %s", movie.id, exc)
                     payload = None
                 names = tmdb_genre_names(payload)
-                if names:
+                if names and not metadata_locks.is_locked(db, "movie", movie.id, "genres"):
                     movie.genres = names
                     filled += 1
+                if pause_sec > 0:
+                    time.sleep(pause_sec)
+            db.commit()
+    return filled
+
+
+# ---------------------------------------------------------------------------
+# Collections backfill
+# ---------------------------------------------------------------------------
+def backfill_movie_collections(
+    db: Session, *, batch_size: int = 25, pause_sec: float = 0.25,
+) -> int:
+    """Fill tmdb_collection_id/name for movies that have a tmdb_id but have never
+    been checked for collection membership. Walks by id in batches, sets
+    tmdb_collection_checked_at regardless of whether the movie is in a collection
+    (so a second run skips it). A failed TMDB lookup leaves checked_at null for
+    retry. Returns the number of movies that received a collection."""
+    if not tmdb_key.get():
+        return 0
+    filled = 0
+    last_id = None
+    with TMDBClient() as cli:
+        while True:
+            stmt = (
+                select(Movie.id)
+                .where(
+                    Movie.tmdb_id.is_not(None),
+                    Movie.tmdb_collection_checked_at.is_(None),
+                )
+                .order_by(Movie.id)
+                .limit(batch_size)
+            )
+            if last_id is not None:
+                stmt = stmt.where(Movie.id > last_id)
+            rows = db.scalars(stmt).all()
+            if not rows:
+                break
+            last_id = rows[-1]
+            for movie_id in rows:
+                movie = db.get(Movie, movie_id)
+                if movie is None or not movie.tmdb_id:
+                    continue
+                try:
+                    payload = cli.get_movie(int(movie.tmdb_id))
+                except ProviderError as exc:
+                    log.warning("tmdb collections fetch failed for movie %s: %s", movie.id, exc)
+                    if pause_sec > 0:
+                        time.sleep(pause_sec)
+                    continue
+                coll = (payload or {}).get("belongs_to_collection")
+                if coll and isinstance(coll, dict) and coll.get("id"):
+                    movie.tmdb_collection_id = int(coll["id"])
+                    movie.tmdb_collection_name = coll.get("name") or None
+                    filled += 1
+                movie.tmdb_collection_checked_at = datetime.now(timezone.utc)
                 if pause_sec > 0:
                     time.sleep(pause_sec)
             db.commit()
@@ -396,13 +475,17 @@ def enrich_artist(
         db.commit()
         return MetadataResult(status="no_external_id", provider="musicbrainz")
 
-    artist.country = mb_payload.get("country") or None
+    locked = metadata_locks.locked_fields(db, "artist", artist.id)
+    if "country" not in locked:
+        artist.country = mb_payload.get("country") or None
     artist.artist_type = mb_payload.get("type") or None
     life_span = mb_payload.get("life-span") or {}
-    artist.formed_year = _safe_year(life_span.get("begin"))
-    artist.disbanded_year = (
-        _safe_year(life_span.get("end")) if life_span.get("ended") else None
-    )
+    if "formed_year" not in locked:
+        artist.formed_year = _safe_year(life_span.get("begin"))
+    if "disbanded_year" not in locked:
+        artist.disbanded_year = (
+            _safe_year(life_span.get("end")) if life_span.get("ended") else None
+        )
     relations = mb_payload.get("relations") or []
     artist.links = _extract_links(relations)
 
@@ -536,11 +619,12 @@ def enrich_series(
         # Key unset or TMDB 404 for this id. Nothing to write.
         return MetadataResult(status="no_external_id", provider="tmdb")
 
+    locked = metadata_locks.locked_fields(db, "series", series.id)
     overview = payload.get("overview")
-    if overview:
+    if overview and "overview" not in locked:
         series.overview = overview
     aired = _parse_date(payload.get("first_air_date"))
-    if aired is not None:
+    if aired is not None and "first_aired" not in locked:
         series.first_aired = aired
     db.commit()
 

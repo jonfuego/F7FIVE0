@@ -44,3 +44,22 @@ class LidarrClient(_ArrClient):
         MusicVideoRelease.mbid.
         """
         return self._get("album/lookup", params={"term": term})
+
+    def rescan_artist(self, lidarr_id: int) -> dict[str, Any]:
+        """Queue a RescanArtist command on Lidarr."""
+        return self._post("command", json={"name": "RescanArtist", "artistId": lidarr_id})
+
+    def get_media_management(self) -> dict[str, Any]:
+        """GET /api/v1/config/mediamanagement. Returns keys including writeAudioTags."""
+        data = self._get("config/mediamanagement")
+        return data if isinstance(data, dict) else {}
+
+    def update_artist_path(self, lidarr_id: int, new_folder: str) -> dict[str, Any]:
+        """Update an artist's path in Lidarr (move files off).
+
+        GETs the current artist resource, updates `path`, then PUTs it back
+        so Lidarr knows the new location without triggering its own file move.
+        """
+        artist = self.get_artist(lidarr_id)
+        artist["path"] = new_folder
+        return self._put(f"artist/{lidarr_id}", json={**artist, "moveFiles": False})

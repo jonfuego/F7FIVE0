@@ -11,7 +11,9 @@ from app.models.login_attempt import LoginAttempt  # noqa: F401
 from app.models.webauthn import WebAuthnCredential, WebAuthnChallenge  # noqa: F401
 
 # Libraries + canonical metadata
-from app.models.library import Library  # noqa: F401
+from app.models.library import (  # noqa: F401
+    Library, LibraryFolder, UserLibraryAccess,
+)
 from app.models.movie import Movie  # noqa: F401
 from app.models.tv import Series, Season, Episode  # noqa: F401
 from app.models.music import (  # noqa: F401
@@ -28,6 +30,9 @@ from app.models.share import ShareLink  # noqa: F401
 
 # Admin overrides
 from app.models.art import ArtOverride  # noqa: F401
+
+# Metadata editor locks
+from app.models.metadata_lock import MetadataLock  # noqa: F401
 
 # Media requests
 from app.models.request import Request  # noqa: F401
@@ -50,5 +55,11 @@ from app.models.app_setting import AppSetting  # noqa: F401
 
 # Saved library views, per user
 from app.models.view_pref import UserViewPref  # noqa: F401
+
+# Collections (TMDB-auto and admin-manual groups of media)
+from app.models.collection import Collection, CollectionItem  # noqa: F401
+
+# Organizer journals (rename/retag run history)
+from app.models.organizer import OrganizerJournal, OrganizerJournalItem  # noqa: F401
 
 __all__ = ["Base"]

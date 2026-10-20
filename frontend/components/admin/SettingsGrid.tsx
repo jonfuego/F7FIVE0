@@ -3,13 +3,13 @@
 // Hover and keyboard focus lift the tile 3 px up and left and draw the HIVE
 // offset behind it; the global :focus-visible ring is the focus cue.
 //
-// The hrefs below are the same nine as ADMIN_AREAS in lib/admin-dashboard.ts
+// The hrefs below are the same ten as ADMIN_AREAS in lib/admin-dashboard.ts
 // (admin-dashboard.test.ts checks they match). A new admin area gets a subpage,
 // an ADMIN_AREAS entry, a row here and a hash entry.
 
 import Link from "next/link";
 import {
-  Activity, AudioLines, Download, FolderOpen, Globe, Plug, RefreshCw, Tags, TriangleAlert, Users,
+  Activity, AudioLines, Download, FileWarning, FolderOpen, Globe, Plug, RefreshCw, Tags, TriangleAlert, Users, Wand2,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Icon } from "@/components/Icon";
@@ -26,6 +26,8 @@ const TILE: Record<AdminAreaId, { icon: LucideIcon; href: string }> = {
   metadata: { icon: Tags, href: "/admin/metadata" },
   arr: { icon: Plug, href: "/admin/arr" },
   "audio-analysis": { icon: AudioLines, href: "/admin/audio-analysis" },
+  "library-health": { icon: FileWarning, href: "/admin/library-health" },
+  organizer: { icon: Wand2, href: "/admin/organizer" },
   "remote-access": { icon: Globe, href: "/admin/remote-access" },
   updates: { icon: Download, href: "/admin/updates" },
   activity: { icon: Activity, href: "/admin/activity" },
