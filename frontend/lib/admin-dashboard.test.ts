@@ -262,6 +262,7 @@ test("old hashes: every row of the redirect table", () => {
     "#arr": "/admin/arr",
     "#audio-analysis": "/admin/audio-analysis",
     "#library-health": "/admin/library-health",
+    "#organizer": "/admin/organizer",
     "#sessions": "/admin/activity",
     "#auth-events": "/admin/activity",
     "#history": "/admin/activity",

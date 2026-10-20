@@ -192,11 +192,24 @@ def _backup_mp3(path: str) -> dict:
             result[key] = repr(frame)
     result["_frames_raw"] = {k: audio[k].HashKey + ":" + repr(audio[k]) for k in audio.keys()}
     # Store the raw ID3 header bytes so restore_tags can do a faithful round-trip.
+    # Read the raw bytes directly from the file to preserve the original ID3 version
+    # and all frame bytes without re-serialization through mutagen (which would change
+    # the version to ID3v2.4 by default).
     try:
-        import io as _io
-        buf = _io.BytesIO()
-        audio.save(buf)
-        result["_raw_id3_b64"] = base64.b64encode(buf.getvalue()).decode("ascii")
+        with open(path, "rb") as _f:
+            _hdr = _f.read(10)
+            if _hdr[:3] == b"ID3":
+                _size_bytes = _hdr[6:10]
+                _sync_size = (
+                    ((_size_bytes[0] & 0x7F) << 21)
+                    | ((_size_bytes[1] & 0x7F) << 14)
+                    | ((_size_bytes[2] & 0x7F) << 7)
+                    | (_size_bytes[3] & 0x7F)
+                )
+                _id3_end = 10 + _sync_size
+                _f.seek(0)
+                raw_id3 = _f.read(_id3_end)
+                result["_raw_id3_b64"] = base64.b64encode(raw_id3).decode("ascii")
     except Exception:
         pass
     return result

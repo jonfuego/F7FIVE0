@@ -392,3 +392,125 @@ def test_compute_new_path_returns_none_for_escape(tmp_path):
         nt.render_safe = original
 
     assert result_bad is None, "Path escaping the folder must be rejected by _compute_new_path"
+
+
+# ---------------------------------------------------------------------------
+# *arr path update ordering (criterion 20)
+# ---------------------------------------------------------------------------
+
+def test_arr_path_update_called_before_os_rename(db_session, tmp_path):
+    """When a rename changes the item folder for an arr-known movie, the *arr
+    path update must be called BEFORE os.rename, and the rescan must be called
+    AFTER the file is moved."""
+    lib = _make_library(db_session, "movies")
+    folder = str(tmp_path / "movies")
+    os.makedirs(folder, exist_ok=True)
+    _make_lib_folder(db_session, lib.id, folder)
+
+    # Movie with a radarr_id so _update_arr_path sees it
+    movie = Movie(id=uuid.uuid4(), title="Arr Movie", year=2021, radarr_id=42)
+    db_session.add(movie)
+    db_session.flush()
+
+    # File is in a sub-folder so folder change is detected
+    old_dir = os.path.join(folder, "Arr Movie (2021)")
+    os.makedirs(old_dir, exist_ok=True)
+    old_file = os.path.join(old_dir, "Arr Movie (2021).mkv")
+    Path(old_file).write_text("content")
+    new_dir = os.path.join(folder, "Arr Movie Renamed (2021)")
+    new_file = os.path.join(new_dir, "Arr Movie Renamed (2021).mkv")
+
+    mf = _make_media_file(db_session, lib.id, old_file, MediaKind.movie, movie.id)
+
+    journal = _make_journal(db_session, lib.id, "preview")
+    _make_item(db_session, journal.id, mf.id, old_file, new_file)
+    journal.item_count = 1
+    db_session.commit()
+
+    call_log: list[str] = []
+
+    def _fake_update_arr_path(db_, mf_, new_folder):
+        call_log.append(f"update_arr_path:{new_folder}")
+        return None  # success
+
+    original_rename = os.rename
+    def _checked_rename(src, dst):
+        # At the time rename is called, the arr path update must already be logged
+        assert any("update_arr_path" in c for c in call_log), \
+            "os.rename called before _update_arr_path"
+        call_log.append(f"os.rename:{src}->{dst}")
+        original_rename(src, dst)
+
+    import app.services.organizer as org_mod
+    org_mod._update_arr_path = _fake_update_arr_path
+    try:
+        import unittest.mock as um
+        with um.patch.object(os, "rename", side_effect=_checked_rename):
+            organizer.apply_run(journal.id, uuid.uuid4())
+    finally:
+        # Restore from actual module
+        from app.services import organizer as real_org
+        import importlib
+        importlib.reload(real_org)
+
+    # arr path update was called
+    assert any("update_arr_path" in c for c in call_log)
+    # rename was called
+    assert any("os.rename" in c for c in call_log)
+
+
+def test_arr_path_update_failure_leaves_file_untouched(db_session, tmp_path):
+    """When _update_arr_path returns an error for a folder-changing rename, the
+    file must NOT be moved and the item error must contain arr_path_update_failed."""
+    lib = _make_library(db_session, "movies")
+    folder = str(tmp_path / "movies2")
+    os.makedirs(folder, exist_ok=True)
+    _make_lib_folder(db_session, lib.id, folder)
+
+    movie = Movie(id=uuid.uuid4(), title="Arr Fail Movie", year=2022, radarr_id=99)
+    db_session.add(movie)
+    db_session.flush()
+
+    old_dir = os.path.join(folder, "Arr Fail Movie (2022)")
+    os.makedirs(old_dir, exist_ok=True)
+    old_file = os.path.join(old_dir, "Arr Fail Movie (2022).mkv")
+    Path(old_file).write_text("original content")
+    new_dir = os.path.join(folder, "Arr Fail Movie New (2022)")
+    new_file = os.path.join(new_dir, "Arr Fail Movie New (2022).mkv")
+
+    mf = _make_media_file(db_session, lib.id, old_file, MediaKind.movie, movie.id)
+
+    journal = _make_journal(db_session, lib.id, "preview")
+    _make_item(db_session, journal.id, mf.id, old_file, new_file)
+    journal.item_count = 1
+    db_session.commit()
+
+    def _failing_update_arr_path(db_, mf_, new_folder):
+        return "connection_refused"  # simulate failure
+
+    import app.services.organizer as org_mod
+    original_update = org_mod._update_arr_path
+    org_mod._update_arr_path = _failing_update_arr_path
+    try:
+        organizer.apply_run(journal.id, uuid.uuid4())
+    finally:
+        org_mod._update_arr_path = original_update
+
+    db_session.expire_all()
+
+    # File must still be at the original path
+    assert Path(old_file).exists(), "File must not have been moved"
+    assert not Path(new_file).exists(), "New file must not have been created"
+
+    # media_file path must still be old_file
+    mf_db = db_session.get(MediaFile, mf.id)
+    assert mf_db.path == old_file
+
+    # Item error must reference arr_path_update_failed
+    from sqlalchemy import select as sa_select
+    items = db_session.scalars(
+        sa_select(OrganizerJournalItem).where(OrganizerJournalItem.journal_id == journal.id)
+    ).all()
+    assert len(items) == 1
+    assert items[0].error is not None
+    assert "arr_path_update_failed" in items[0].error

@@ -110,6 +110,26 @@ def test_put_settings_returns_200_with_flip_flop_warnings(client, db_session):
     assert isinstance(body["flip_flop_warnings"], list)
 
 
+def test_put_settings_returns_flip_flop_warnings_non_empty_when_stubbed(client, db_session):
+    """Saving ownership=f7five0 on an arr-managed library returns non-empty warnings when
+    check_flipflop returns a non-empty list (stubbed)."""
+    lib = _lib(db_session)
+    db_session.commit()
+    with patch(
+        "app.api.admin_organizer.check_flipflop",
+        return_value=["Radarr has Rename Movies enabled"],
+    ):
+        r = client.put(
+            f"/api/admin/library/organizer/{lib.id}/settings",
+            json={"ownership": "f7five0"},
+        )
+    assert r.status_code == 200
+    body = r.json()
+    assert "flip_flop_warnings" in body
+    assert len(body["flip_flop_warnings"]) > 0
+    assert body["flip_flop_warnings"][0] == "Radarr has Rename Movies enabled"
+
+
 def test_put_settings_saves_naming_template(client, db_session):
     lib = _lib(db_session)
     db_session.commit()
@@ -291,6 +311,7 @@ def test_undo_journal_409_when_not_done(client, db_session):
 # ---------------------------------------------------------------------------
 
 def test_delete_version_moves_file_and_returns_recycle_path(client, db_session, tmp_path):
+    """Deleting the only file of a movie sets item_deleted=True (movie row removed)."""
     lib = _lib(db_session)
     folder = str(tmp_path / "movies")
     os.makedirs(folder)
@@ -307,8 +328,33 @@ def test_delete_version_moves_file_and_returns_recycle_path(client, db_session, 
     body = r.json()
     assert "recycle_path" in body
     assert "item_deleted" in body
+    assert body["item_deleted"] is True
     assert os.path.exists(body["recycle_path"])
     assert not Path(p).exists()
+
+
+def test_delete_version_item_not_deleted_when_second_file_remains(client, db_session, tmp_path):
+    """Deleting one of two files for the same movie sets item_deleted=False (movie row kept)."""
+    lib = _lib(db_session)
+    folder = str(tmp_path / "movies2")
+    os.makedirs(folder)
+    _lib_folder(db_session, lib.id, folder)
+
+    movie = _movie(db_session)
+    p1 = str(tmp_path / "movies2" / "film_copy1.mkv")
+    p2 = str(tmp_path / "movies2" / "film_copy2.mkv")
+    Path(p1).write_text("bytes1")
+    Path(p2).write_text("bytes2")
+    mf1 = _mf(db_session, lib.id, p1, ref_id=movie.id)
+    _mf(db_session, lib.id, p2, ref_id=movie.id)
+    db_session.commit()
+
+    r = client.delete(f"/api/admin/library/organizer/versions/{mf1.id}")
+    assert r.status_code == 200
+    body = r.json()
+    assert "item_deleted" in body
+    assert body["item_deleted"] is False
+    assert not Path(p1).exists()
 
 
 def test_delete_version_404_for_unknown_media_file(client, db_session):
@@ -418,3 +464,65 @@ def test_template_preview_returns_list(client, db_session, tmp_path):
 def test_template_preview_404_for_unknown_library(client, db_session):
     r = client.get(f"/api/admin/library/organizer/{uuid.uuid4()}/template-preview")
     assert r.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# 409 scan_running (criterion 21)
+# ---------------------------------------------------------------------------
+
+def test_preview_409_when_scan_is_running(client, db_session):
+    """POST /{library_id}/preview returns 409 scan_running when folder scan is active."""
+    lib = _lib(db_session)
+    db_session.commit()
+
+    with patch("app.services.scan_status.is_running", return_value=True), \
+         patch("app.services.scan_status.arr_is_running", return_value=False), \
+         patch("app.services.organizer.is_organizer_running", return_value=False):
+        r = client.post(f"/api/admin/library/organizer/{lib.id}/preview")
+
+    assert r.status_code == 409
+    assert r.json()["detail"] == "scan_running"
+
+
+def test_preview_409_when_arr_sync_is_running(client, db_session):
+    """POST /{library_id}/preview returns 409 arr_sync_running when *arr sync is active."""
+    lib = _lib(db_session)
+    db_session.commit()
+
+    with patch("app.services.scan_status.is_running", return_value=False), \
+         patch("app.services.scan_status.arr_is_running", return_value=True), \
+         patch("app.services.organizer.is_organizer_running", return_value=False):
+        r = client.post(f"/api/admin/library/organizer/{lib.id}/preview")
+
+    assert r.status_code == 409
+    assert r.json()["detail"] == "arr_sync_running"
+
+
+def test_apply_409_when_scan_is_running(client, db_session):
+    """POST /{library_id}/apply/{journal_id} returns 409 scan_running when folder scan is active."""
+    lib = _lib(db_session)
+    j = _journal(db_session, lib.id, "preview")
+    db_session.commit()
+
+    with patch("app.services.scan_status.is_running", return_value=True), \
+         patch("app.services.scan_status.arr_is_running", return_value=False), \
+         patch("app.services.organizer.is_organizer_running", return_value=False):
+        r = client.post(f"/api/admin/library/organizer/{lib.id}/apply/{j.id}")
+
+    assert r.status_code == 409
+    assert r.json()["detail"] == "scan_running"
+
+
+def test_undo_409_when_scan_is_running(client, db_session):
+    """POST /{library_id}/undo/{journal_id} returns 409 scan_running when folder scan is active."""
+    lib = _lib(db_session)
+    j = _journal(db_session, lib.id, "done")
+    db_session.commit()
+
+    with patch("app.services.scan_status.is_running", return_value=True), \
+         patch("app.services.scan_status.arr_is_running", return_value=False), \
+         patch("app.services.organizer.is_organizer_running", return_value=False):
+        r = client.post(f"/api/admin/library/organizer/{lib.id}/undo/{j.id}")
+
+    assert r.status_code == 409
+    assert r.json()["detail"] == "scan_running"
