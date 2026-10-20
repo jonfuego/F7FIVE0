@@ -14,8 +14,23 @@
  *   com.google.android.gms.cast.framework.OPTIONS_PROVIDER_CLASS_NAME
  *     -> com.reactnative.googlecast.GoogleCastOptionsProvider
  *   com.reactnative.googlecast.RECEIVER_APPLICATION_ID -> CC1AD845
+ *
+ * Also pins the Cast SDK. react-native-google-cast asks for
+ * play-services-cast-framework with the dynamic version "+" unless the root
+ * project sets ext.castFrameworkVersion. On 2026-10-20 "+" moved from 22.3.1 to
+ * 23.0.0, which pulls androidx.mediarouter 1.9.0-beta01 (needs compileSdk 37 and
+ * Android Gradle plugin 9.1) and broke the release build. Every shipped APK up
+ * to 1.0.16 was built with 22.3.1. Move the pin only together with the Expo SDK
+ * upgrade (compileSdk and AGP).
  */
-const { withAndroidManifest, AndroidConfig } = require("@expo/config-plugins");
+const {
+  withAndroidManifest,
+  withProjectBuildGradle,
+  AndroidConfig,
+} = require("@expo/config-plugins");
+
+const CAST_FRAMEWORK_VERSION = "22.3.1";
+const PIN_MARKER = "// f7five0: pin play-services-cast-framework";
 
 const OPTIONS_PROVIDER_NAME =
   "com.google.android.gms.cast.framework.OPTIONS_PROVIDER_CLASS_NAME";
@@ -33,12 +48,27 @@ function setMeta(app, name, value) {
   }
 }
 
+/** Append the pin to the root build.gradle (once). The library reads it with
+ * rootProject.ext, and the root script runs before the library's. */
+function pinCastFramework(contents) {
+  if (contents.includes(PIN_MARKER)) return contents;
+  const lead = contents.endsWith("\n") ? "\n" : "\n\n";
+  return `${contents}${lead}${PIN_MARKER}\next.castFrameworkVersion = "${CAST_FRAMEWORK_VERSION}"\n`;
+}
+
 module.exports = function withGoogleCast(config, props = {}) {
   const receiverAppId = props.receiverAppId || DEFAULT_RECEIVER;
-  return withAndroidManifest(config, (cfg) => {
+  const withManifest = withAndroidManifest(config, (cfg) => {
     const app = AndroidConfig.Manifest.getMainApplicationOrThrow(cfg.modResults);
     setMeta(app, OPTIONS_PROVIDER_NAME, OPTIONS_PROVIDER_CLASS);
     setMeta(app, RECEIVER_ID_NAME, receiverAppId);
     return cfg;
   });
+  return withProjectBuildGradle(withManifest, (cfg) => {
+    cfg.modResults.contents = pinCastFramework(cfg.modResults.contents);
+    return cfg;
+  });
 };
+
+module.exports.pinCastFramework = pinCastFramework;
+module.exports.CAST_FRAMEWORK_VERSION = CAST_FRAMEWORK_VERSION;
