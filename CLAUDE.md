@@ -906,8 +906,15 @@ is only proven by a real update on a VM: the tests use a stub Setup.
   not run: its `PrepareToInstall` stops the live services. Version 1.0.18
   (versionCode 19). Checks on the branch: pytest 1424 passed (11 skipped), web
   build ok, lint 0 errors, mobile tsc clean, jest 476. Logs in the vault
-  `projects\f7five0\smoke\migration-pg-fix\`. Not done here: the real-data
-  rehearsal (pg_dump of the live database needs its password), the release, and
+  `projects\f7five0\smoke\migration-pg-fix\`. Released as v1.0.18 from `main`
+  `f093367` (merge `--no-ff`, APK from `release-apk.ps1`, tag pushed). CI on that
+  commit failed only on the flaky organizer undo test (`undoing` vs `undone`,
+  same failure on `f1684b5` before this change). Real-data rehearsal: a read-only
+  `pg_dump -Fc` of the live `f7five0` database, restored into `f7five0_migtest`
+  on the dev cluster (55432), went 0029 to 0033 head in 6 s, no traceback, then
+  the scratch database was dropped (`rehearsal.txt`). The dump stays in
+  `C:\f7dev\migtest`. The live install's `.env` is Administrators only, so the
+  dump is a command Jon runs elevated with the `DATABASE_URL` account. Not done:
   Jon's 1.0.9 to 1.0.18 update on the VM.
 
 - 2026-10-20 (Code, v1.0.17 release of the Library Management merge): v1.0.17
