@@ -487,9 +487,12 @@ begin
   if not Exec('powershell.exe', Params, ExpandConstant('{app}'), SW_SHOW, ewWaitUntilTerminated, ResultCode) or (ResultCode <> 0) then
   begin
     InstallFailed := True;
-    MsgBox('F7FIVE0 setup did not finish (code ' + IntToStr(ResultCode) + ').' + #13#10#13#10 +
+    // SuppressibleMsgBox, never MsgBox: Admin > Updates runs Setup silently as
+    // SYSTEM with /SUPPRESSMSGBOXES, which plain MsgBox ignores, so nobody could
+    // click it and the update hung until update.ps1's 45-minute deadline.
+    SuppressibleMsgBox('F7FIVE0 setup did not finish (code ' + IntToStr(ResultCode) + ').' + #13#10#13#10 +
       'The log is in ' + ExpandConstant('{app}\logs') + '. Fix the problem it names and run Setup again; ' +
-      'it picks up where it stopped.', mbError, MB_OK);
+      'it picks up where it stopped.', mbError, MB_OK, IDOK);
   end;
   DeleteFile(CfgPath);
 end;
@@ -497,6 +500,16 @@ end;
 function SetupSucceeded: Boolean;
 begin
   Result := not InstallFailed;
+end;
+
+// A failed install.ps1 must fail Setup itself: update.ps1 rolls back on a
+// non-zero exit. Inno's own codes are 1 to 8, so this one is 10.
+function GetCustomSetupExitCode: Integer;
+begin
+  if InstallFailed then
+    Result := 10
+  else
+    Result := 0;
 end;
 
 // True unless this Setup is the cached copy itself (a rollback runs it from

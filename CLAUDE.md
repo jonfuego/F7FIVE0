@@ -488,6 +488,22 @@ INSTALL.md for the operator view.
   out of `frontend/`; `git grep bg-2 -- frontend` should stay empty.
 - Migrations go through Alembic. Keep revision ids stable: existing installs
   upgrade through them. Register new models in `app/models/__init__.py`.
+- Migration data steps bind with the real column types. The lightweight
+  `sa.table(...)` / `sa.column(...)` defs a data step uses must give every id,
+  `*_id` and `ref_id` column a uuid type: `postgresql.UUID(as_uuid=False)
+  .with_variant(sa.String(36), "sqlite")` (`_UUID` in 0030 and 0031). Never
+  `sa.String`: psycopg binds it as `::VARCHAR`, and PostgreSQL refuses a varchar
+  for a uuid column (`DatatypeMismatch`) and has no `uuid = varchar` operator.
+  Not `sa.Uuid` either: on SQLite it stores 32-char hex and misses the dashed ids
+  the tests hold. PostgreSQL enum columns (`media_files.kind`, `scan_state`,
+  `libraries.kind`) have no `enum = varchar` operator, so compare them as
+  `sa.cast(col, sa.String) == "..."`. 1.0.17 failed every upgrade with library
+  rows at 0030 this way; the SQLite tests could not show it. Any migration with
+  a data step needs a PostgreSQL upgrade test with real rows in the tables it
+  reads: extend `tests/test_migration_pg_upgrade.py` (opt-in on
+  `F7FIVE0_PG_TEST_URL`, it makes and drops its own database, refuses `f7five0`)
+  and run it before the release, plus an upgrade of a scratch restore of a real
+  database when one is at hand.
 - Config comes from `.env` at the install root via pydantic-settings. New
   settings need a default, an `.env.example` entry, and (if setup should
   write it) a line in `install.ps1`.
@@ -698,7 +714,11 @@ INSTALL.md for the operator view.
   SYSTEM only) and checks and runs that copy; stops the services and `pg_dump -Fc`
   to `data/updates/backup/<from>-<id>.dump` (a new version can migrate the
   schema, so code alone is not enough to go back); runs Setup with
-  `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-`; waits up to 5 minutes for
+  `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-` (so every message box
+  `F7FIVE0.iss` can show after the wizard, `CurStepChanged` and anything it
+  calls, is `SuppressibleMsgBox` with a default button, never `MsgBox`, which
+  ignores the switch and hung the 1.0.17 update until the 45-minute deadline; a
+  failed `install.ps1` makes Setup exit 10 through `GetCustomSetupExitCode`); waits up to 5 minutes for
   `/api/health` to report the new version and `/stream/health` and the web port
   to answer 200; on any failure `pg_restore --clean`, runs the cached previous
   Setup (`data/updates/setup`, copied there by Setup itself via `{srcexe}`, kept
@@ -868,6 +888,27 @@ on a clean Windows VM before tagging a release. Self-update (Admin > Updates)
 is only proven by a real update on a VM: the tests use a stub Setup.
 
 ## Session log
+
+- 2026-10-20 (Code, 1.0.18 migration fix, branch `fix/migration-pg-uuid`): the
+  FuegoTest VM update from 1.0.9 to 1.0.17 stopped at `alembic upgrade`: 0030's
+  data step bound ids as `::VARCHAR` into `library_folders.id` (uuid) and
+  PostgreSQL refused it. 0031 had the same pattern (`watch_history.ref_id`, every
+  id WHERE) plus `media_files.kind` / `scan_state` enum vs varchar compares. Both
+  now use `_UUID` and cast the enums (see the data steps rule). 0032 and 0033
+  were read: schema only, no data step, unchanged. New opt-in
+  `tests/test_migration_pg_upgrade.py` upgrades 0029 to head on PostgreSQL with
+  real rows (two movie folders plus a TV folder, a watched movie and episode, a
+  played track, a missing file); it failed on main's 0030 with `DatatypeMismatch`
+  and, with only 0030 fixed, on 0031's `ref_id`; it passes now. The Setup "setup
+  did not finish" box is `SuppressibleMsgBox`, and a failed `install.ps1` now
+  makes Setup exit 10 (`GetCustomSetupExitCode`; before, Setup exited 0 and
+  update.ps1 waited for the health check). ISCC compiles it (stub payload);
+  not run: its `PrepareToInstall` stops the live services. Version 1.0.18
+  (versionCode 19). Checks on the branch: pytest 1424 passed (11 skipped), web
+  build ok, lint 0 errors, mobile tsc clean, jest 476. Logs in the vault
+  `projects\f7five0\smoke\migration-pg-fix\`. Not done here: the real-data
+  rehearsal (pg_dump of the live database needs its password), the release, and
+  Jon's 1.0.9 to 1.0.18 update on the VM.
 
 - 2026-10-20 (Code, v1.0.17 release of the Library Management merge): v1.0.17
   (versionCode 18) is released from `main` `92bbf2f` (Setup, APK, zip, SBOMs and

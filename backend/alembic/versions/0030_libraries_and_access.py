@@ -90,15 +90,21 @@ def upgrade() -> None:
     _migrate_folders_into_libraries()
 
 
+# ids in the data step. psycopg casts every bind to the type of the column it
+# is given (`$1::VARCHAR` for sa.String), and PostgreSQL has no varchar to uuid
+# assignment and no `uuid = varchar` operator, so ids must bind as uuid there.
+# On SQLite the rows hold dashed text, which String(36) passes through as is
+# (sa.Uuid would store 32-char hex and miss them). as_uuid=False keeps ids as
+# str on both sides.
+_UUID = postgresql.UUID(as_uuid=False).with_variant(sa.String(36), "sqlite")
+
+
 def _migrate_folders_into_libraries() -> None:
     bind = op.get_bind()
-    # Lightweight table defs for the data step. ids use sa.String so the WHERE
-    # and INSERT binds are representation-agnostic (PostgreSQL casts the string
-    # to its native uuid; SQLite stores it verbatim), rather than depending on a
-    # dialect-specific uuid serialization.
+    # Lightweight table defs for the data step. Every id column is _UUID.
     libraries = sa.table(
         "libraries",
-        sa.column("id", sa.String),
+        sa.column("id", _UUID),
         sa.column("name", sa.String),
         sa.column("kind", sa.String),
         sa.column("root_path", sa.String),
@@ -107,8 +113,8 @@ def _migrate_folders_into_libraries() -> None:
     )
     folders = sa.table(
         "library_folders",
-        sa.column("id", sa.String),
-        sa.column("library_id", sa.String),
+        sa.column("id", _UUID),
+        sa.column("library_id", _UUID),
         sa.column("path", sa.String),
         sa.column("created_at", sa.DateTime(timezone=True)),
     )
