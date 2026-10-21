@@ -112,44 +112,54 @@ def upgrade() -> None:
     _backfill(dialect)
 
 
+# ids in the data steps. psycopg casts every bind to the type of the column it
+# is given (`$1::VARCHAR` for sa.String), and PostgreSQL has no `uuid = varchar`
+# operator and no varchar to uuid assignment, so ids must bind as uuid there. On
+# SQLite the rows hold dashed text, which String(36) passes through as is
+# (sa.Uuid would compare 32-char hex and miss them). as_uuid=False keeps ids as
+# str on both sides. media_files.kind and scan_state are PostgreSQL enums with
+# no `enum = varchar` operator either, so the steps compare them cast to text.
+_UUID = postgresql.UUID(as_uuid=False).with_variant(sa.String(36), "sqlite")
+
+
 def _backfill(dialect: str) -> None:
     bind = op.get_bind()
 
     watch_history = sa.table(
         "watch_history",
-        sa.column("id", sa.String),
-        sa.column("media_file_id", sa.String),
+        sa.column("id", _UUID),
+        sa.column("media_file_id", _UUID),
         sa.column("ref_kind", sa.String),
-        sa.column("ref_id", sa.String),
+        sa.column("ref_id", _UUID),
         sa.column("last_path", sa.String),
         sa.column("ref_key", sa.String),
     )
     track_plays = sa.table(
         "track_plays",
-        sa.column("id", sa.String),
-        sa.column("track_id", sa.String),
+        sa.column("id", _UUID),
+        sa.column("track_id", _UUID),
         sa.column("last_path", sa.String),
         sa.column("ref_key", sa.String),
     )
     media_files = sa.table(
         "media_files",
-        sa.column("id", sa.String),
+        sa.column("id", _UUID),
         sa.column("kind", sa.String),
-        sa.column("ref_id", sa.String),
+        sa.column("ref_id", _UUID),
         sa.column("path", sa.String),
         sa.column("scan_state", sa.String),
         sa.column("missing_since", sa.DateTime(timezone=True)),
     )
-    movies = sa.table("movies", sa.column("id", sa.String), sa.column("tmdb_id", sa.Integer))
-    tracks = sa.table("tracks", sa.column("id", sa.String), sa.column("mbid", sa.String))
+    movies = sa.table("movies", sa.column("id", _UUID), sa.column("tmdb_id", sa.Integer))
+    tracks = sa.table("tracks", sa.column("id", _UUID), sa.column("mbid", sa.String))
     episodes = sa.table(
         "episodes",
-        sa.column("id", sa.String), sa.column("series_id", sa.String),
+        sa.column("id", _UUID), sa.column("series_id", _UUID),
         sa.column("season_number", sa.Integer), sa.column("episode_number", sa.Integer),
     )
     series = sa.table(
         "series",
-        sa.column("id", sa.String), sa.column("tvdb_id", sa.Integer), sa.column("tmdb_id", sa.Integer),
+        sa.column("id", _UUID), sa.column("tvdb_id", sa.Integer), sa.column("tmdb_id", sa.Integer),
     )
 
     # 5a. Backfill ref_kind, ref_id, last_path, ref_key on existing watch_history rows.
@@ -181,7 +191,7 @@ def _backfill(dialect: str) -> None:
     for row in tp_rows:
         mf_row = bind.execute(
             sa.select(media_files.c.path)
-            .where(media_files.c.kind == "track")
+            .where(sa.cast(media_files.c.kind, sa.String) == "track")
             .where(media_files.c.ref_id == row.track_id)
         ).first()
         path = mf_row.path if mf_row else None
@@ -199,7 +209,7 @@ def _backfill(dialect: str) -> None:
     now = datetime.now(timezone.utc)
     bind.execute(
         media_files.update()
-        .where(media_files.c.scan_state == "missing")
+        .where(sa.cast(media_files.c.scan_state, sa.String) == "missing")
         .where(media_files.c.missing_since.is_(None))
         .values(missing_since=now)
     )
@@ -244,11 +254,11 @@ def downgrade() -> None:
     # Clean up rows that would violate the NOT NULL constraints before restoring them.
     watch_history = sa.table(
         "watch_history",
-        sa.column("media_file_id", sa.String),
+        sa.column("media_file_id", _UUID),
     )
     track_plays = sa.table(
         "track_plays",
-        sa.column("track_id", sa.String),
+        sa.column("track_id", _UUID),
     )
     bind.execute(watch_history.delete().where(watch_history.c.media_file_id.is_(None)))
     bind.execute(track_plays.delete().where(track_plays.c.track_id.is_(None)))
