@@ -107,6 +107,23 @@ function Download([string]$url, [string]$dest, [string]$expectedSha256, [string]
     Move-Item -Force $tmp $dest
 }
 
+# One line of winget output as it should land in the console and the log, or
+# "" to drop it. Drops the progress bars (block characters, which the Setup
+# transcript turned into mojibake like the Greek-capital-gamma runs seen in the
+# 2026-10-21 VM log) with their size or percent tail, and the bare spinner
+# characters; strips a spinner in front of a status ("- Cancelling operation"
+# becomes "Cancelling operation", and the caller prints a repeat only once).
+function Format-WingetLine([string]$raw) {
+    $line = "$raw".Trim()
+    if (-not $line) { return "" }
+    $bar = '[\u2580-\u259F\u0393\u00FB\u00EA\u00C6]'
+    $tail = '(\d+(\.\d+)?\s*[KMG]?B\s*/\s*\d+(\.\d+)?\s*[KMG]?B|\d+\s*%)'
+    $barLine = '^(' + $bar + '|\s)+' + $tail + '?$'
+    if ($line -match $barLine) { return "" }
+    if ($line -match '^[-\\|/ ]+$') { return "" }
+    return ($line -replace '^[-\\|/]\s+', '')
+}
+
 # Runs winget and returns its exit code. 0 = installed;
 # -1978335189 (0x8A15002B) = already installed / no upgrade available.
 # Callers decide what counts as success: winget sometimes reports failure
@@ -122,9 +139,13 @@ function Invoke-WingetRaw([string]$id, [string[]]$extra = @()) {
     # anything left in the pipeline becomes part of this function's return
     # value, and the caller then sees "Found Python ... 0" instead of 0.
     # No 2>&1: under ErrorActionPreference Stop that turns stderr into errors.
+    $script:WingetLastLine = ""
     & winget @wargs | ForEach-Object {
-        $line = "$_".Trim()
-        if ($line -and $line -notmatch '^[-\\|/ ]+$') { Info $line }
+        $line = Format-WingetLine "$_"
+        if ($line -and $line -ne $script:WingetLastLine) {
+            Info $line
+            $script:WingetLastLine = $line
+        }
     }
     $rc = [int]$LASTEXITCODE
     Refresh-Path
