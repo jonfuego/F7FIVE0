@@ -15,7 +15,8 @@
 // hash entry in ADMIN_HASH_MAP so an old link still lands.
 
 import { remoteAccessSummary, updatesSummary } from "./admin-sections.ts";
-import type { ScanRow } from "./scans-rows.ts";
+import { healthViewHref } from "./library-health-view.ts";
+import { scanRowHref, type ScanRow } from "./scans-rows.ts";
 
 // ---------------------------------------------------------------------------
 // Areas, hashes and the section list
@@ -247,6 +248,18 @@ function slowTranscodeText(t: TranscodeLike): string {
   return `${t.user_display_name}'s stream of ${t.title} is transcoding below realtime (${detail})`;
 }
 
+/** The second line of a scan item: the first file that failed and why, else
+ *  what the row says about missing files, else null. */
+export function scanAttentionDetail(row: ScanRow): string | null {
+  const first = row.errorItems[0];
+  if (first) {
+    const more = row.errorItems.length + row.errorsUnlisted - 1;
+    const head = first.path ? `${first.path}: ${first.reason}` : first.reason;
+    return more > 0 ? `${head} (and ${more} more)` : head;
+  }
+  return row.hint ? row.hint.text : null;
+}
+
 /** Everything that needs the admin's eye, in this order: reminders, slow
  *  streams, scans that failed, *arr folders the service can't open, an update
  *  ready to install, remote access that can't be reached. Empty when all is well. A source that did not load (null)
@@ -285,9 +298,9 @@ export function buildAttentionItems(inputs: AttentionInputs): AttentionItem[] {
         id: `scan:${row.id}`,
         kind: "scan",
         text: `${row.label} scan needs attention: ${row.result || "failed"}`,
-        detail: null,
-        linkLabel: "Open Scans",
-        href: "/admin/scans",
+        detail: scanAttentionDetail(row),
+        linkLabel: "See the errors",
+        href: scanRowHref(row.id),
       });
     }
   }
@@ -336,8 +349,8 @@ export function buildAttentionItems(inputs: AttentionInputs): AttentionItem[] {
       kind: "health",
       text: `${plural(lh.missing_files_eligible, "missing file", "missing files")} eligible for cleanup`,
       detail: null,
-      linkLabel: "Open Library health",
-      href: "/admin/library-health",
+      linkLabel: "See the files",
+      href: healthViewHref("eligible"),
     });
   }
   if (lh && lh.unreachable_folders > 0) {
@@ -346,8 +359,8 @@ export function buildAttentionItems(inputs: AttentionInputs): AttentionItem[] {
       kind: "health",
       text: `${plural(lh.unreachable_folders, "library folder", "library folders")} unreachable`,
       detail: null,
-      linkLabel: "Open Library health",
-      href: "/admin/library-health",
+      linkLabel: "See the folders",
+      href: healthViewHref("unreachable"),
     });
   }
   if (lh && (lh.duplicate_movie_versions ?? 0) > 0) {

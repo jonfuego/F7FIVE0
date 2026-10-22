@@ -140,7 +140,49 @@ test("needs attention: a failed scan", () => {
   assert.equal(items.length, 1);
   assert.equal(items[0].kind, "scan");
   assert.equal(items[0].text, "Movies scan needs attention: Failed");
-  assert.equal(items[0].href, "/admin/scans");
+  assert.equal(items[0].href, "/admin/scans?show=movies");
+});
+
+test("needs attention: a scan item links to its error list and names the first file", () => {
+  const rows = scanRowsWith({
+    state: "idle",
+    finished_at: "2026-10-21T17:00:00Z",
+    scope: null,
+    libraries: {
+      music: {
+        state: "done", seen: 160481, added: 0, missing: 202, errors: 50,
+        error_items: [
+          { path: "\\\\fuegonas\\Music\\a.flac", reason: "duplicate key" },
+          { path: "\\\\fuegonas\\Music\\b.flac", reason: "value too long" },
+        ],
+      },
+    },
+    last_error: null,
+  });
+  const [item] = buildAttentionItems({ ...quiet, scanRows: rows });
+  assert.equal(item.href, "/admin/scans?show=music");
+  assert.equal(item.linkLabel, "See the errors");
+  assert.equal(item.detail, "\\\\fuegonas\\Music\\a.flac: duplicate key (and 49 more)");
+});
+
+test("needs attention: an older scan with no file list points at the missing files", () => {
+  const rows = scanRowsWith({
+    state: "idle", finished_at: "2026-10-21T17:00:00Z", scope: null,
+    libraries: { music: { state: "done", seen: 10, added: 0, missing: 202, errors: 3 } },
+    last_error: null,
+  });
+  const [item] = buildAttentionItems({ ...quiet, scanRows: rows });
+  assert.equal(item.detail, "202 files are missing on disk.");
+});
+
+test("needs attention: library health items open the matching list", () => {
+  const items = buildAttentionItems({
+    ...quiet,
+    libraryHealth: { missing_files_eligible: 3, unreachable_folders: 1 },
+  });
+  const byId = Object.fromEntries(items.map((i) => [i.id, i]));
+  assert.equal(byId["health:missing"].href, "/admin/library-health?view=eligible");
+  assert.equal(byId["health:unreachable"].href, "/admin/library-health?view=unreachable");
 });
 
 test("needs attention: an update ready to install", () => {
