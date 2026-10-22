@@ -224,6 +224,16 @@ INSTALL.md for the operator view.
   `scan_status.py` (sibling key `music_videos_scan_status`) with a file total
   counted up front and a running count, and Admin shows it with the same progress
   bar as the folder scan.
+  Every per-file folder-scan error goes through `FolderScanStats.note_error(path,
+  reason)`, which counts it, sets `last_error` and keeps `{path, reason}` in
+  `error_items` (the first `ERROR_ITEMS_CAP` = 50); a library that raises adds
+  one item with an empty path. `scan_status` writes `error_items` into each
+  library's entry, and Admin > Scans lists them under the row (Show errors;
+  `/admin/scans?show=<row>` opens it). Never add an `errors += 1` that skips
+  `note_error`. An ffprobe failure reads `PROBE_FAILED`. In the music scan, a
+  known file whose track would move into an album / disc / track number another
+  track holds is linked to that track (`_slot_holder`), the same as a new file
+  with that number, instead of breaking `uq_tracks_album_disc_track`.
 - Artist aliases and merge: Admin can merge one artist into another
   (`services/artist_merge.py`). The source's name and MusicBrainz id are stored
   as an alias (table `artist_aliases`) that both `scan_library.py` and `sync.py`
@@ -572,8 +582,18 @@ INSTALL.md for the operator view.
   Tailscale MSI) also carry `Publisher`; `Download` then requires a Valid
   `Get-AuthenticodeSignature` whose subject contains it. Caddy ships as a zip
   (GitHub has no bare Windows exe), so `remote-access.ps1` extracts `caddy.exe`
-  after the hash check. Things installed by winget (Python, PostgreSQL, NSSM) or
-  bundled (the APK) are NOT direct downloads and are NOT in the manifest. The
+  after the hash check. Python is a pinned direct download too (`python`, the
+  python.org x64 installer, Publisher `Python Software Foundation`):
+  `install.ps1` `Install-PythonDirect` runs it `/quiet InstallAllUsers=1
+  PrependPath=0`, prints a line every 30 s, stops it after 15 minutes, waits 60 s
+  and retries on exit 1618 (another install running), logs to
+  `logs\python-install-*.log`, and judges success by `Find-Python`, never the
+  exit code. winget is not used for Python: on a clean VM it sat on "Cancelling
+  operation" for 29 minutes and failed with 0x80004004 after verifying the file.
+  Things installed by winget (PostgreSQL, NSSM) or bundled (the APK) are NOT
+  direct downloads and are NOT in the manifest. winget output goes through
+  `Format-WingetLine` (`common.ps1`, test `installer\tests\winget-line.ps1`):
+  progress bars and bare spinners are dropped and a repeated status prints once. The
   offline logic test is `installer/tests/download-verify.ps1` (no network: it
   serves a fixture over `file://`); keep it green. `build-dist.ps1` copies the
   manifest into `dist/installer` so releases carry it.
@@ -853,6 +873,23 @@ INSTALL.md for the operator view.
   use `tabular-nums`, touch targets are 44 px. A QR code stays black on white
   (`lib/qr-colors.ts`). The admin no longer folds sections; the
   `admin.collapsed` view pref stays valid so an old stored value still parses.
+- Every count or "needs attention" in Admin opens the list behind it. Needs
+  attention items link to the exact view (`buildAttentionItems`: a scan item to
+  `scanRowHref(id)` with the first failed file as its detail, library health
+  items to `healthViewHref(view)`), and the item text is a link too. Library
+  health's tiles are tabs over `?view=missing|eligible|errors|unreachable`
+  (`lib/library-health-view.ts`), backed by
+  `GET /api/admin/library/health/files?state=missing|error` (paged) and
+  `GET /api/admin/library/health/unreachable-folders`. Pages read `?show=` /
+  `?view=` from `window.location` after mount, so they need no Suspense
+  boundary for `useSearchParams`.
+- The Account page (`app/account/page.tsx`) follows the Admin look:
+  `AdminPageHeader`, one bordered panel per section, a section list on the left,
+  the `app/admin/admin-ui.ts` input and button classes with `min-h-tap`, v3
+  tokens only.
+- `GET /api/libraries` (and `/api/library/libraries`) answers a bare array. Read
+  it with `loadLibraries` (`lib/libraries.ts`); the Organizer once read
+  `{libraries: [...]}` and always showed none.
 
 ## Design system
 
@@ -888,6 +925,27 @@ on a clean Windows VM before tagging a release. Self-update (Admin > Updates)
 is only proven by a real update on a VM: the tests use a stub Setup.
 
 ## Session log
+
+- 2026-10-21 (Cowork, 1.0.18 review fixes, branch `fix/review-1.0.18` from `main`
+  `16e8a73`, spec `projects\f7five0\handoffs\f7five0-review-1.0.18_task_v2.md`):
+  Jon's 1.0.18 review on the FuegoTest VM (punch list
+  `tasks\ui-review-1.0.18_punch-list_v1.md`). Commits, in order: Organizer lists
+  libraries (it read `{libraries}` from a bare array); scan error list
+  (`error_items`) and the `uq_tracks_album_disc_track` fix (the slot test fails on
+  main with the same IntegrityError the VM showed); Scans rows Show errors and a
+  missing-files link; Library health drill-down (tiles open lists, two new admin
+  endpoints); Needs attention deep links with the first failed file; Account in
+  the Admin style; Python from the pinned python.org installer instead of winget,
+  plus `Format-WingetLine`. Item 5 (Path mappings said "No mappings yet") was a
+  cached page, nothing changed. Checks in the cloud sandbox (Linux, Python 3.13):
+  pytest 1428 passed (15 skipped), web build ok, lint 0 errors, web tests 382, installer
+  parse check clean and `winget-line.ps1` 10 of 10 under pwsh 7; mobile untouched,
+  not run. Not checked: `download-verify.ps1` under Windows PowerShell 5.1 (its 3
+  `file://` checks fail under pwsh 7 on Linux, the same on main), the Python
+  installer's real hash and signature (the Sha256 is the winget-pkgs manifest
+  value for 3.12.10; python.org was not reachable from the sandbox, so confirm
+  with `Get-FileHash` and `Get-AuthenticodeSignature` on Jon's PC), and a clean-VM
+  install from the "no prereqs" checkpoint.
 
 - 2026-10-20 (Code, 1.0.18 migration fix, branch `fix/migration-pg-uuid`): the
   FuegoTest VM update from 1.0.9 to 1.0.17 stopped at `alembic upgrade`: 0030's
