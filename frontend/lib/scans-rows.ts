@@ -52,6 +52,10 @@ export type ArrApp = "radarr" | "sonarr" | "lidarr";
 export type ArrApps = Record<ArrApp, boolean>;
 export type FolderLibraryId = "movies" | "tv" | "music" | "podcasts";
 
+/** One per-file error a scan kept: the file and a short reason ("" path when
+ *  the whole library failed). */
+export type ScanErrorItemLike = { path: string; reason: string };
+
 export type FolderLibraryLike = {
   state: string;
   total?: number;
@@ -59,6 +63,8 @@ export type FolderLibraryLike = {
   added?: number;
   missing?: number;
   errors?: number;
+  /** The first 50 per-file errors. Missing from a status written before 1.0.19. */
+  error_items?: ScanErrorItemLike[];
 };
 
 /** GET /api/admin/library/scan (the folder scan). */
@@ -159,7 +165,36 @@ export type ScanRow = {
   action: ScanAction;
   /** A line under the row that says why files are missing and where to fix it. */
   hint: ScanHint | null;
+  /** The per-file errors behind the error count (the first 50); [] for none. */
+  errorItems: ScanErrorItemLike[];
+  /** The row counts errors the status did not list (a scan from before the
+   *  list existed, or more than 50): how many are not shown. */
+  errorsUnlisted: number;
 };
+
+/** Library health's missing-files view. */
+export const MISSING_FILES_HREF = "/admin/library-health?view=missing";
+
+/** "/admin/scans?show=music": the Scans page with that row's error list open. */
+export function scanRowHref(id: ScanRowId): string {
+  return `/admin/scans?show=${id}`;
+}
+
+/** Which row's error list the URL asks to open (`?show=<row id>`), or null. */
+export function shownRowFromSearch(search: string): ScanRowId | null {
+  const value = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search).get("show");
+  const ids: ScanRowId[] = ["movies", "tv", "music", "music_videos", "podcasts", "podcast_feeds"];
+  return ids.find((id) => id === value) ?? null;
+}
+
+function missingHint(missing: number): ScanHint | null {
+  if (!missing) return null;
+  return {
+    text: `${plural(missing, "file is", "files are")} missing on disk.`,
+    linkLabel: "See missing files",
+    href: MISSING_FILES_HREF,
+  };
+}
 
 export type ScanHint = { text: string; linkLabel: string; href: string };
 
@@ -252,7 +287,9 @@ function folderRow(id: FolderLibraryId, label: string, inputs: ScanInputs): Scan
     when: state === "running" || !lib ? "" : whenText(folder?.finished_at ?? null, now),
     canStart: disabledReason === null, disabledReason,
     action: { kind: "folder", library: id },
-    hint: null,
+    hint: state === "running" || !lib ? null : missingHint(lib.missing ?? 0),
+    errorItems: lib?.error_items ?? [],
+    errorsUnlisted: Math.max(0, (lib?.errors ?? 0) - (lib?.error_items?.length ?? 0)),
   };
 }
 
@@ -361,6 +398,8 @@ function arrAppRow(id: FolderLibraryId, label: string, app: ArrApp, inputs: Scan
     canStart: disabledReason === null, disabledReason,
     action: { kind: "arr", apps: [app] },
     hint: driveHint(entry),
+    errorItems: [],
+    errorsUnlisted: 0,
   };
 }
 
@@ -405,6 +444,8 @@ function musicVideosRow(inputs: ScanInputs): ScanRow {
     canStart: disabledReason === null, disabledReason,
     action: { kind: "music_videos" },
     hint: null,
+    errorItems: [],
+    errorsUnlisted: 0,
   };
 }
 
@@ -447,6 +488,8 @@ function podcastFeedsRow(inputs: ScanInputs): ScanRow {
     canStart: disabledReason === null, disabledReason,
     action: { kind: "podcast_refresh" },
     hint: null,
+    errorItems: [],
+    errorsUnlisted: 0,
   };
 }
 

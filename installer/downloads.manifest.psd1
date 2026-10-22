@@ -14,6 +14,19 @@
 # To bump a pinned version, see "Refreshing a pinned download" in CLAUDE.md.
 # ASCII only. PowerShell 5.1 compatible.
 @{
+    # Python comes straight from python.org, not winget: a clean install on the
+    # FuegoTest VM (2026-10-21) sat on winget's "Cancelling operation" for 29
+    # minutes and failed with 0x80004004 after winget had verified the file.
+    # Sha256 is the value the winget-pkgs manifest for Python.Python.3.12
+    # 3.12.10 pins (the hash winget checked on the VM); confirm it against the
+    # downloaded file with Get-FileHash when refreshing.
+    python = @{
+        Name      = "Python (python.org Windows installer, x64)"
+        Version   = "3.12.10"
+        Url       = "https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe"
+        Sha256    = "67B5635E80EA51072B87941312D00EC8927C4DB9BA18938F7AD2D27B328B95FB"
+        Publisher = "Python Software Foundation"
+    }
     node = @{
         Name      = "Node.js (win-x64 zip)"
         Version   = "22.14.0"

@@ -23,7 +23,8 @@ import {
   type PodcastRefreshStatus,
 } from "@/lib/library-scan";
 import {
-  buildScanRows, scanAllPlan, scanErrors, type ScanInputs, type ScanRow, type ScanRowState,
+  buildScanRows, scanAllPlan, scanErrors, shownRowFromSearch,
+  type ScanInputs, type ScanRow, type ScanRowId, type ScanRowState,
 } from "@/lib/scans-rows";
 import { ScanBar } from "./ScanBar";
 
@@ -134,6 +135,28 @@ export function ScansSection({
   const plan = scanAllPlan(rows);
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  // Rows whose error list is open. A link from Needs attention opens one with
+  // ?show=<row id> (read from the URL after mount, so the page needs no
+  // Suspense boundary for useSearchParams).
+  const [open, setOpen] = useState<Set<ScanRowId>>(() => new Set());
+
+  useEffect(() => {
+    const shown = shownRowFromSearch(window.location.search);
+    if (!shown) return;
+    setOpen(new Set([shown]));
+    window.setTimeout(() => {
+      document.querySelector(`[data-testid="scan-row-${shown}"]`)?.scrollIntoView({ block: "center" });
+    }, 0);
+  }, []);
+
+  function toggle(id: ScanRowId) {
+    setOpen((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
 
   // A started scan marks itself running on the server before the request
   // returns; look again right away, then once more after the job has begun.
@@ -221,6 +244,8 @@ export function ScansSection({
             starting={busy === row.id}
             locked={busy !== null}
             onStart={() => void startRow(row)}
+            errorsOpen={open.has(row.id)}
+            onToggleErrors={() => toggle(row.id)}
           />
         ))}
       </ul>
@@ -240,13 +265,20 @@ function ScanListRow({
   starting,
   locked,
   onStart,
+  errorsOpen,
+  onToggleErrors,
 }: {
   row: ScanRow;
   starting: boolean;
   locked: boolean;
   onStart: () => void;
+  errorsOpen: boolean;
+  onToggleErrors: () => void;
 }) {
   const running = row.state === "running";
+  const errorCount = row.errorItems.length + row.errorsUnlisted;
+  const hasErrors = !running && errorCount > 0;
+  const listId = `scan-errors-${row.id}`;
   const showReason = !row.canStart && !running && row.disabledReason;
   return (
     <li
@@ -288,6 +320,39 @@ function ScanListRow({
                 {row.hint.linkLabel}
               </Link>
             </p>
+          ) : null}
+          {hasErrors ? (
+            <button
+              type="button"
+              onClick={onToggleErrors}
+              aria-expanded={errorsOpen}
+              aria-controls={listId}
+              className="mt-1 inline-flex min-h-tap items-center text-xs font-semibold text-hive-text hover:underline"
+              data-testid={`scan-errors-toggle-${row.id}`}
+            >
+              {errorsOpen ? "Hide errors" : `Show errors (${errorCount})`}
+            </button>
+          ) : null}
+          {hasErrors && errorsOpen ? (
+            <div id={listId} className="mt-1 border-t border-line pt-2" data-testid={listId}>
+              {row.errorItems.length > 0 ? (
+                <ul className="space-y-1.5">
+                  {row.errorItems.map((item, i) => (
+                    <li key={`${item.path}:${i}`} className="text-xs">
+                      {item.path ? <p className="break-all text-ink">{item.path}</p> : null}
+                      <p className="text-ink-3">{item.reason}</p>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+              {row.errorsUnlisted > 0 ? (
+                <p className="mt-1.5 text-xs text-ink-3">
+                  {row.errorItems.length > 0
+                    ? `${row.errorsUnlisted} more not listed (a scan keeps the first 50 it finds).`
+                    : "This scan ran before F7FIVE0 kept the file list. Scan again to see which files failed."}
+                </p>
+              ) : null}
+            </div>
           ) : null}
         </div>
         <button

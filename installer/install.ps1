@@ -98,7 +98,6 @@ $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"   # Invoke-WebRequest is 10x faster without the bar
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-$PythonWingetId = "Python.Python.3.12"
 $PostgresWingetId = "PostgreSQL.PostgreSQL.16"
 $NssmWingetId  = "NSSM.NSSM"
 
@@ -147,6 +146,7 @@ $script:Warnings = New-Object System.Collections.Generic.List[string]
 # reads them; the Download helper verifies the hash. To bump a version, see
 # "Refreshing a pinned download" in CLAUDE.md. cloudflared and Caddy are only
 # downloaded by remote-access.ps1, so their specs are read there.
+$PythonSpec  = Get-DownloadSpec "python"
 $NodeSpec    = Get-DownloadSpec "node"
 $NodeVersion = $NodeSpec.Version
 $FfmpegSpec  = Get-DownloadSpec "ffmpeg"
@@ -426,12 +426,69 @@ function Find-Python {
     foreach ($c in $cands) { if ($c -and (Test-Path $c)) { return $c } }
     return $null
 }
+# Python comes from the pinned python.org installer, not winget. On a clean VM
+# winget sat on "Cancelling operation" for 29 minutes and gave up with
+# 0x80004004 after it had downloaded and verified the file. The installer runs
+# quietly for all users, with a progress line every 30 s, a 15-minute limit, and
+# a wait-and-retry while another install holds Windows Installer (exit 1618,
+# often Windows Update on a new PC). Success is judged by Find-Python, not the
+# exit code.
+function Install-PythonDirect {
+    $exe = Join-Path $env:TEMP ("f7five0-python-{0}-amd64.exe" -f $PythonSpec.Version)
+    Download $PythonSpec.Url $exe $PythonSpec.Sha256 $PythonSpec.Publisher
+    $pyLog = Join-Path $LogsDir ("python-install-{0}.log" -f (Get-Date -Format "yyyyMMdd-HHmmss"))
+    $pyArgs = "/quiet InstallAllUsers=1 PrependPath=0 Include_test=0 Include_launcher=0 Shortcuts=0 AssociateFiles=0 /log `"$pyLog`""
+    $rc = $null
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        Info ("installing Python {0} for all users (attempt {1} of 3)" -f $PythonSpec.Version, $attempt)
+        $start = Get-Date
+        $proc = Start-Process -FilePath $exe -ArgumentList $pyArgs -PassThru -WindowStyle Hidden
+        $null = $proc.Handle
+        $nextBeat = 30
+        $timedOut = $false
+        while (-not $proc.WaitForExit(1000)) {
+            $elapsed = [int]((Get-Date) - $start).TotalSeconds
+            if ($elapsed -ge $nextBeat) {
+                Info ("still installing Python ({0}:{1:00} elapsed)" -f [int][math]::Floor($elapsed / 60), ($elapsed % 60))
+                $nextBeat += 30
+            }
+            if ($elapsed -ge 900) {
+                $timedOut = $true
+                try { $proc.Kill() } catch { }
+                break
+            }
+        }
+        if ($timedOut) {
+            Warn "the Python installer did not finish in 15 minutes and was stopped. Its log: $pyLog"
+            $rc = -1
+            break
+        }
+        $rc = $proc.ExitCode
+        # 0 done, 3010 done (restart later), 1638 another 3.12 is already installed.
+        if ($rc -eq 0 -or $rc -eq 3010 -or $rc -eq 1638) { break }
+        if ($rc -eq 1618 -and $attempt -lt 3) {
+            Warn "another installation is running (often Windows Update on a new PC). Waiting 60 s, then trying again."
+            Start-Sleep -Seconds 60
+            continue
+        }
+        Warn "the Python installer exited $rc. Its log: $pyLog"
+        break
+    }
+    Remove-Item -Force $exe -ErrorAction SilentlyContinue
+    Refresh-Path
+    return $rc
+}
+
 $Py = Find-Python
 if (-not $Py) {
-    Invoke-Winget $PythonWingetId @("--scope", "machine")
-    $Py = Find-Python
+    $pyRc = @(Install-PythonDirect) | Select-Object -Last 1
+    for ($i = 0; $i -lt 10 -and -not $Py; $i++) {
+        $Py = Find-Python
+        if (-not $Py) { Start-Sleep -Seconds 2 }
+    }
+    if ($Py -and $pyRc -ne 0) { Info "the Python installer reported $pyRc, but Python is installed; carrying on." }
 }
-if (-not $Py) { Fail "Python 3.12 did not install. Install it from python.org (All users), then run Setup again." }
+if (-not $Py) { Fail "Python $($PythonSpec.Version) did not install. Install Python 3.12 from python.org (choose Install for all users), then run Setup again. The installer log is in $LogsDir." }
 Ok "Python: $Py"
 
 # Node.js: private copy under runtime\ so it never clashes with a system Node.

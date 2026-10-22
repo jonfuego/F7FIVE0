@@ -15,6 +15,7 @@ from app.models.playback import WatchHistory
 from app.models.track_play import TrackPlay
 from app.models.user import User
 from app.services import metadata_locks
+from tests.test_library_scan import authed  # noqa: F401  (fixture used by name)
 
 
 _OLD = datetime.now(timezone.utc) - timedelta(days=10)
@@ -493,3 +494,64 @@ def test_album_absent_from_albums_list_after_last_track_deleted(client, db_sessi
     assert resp.status_code == 200
     ids = [item["id"] for item in resp.json()]
     assert str(album.id) not in ids
+
+
+# ---------------------------------------------------------------------------
+# 1.0.18 review item 4: the count tiles drill down
+# ---------------------------------------------------------------------------
+def test_health_files_lists_every_missing_file_with_eligibility(client, db_session):
+    m = _movie(db_session, "Gone Movie")
+    _mf(db_session, m, r"D:\Movies\old.mkv", state=ScanState.missing, missing_since=_OLD)
+    _mf(db_session, m, r"D:\Movies\new.mkv", state=ScanState.missing, missing_since=_NEW)
+    _mf(db_session, m, r"D:\Movies\fine.mkv", state=ScanState.ready)
+    db_session.commit()
+
+    with _fake_folders([r"D:\Movies"]):
+        r = client.get("/api/admin/library/health/files?state=missing")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["total"] == 2
+    # Longest missing first.
+    assert [i["path"] for i in body["items"]] == [r"D:\Movies\old.mkv", r"D:\Movies\new.mkv"]
+    assert [i["eligible"] for i in body["items"]] == [True, False]
+    assert body["items"][0]["item_title"] == "Gone Movie"
+    assert body["items"][0]["days_missing"] >= 9
+    assert body["items"][0]["kind"] == "movie"
+
+
+def test_health_files_lists_probe_errors_and_pages(client, db_session):
+    m = _movie(db_session)
+    for i in range(3):
+        _mf(db_session, m, rf"D:\Movies\bad{i}.mkv", state=ScanState.error)
+    db_session.commit()
+
+    with _fake_folders([r"D:\Movies"]):
+        first = client.get("/api/admin/library/health/files?state=error&limit=2").json()
+        rest = client.get("/api/admin/library/health/files?state=error&limit=2&offset=2").json()
+    assert first["total"] == 3 and len(first["items"]) == 2 and len(rest["items"]) == 1
+    assert all(i["state"] == "error" and i["days_missing"] is None for i in first["items"])
+    paths = {i["path"] for i in first["items"] + rest["items"]}
+    assert paths == {rf"D:\Movies\bad{i}.mkv" for i in range(3)}
+
+
+def test_health_files_refuses_an_unknown_state(client):
+    assert client.get("/api/admin/library/health/files?state=ready").status_code == 422
+
+
+def test_unreachable_folders_lists_the_folders_the_service_cannot_open(client, db_session, monkeypatch):
+    from app.api import admin_library_health
+    from app.services import library_folders
+
+    monkeypatch.setattr(library_folders, "all_folders", lambda db: {
+        "movies": [r"\\nas\Movies"], "music": [r"\\nas\Music", r"\\gone\Music"],
+    })
+    monkeypatch.setattr(admin_library_health, "_reachable_roots", lambda db: {r"\\nas\Movies", r"\\nas\Music"})
+    r = client.get("/api/admin/library/health/unreachable-folders")
+    assert r.status_code == 200, r.text
+    assert r.json() == [{"path": r"\\gone\Music", "library_kind": "music"}]
+
+
+def test_the_drill_down_endpoints_are_admin_only(authed):
+    client, _admin_h, member_h = authed  # noqa: F811
+    assert client.get("/api/admin/library/health/files?state=missing", headers=member_h).status_code == 403
+    assert client.get("/api/admin/library/health/unreachable-folders", headers=member_h).status_code == 403
