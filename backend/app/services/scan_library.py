@@ -52,7 +52,7 @@ import logging
 import os
 import re
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from typing import Callable, Iterable, Iterator, Optional
 
@@ -121,6 +121,12 @@ _DISC_DIR_RE = re.compile(r"^(?:disc|disk|cd)[\s._\-]*0*(\d+)$", re.IGNORECASE)
 # ---------------------------------------------------------------------------
 # Stats
 # ---------------------------------------------------------------------------
+# How many per-file errors a library keeps for Admin > Scans.
+ERROR_ITEMS_CAP = 50
+
+PROBE_FAILED = "ffprobe could not read the file (damaged, incomplete, or not a media file)"
+
+
 @dataclass
 class FolderScanStats:
     movies: int = 0
@@ -144,6 +150,17 @@ class FolderScanStats:
     # A short one-line reason for the most recent per-file error (file path plus
     # a one-line cause), safe to show an admin. Never the raw SQL dump.
     last_error: Optional[str] = None
+    # The per-file errors behind `errors`, as {path, reason}, at most
+    # ERROR_ITEMS_CAP (the first ones found). Admin > Scans lists them under the
+    # row, so "needs attention" says what needs it.
+    error_items: list = field(default_factory=list)
+
+    def note_error(self, path: str, reason: str) -> None:
+        """Count one file's error and keep its path and reason for Admin."""
+        self.errors += 1
+        self.last_error = f"{path}: {reason}"
+        if len(self.error_items) < ERROR_ITEMS_CAP:
+            self.error_items.append({"path": path, "reason": reason})
 
     def log_summary(self, label: str) -> None:
         log.info(
@@ -276,7 +293,9 @@ def scan_all(
             log.exception("%s folder scan failed", label)
             db.rollback()
             stats.errors += 1
-            error = f"{label} scan failed: {exc}"
+            error = f"{label} scan failed: {_short_reason(exc)}"
+            if len(stats.error_items) < ERROR_ITEMS_CAP:
+                stats.error_items.append({"path": "", "reason": error})
         # A library that raised is "failed"; one that finished but skipped bad
         # files is "done" with an error count and the last per-file reason.
         if on_progress is not None:
@@ -285,6 +304,9 @@ def scan_all(
         for k in total.__dataclass_fields__:
             if k == "last_error":
                 total.last_error = stats.last_error or total.last_error
+                continue
+            if k == "error_items":
+                total.error_items = (total.error_items + stats.error_items)[:ERROR_ITEMS_CAP]
                 continue
             setattr(total, k, getattr(total, k) + getattr(stats, k))
     return total
@@ -486,13 +508,27 @@ def _short_reason(exc: Exception) -> str:
     return text[:200]
 
 
+def _slot_holder(db: Session, track, album_id, disc, track_no):
+    """The other track on `album_id` with this disc and track number, when
+    moving `track` there would collide with it (the unique constraint
+    uq_tracks_album_disc_track). None when the slot is free, is this track's
+    own, or has no track number (NULLs never collide)."""
+    if track_no is None or disc is None:
+        return None
+    if track.album_id == album_id and track.disc_number == disc and track.track_number == track_no:
+        return None
+    return db.scalars(select(Track).where(
+        Track.album_id == album_id, Track.disc_number == disc,
+        Track.track_number == track_no, Track.id != track.id,
+    )).first()
+
+
 def _record_file_error(path: str, exc: Exception, stats: FolderScanStats) -> None:
     """Note one file's failure without leaking the SQL dump. Full detail goes to
     the API log; the admin-facing status gets the file path and a short reason."""
     reason = _short_reason(exc)
     log.exception("skipping music file after an error: %s", path)
-    stats.errors += 1
-    stats.last_error = f"{path}: {reason}"
+    stats.note_error(path, reason)
 
 
 def _is_skip_dir(name: str) -> bool:
@@ -578,7 +614,7 @@ def _probe(mf: MediaFile, stats: FolderScanStats) -> None:
             stats.files_missing += 1
         else:
             mf.scan_state = ScanState.error
-            stats.errors += 1
+            stats.note_error(mf.path, PROBE_FAILED)
         return
     mf.container = result.container or mf.container
     mf.size_bytes = result.size_bytes or mf.size_bytes
@@ -1341,14 +1377,27 @@ def _import_one_track(
         db.flush()
         stats.tracks += 1
     else:
-        track.album_id = album.id
         _locked = metadata_locks.locked_fields(db, "track", track.id)
-        if "title" not in _locked:
-            track.title = ft.title or track.title
-        if "track_number" not in _locked:
-            track.track_number = ft.track
-        if "disc_number" not in _locked:
-            track.disc_number = ft.disc
+        new_track_no = track.track_number if "track_number" in _locked else ft.track
+        new_disc = track.disc_number if "disc_number" in _locked else ft.disc
+        holder = _slot_holder(db, track, album.id, new_disc, new_track_no)
+        if holder is not None:
+            # Another track already has this album / disc / track number (two
+            # editions under one album, or a retagged file). Moving this track
+            # there broke uq_tracks_album_disc_track and skipped the file, so
+            # link the file to the track that holds the slot instead, the same
+            # way a new file with that number is linked.
+            log.info(
+                "track slot album=%s disc=%s track=%s is taken; linking %s to the track there",
+                album.id, new_disc, new_track_no, path,
+            )
+            track = holder
+        else:
+            track.album_id = album.id
+            if "title" not in _locked:
+                track.title = ft.title or track.title
+            track.track_number = new_track_no
+            track.disc_number = new_disc
         if ft.credited_as and not track.credited_as:
             track.credited_as = ft.credited_as
     mf = _upsert_file(db, kind=MediaKind.track, ref_id=track.id, path=path, stats=stats, library_id=library_id)
