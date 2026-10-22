@@ -30,3 +30,9 @@ export async function loadLibraries(get: LibrariesFetcher): Promise<LibraryInfo[
     return [];
   }
 }
+
+/** The libraries the Organizer can work on: movies, TV and music, in the order
+ *  the API gave them. */
+export function organizerLibraries(all: LibraryInfo[]): LibraryInfo[] {
+  return all.filter((l) => l.kind === "movies" || l.kind === "tv" || l.kind === "music");
+}

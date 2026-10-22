@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import { apiGet, apiPut, apiPost, apiDelete, ApiError } from "@/lib/client-api";
+import { loadLibraries, organizerLibraries } from "@/lib/libraries";
 import { inputCls, primaryButtonCls, smallButtonCls } from "../admin-ui";
 
 // ---------------------------------------------------------------------------
@@ -86,6 +87,7 @@ const PRESET_NAMES: Record<string, string> = { plex: "Plex", arr: "*arr", flat: 
 // ---------------------------------------------------------------------------
 export default function OrganizerPage() {
   const [libraries, setLibraries] = useState<LibraryOut[]>([]);
+  const [librariesLoaded, setLibrariesLoaded] = useState(false);
   const [selectedId, setSelectedId] = useState<string>("");
   const [settings, setSettings] = useState<OrganizerSettings | null>(null);
   const [preview, setPreview] = useState<TemplatePreviewItem[]>([]);
@@ -108,13 +110,15 @@ export default function OrganizerPage() {
 
   // Load the list of libraries
   useEffect(() => {
-    apiGet<{ libraries: LibraryOut[] }>("/api/library/libraries")
-      .then((r) => {
-        const libs = (r.libraries ?? []).filter(
-          (l) => l.kind === "movies" || l.kind === "tv" || l.kind === "music",
-        );
+    // GET /api/libraries answers a bare array; loadLibraries parses it. The page
+    // used to read `{libraries: [...]}`, which never existed, so it always said
+    // "No music, movies, or TV libraries found."
+    loadLibraries(apiGet)
+      .then((all) => {
+        const libs: LibraryOut[] = organizerLibraries(all);
         setLibraries(libs);
         if (libs.length > 0 && !selectedId) setSelectedId(libs[0].id);
+        setLibrariesLoaded(true);
       })
       .catch((e) => setLoadError(e instanceof Error ? e.message : "Failed to load libraries."));
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -278,7 +282,7 @@ export default function OrganizerPage() {
         <p className="body-2 mb-4 text-hive-text">{loadError}</p>
       )}
 
-      {libraries.length === 0 && !loadError && (
+      {librariesLoaded && libraries.length === 0 && !loadError && (
         <p className="body-2 text-ink-2">No music, movies, or TV libraries found.</p>
       )}
 
