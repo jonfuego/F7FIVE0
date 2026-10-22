@@ -6,7 +6,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  ARR_STALE_MS, buildScanRows, clockTime, scanAllPlan, scanErrors, scansSummary,
+  ARR_STALE_MS, MISSING_FILES_HREF, buildScanRows, clockTime, scanAllPlan, scanErrors, scanRowHref,
+  scansSummary, shownRowFromSearch,
   type ArrApps, type ArrSyncLike, type FolderScanLike, type MusicVideosLike, type PodcastRefreshLike,
   type ScanInputs, type ScanRow,
 } from "./scans-rows.ts";
@@ -515,6 +516,51 @@ test("exactly half counts, under half does not, and an app with no drive has no 
   assert.equal(hintOf(make(10, undefined)), null);
   const plain = row(buildScanRows(inputs({ apps: ALL_APPS, arr: make(10, 4) })), "movies");
   assert.equal(plain.result, "10 movies synced, 10 missing");
-  // Folder rows never carry a hint.
+  // Folder rows with nothing missing carry no hint.
   assert.ok(buildScanRows(inputs()).every((r) => r.hint === null));
+});
+
+
+// -- 1.0.18 review: "needs attention" says what the errors are ---------------
+test("a folder row carries its per-file errors and how many were not listed", () => {
+  const folder: FolderScanLike = {
+    ...idleFolder, finished_at: "2026-10-11T11:51:00Z",
+    libraries: {
+      movies: {
+        state: "done", seen: 2686, added: 0, errors: 2,
+        error_items: [{ path: "\\\\nas\\Movies\\Bad.mkv", reason: "ffprobe could not read the file" }],
+      },
+      music: { state: "done", seen: 160481, added: 0, missing: 202, errors: 50 },
+    },
+  };
+  const rows = buildScanRows(inputs({ folder }));
+  const movies = row(rows, "movies");
+  assert.equal(movies.state, "error");
+  assert.equal(movies.errorItems.length, 1);
+  assert.equal(movies.errorItems[0].reason, "ffprobe could not read the file");
+  assert.equal(movies.errorsUnlisted, 1);
+  const music = row(rows, "music");
+  assert.deepEqual(music.errorItems, []);
+  assert.equal(music.errorsUnlisted, 50, "a status from before the list existed lists none");
+});
+
+test("a row with missing files links to Library health's missing view", () => {
+  const folder: FolderScanLike = {
+    ...idleFolder, finished_at: "2026-10-11T11:51:00Z",
+    libraries: { music: { state: "done", seen: 10, added: 0, missing: 202, errors: 0 } },
+  };
+  const hint = row(buildScanRows(inputs({ folder })), "music").hint;
+  assert.ok(hint);
+  assert.equal(hint.href, MISSING_FILES_HREF);
+  assert.equal(MISSING_FILES_HREF, "/admin/library-health?view=missing");
+  assert.match(hint.text, /202 files are missing/);
+  assert.equal(row(buildScanRows(inputs({ folder })), "movies").hint, null);
+});
+
+test("?show= picks a row to open, anything else picks none", () => {
+  assert.equal(scanRowHref("music"), "/admin/scans?show=music");
+  assert.equal(shownRowFromSearch("?show=music"), "music");
+  assert.equal(shownRowFromSearch("show=movies"), "movies");
+  assert.equal(shownRowFromSearch("?show=nope"), null);
+  assert.equal(shownRowFromSearch(""), null);
 });
