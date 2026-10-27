@@ -22,10 +22,14 @@
         Publisher = ""
     }
     ffmpeg = @{
+        # 8.1.1 is the newest gyan.dev build whose NVENC works on the 580 driver
+        # branch (GeForce 10-series stays there). 8.1.2 and 9.x need driver 610+.
+        # Tested on a GTX 1060, driver 582.28, 2026-10-26. gyan.dev keeps only the
+        # latest patch, so the URL is GyanD's tagged GitHub release of the same build.
         Name      = "FFmpeg (gyan.dev essentials build)"
-        Version   = "9.0.2"
-        Url       = "https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-9.0.2-essentials_build.zip"
-        Sha256    = "60F467265B1E312373DBCD92200C2618A74850F98D3D078E94296BB3FA2047BA"
+        Version   = "8.1.1"
+        Url       = "https://github.com/GyanD/codexffmpeg/releases/download/8.1.1/ffmpeg-8.1.1-essentials_build.zip"
+        Sha256    = "6F58CE889F59C311410F7D2B18895B33C03456463486F3B1EBC93D97A0F54541"
         Publisher = ""
     }
     cloudflared = @{
