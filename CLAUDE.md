@@ -86,6 +86,21 @@ INSTALL.md for the operator view.
   Radarr, Sonarr or Lidarr before the first probe, never probes or stores a path
   outside the roots, and counts it in `SyncStats.files_refused`.
 - HLS playlists are rewritten so every URI carries the signed query.
+- NVENC is on only when it works. `NVENC_ENABLED=true` means an NVIDIA card,
+  not a working encoder: the pinned ffmpeg needs a driver new enough for its
+  NVENC SDK (ffmpeg 9.x wants 610+, and GeForce 10-series cards stay on the 580
+  branch), and a refused encoder made every transcode exit -40 on 1.0.18 (the
+  variant playlist answered 500, so AC3/DTS movies never played). Every NVENC
+  decision reads `services/nvenc_check.py::nvenc_usable()` (one test encode per
+  process through hwupload_cuda + scale_cuda + h264_nvenc, cached, one warning
+  with ffmpeg's lines on a failure, then libx264 and one rung); never read
+  `settings.nvenc_enabled` for that. The stream gateway runs the check at
+  startup; a driver change is seen after a service restart. Tests: conftest
+  stubs the probe to pass; `tests/services/test_nvenc_check.py` covers the
+  failure. Setup writes `NVENC_ENABLED=true` only after the same encode passes
+  (`Test-NvencEncode` in `common.ps1`; keep its argv in step with
+  `nvenc_check.probe_args`), and `bin\ffmpeg.version` records the pinned ffmpeg
+  so a new pin replaces the old binaries on the next Setup or update.
 - Cast stream identity. A Cast receiver gets its own stream, never the sender's.
   `POST /api/stream/start` with `purpose: "cast"` adds a `c` part to the
   track-options token (`services/track_opts.py`, grammar `a<N>-s<N>-q<H>-c`), only
@@ -888,6 +903,25 @@ on a clean Windows VM before tagging a release. Self-update (Admin > Updates)
 is only proven by a real update on a VM: the tests use a stub Setup.
 
 ## Session log
+
+- 2026-10-26 (Cowork, movies not playing and phone "The" sort, branches
+  `fix/nvenc-driver-floor` and `fix/mobile-article-sort` from `main` `16e8a73`):
+  on Jon's PC every movie with AC3 audio did nothing on Play (web and phone);
+  episodes with AAC direct-played, so only movies looked broken. The variant
+  playlist answered 500 `transcode_failed_rc_4294967256` (-40); the Stream log
+  said "Driver does not support the required nvenc API version. Required: 13.1
+  Found: 13.0 ... minimum required Nvidia driver for nvenc is 610.00". GTX 1060,
+  driver 582.28, the pinned ffmpeg 9.0.2. Jon set `NVENC_ENABLED=false` and
+  restarted F7FIVE0-Stream; movies play (checked in the browser pane). Fixes:
+  the runtime NVENC check and the Setup test encode (see the NVENC rule), and
+  the phone's Title sort now drops a leading the/a/an and uses `sort_title`
+  (movie and series lists now carry it). Checks in the cloud sandbox (Linux,
+  Python 3.13): pytest 1428 passed (15 skipped; one run hit the known organizer
+  flake), mobile typecheck clean, jest 479. Not done: the ffmpeg re-pin to an 8.x
+  build (needs the real file's hash; gyan.dev was not reachable from the
+  sandbox), the installer parse check and `download-verify.ps1` / `update-verify.ps1`
+  under Windows PowerShell 5.1, and running the probe on the GTX 1060 with
+  both ffmpeg builds. The unmerged `fix/review-1.0.18` branch is separate.
 
 - 2026-10-20 (Code, 1.0.18 migration fix, branch `fix/migration-pg-uuid`): the
   FuegoTest VM update from 1.0.9 to 1.0.17 stopped at `alembic upgrade`: 0030's
