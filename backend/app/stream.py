@@ -42,7 +42,7 @@ from app.db import SessionLocal
 from app.models.media_file import MediaFile, ScanState
 from app.models.podcast import PodcastEpisode
 from app.models.transcode import TranscodeSession
-from app.services import library_access, media_paths, nas_auth, net_guard, transcode_cache, transcoder
+from app.services import library_access, media_paths, nas_auth, net_guard, nvenc_check, transcode_cache, transcoder
 from app.services.podcasts import media_types
 from app.services.playback import (
     VARIANT_LADDER,
@@ -127,6 +127,12 @@ async def lifespan(app: FastAPI):
         log.warning("library seed at stream startup raised", exc_info=True)
     _close_orphaned_sessions()
     transcoder.manager.start_janitor()
+    # Run the NVENC test encode now, off the event loop, so the first play
+    # does not wait for it and the log says at boot whether NVENC works.
+    import threading
+    threading.Thread(
+        target=nvenc_check.nvenc_usable, name="nvenc-check", daemon=True,
+    ).start()
 
     sched = BackgroundScheduler(timezone="UTC")
     sched.add_job(
@@ -288,7 +294,7 @@ def _variants_for(mf: MediaFile, o: str):
     variants = pick_variants(mf)
     parsed = parse_token(o)
     max_h = parsed.max_height
-    if not settings.nvenc_enabled:
+    if not nvenc_check.nvenc_usable():
         return single_rung_for_cpu(variants, max_h)
     if max_h:
         capped = tuple(v for v in variants if v.height <= max_h)

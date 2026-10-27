@@ -35,6 +35,7 @@ from typing import Optional
 from app.config import settings
 from app.db import db_session
 from app.models.transcode import TranscodeSession
+from app.services import nvenc_check
 from app.services.playback import VARIANT_LADDER, Variant
 from app.services.track_opts import TrackOpts, parse_token
 
@@ -621,7 +622,7 @@ class TranscodeManager:
         # (bucket + N*6) or plain `offset_bucket` for a cold start.
         seek = seek_offset_sec if seek_offset_sec is not None else offset_bucket
         args = _build_ffmpeg_args(
-            source_path, variant, out_dir, settings.nvenc_enabled,
+            source_path, variant, out_dir, nvenc_check.nvenc_usable(),
             offset_bucket=seek,
             start_number=start_number,
             playlist_name=playlist_name,
@@ -804,7 +805,7 @@ def _read_progress(proc: subprocess.Popen, job: "TranscodeJob") -> None:
 
 
 def _is_nvenc(job: "TranscodeJob") -> bool:
-    return bool(getattr(settings, "nvenc_enabled", False))
+    return nvenc_check.nvenc_usable()
 
 
 def _persist_speed(row_id: Optional[uuid.UUID], speed: float, below_sec: int) -> None:
@@ -899,7 +900,7 @@ def build_download_transcode_args(source: Path, dest: Path, quality: str) -> lis
         "-y",
         "-i", str(source),
     ]
-    if settings.nvenc_enabled:
+    if nvenc_check.nvenc_usable():
         args += ["-c:v", "h264_nvenc", "-preset", "p4", "-rc", "vbr", "-cq", "23"]
         if height > 0:
             args += ["-vf", f"scale=-2:{height}"]

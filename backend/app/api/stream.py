@@ -27,7 +27,7 @@ from app.models.movie import Movie
 from app.models.music import Album, Artist, MusicVideo, Track
 from app.models.tv import Episode
 from app.models.user import User
-from app.services import library_access, media_paths, media_streams, playback
+from app.services import library_access, media_paths, media_streams, nvenc_check, playback
 from app.services.art import resolve_art
 from app.services.security import build_signed_art_url, sign_stream_url_params
 from app.services.track_opts import parse_token, resolve_track_opts
@@ -263,7 +263,7 @@ def stream_start(
             quality=body.quality,
             source_height=mf.height,
             streams=streams,
-            keep_source_height=not settings.nvenc_enabled,
+            keep_source_height=not nvenc_check.nvenc_usable(),
         )
         opts_token = opts.to_token()
         # A quality pick at or above the source height is not a cap. On a
