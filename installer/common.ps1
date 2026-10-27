@@ -71,6 +71,47 @@ function Get-DownloadSpec([string]$key) {
 # $publisher is given, the file must also carry a Valid Authenticode signature
 # whose subject contains that string (used for signed exe/msi; leave blank for
 # zips and unsigned binaries, which the SHA-256 already pins).
+# One tiny encode through the same path a transcode uses (CUDA upload,
+# scale_cuda, h264_nvenc). True only when ffmpeg exits 0 within 20 s. The
+# last ffmpeg lines go to the install log on a failure. Mirrors
+# backend/app/services/nvenc_check.py::probe_args; keep the two in step.
+function Test-NvencEncode([string]$ffmpegExe) {
+    if (-not (Test-Path $ffmpegExe)) { return $false }
+    $errFile = Join-Path $env:TEMP "f7five0-nvenc-test.err.txt"
+    $outFile = Join-Path $env:TEMP "f7five0-nvenc-test.out.txt"
+    $argList = @(
+        "-hide_banner", "-loglevel", "error",
+        "-f", "lavfi", "-i", "color=c=black:s=320x240:r=25:d=0.4",
+        "-vf", "format=nv12,hwupload_cuda,scale_cuda=-2:240",
+        "-c:v", "h264_nvenc", "-frames:v", "5",
+        "-f", "null", "-"
+    )
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $p = Start-Process -FilePath $ffmpegExe -ArgumentList $argList -NoNewWindow -PassThru `
+            -RedirectStandardError $errFile -RedirectStandardOutput $outFile
+        $null = $p.Handle  # keeps ExitCode readable after WaitForExit(timeout)
+        if (-not $p.WaitForExit(20000)) {
+            try { $p.Kill() } catch { }
+            Info "NVENC test encode did not finish in 20 s"
+            return $false
+        }
+        if ($p.ExitCode -eq 0) { return $true }
+        Info "NVENC test encode exit code $($p.ExitCode)"
+        if (Test-Path $errFile) {
+            foreach ($l in @(Get-Content $errFile | Select-Object -Last 6)) { Info "ffmpeg: $l" }
+        }
+        return $false
+    } catch {
+        Info "NVENC test encode could not run: $($_.Exception.Message)"
+        return $false
+    } finally {
+        $ErrorActionPreference = $prev
+        Remove-Item -Force -ErrorAction SilentlyContinue $errFile, $outFile
+    }
+}
+
 function Download([string]$url, [string]$dest, [string]$expectedSha256, [string]$publisher = "") {
     if ([string]::IsNullOrWhiteSpace($expectedSha256)) {
         Fail "refusing to download $url without an expected SHA-256 (SEC-P0-2)."

@@ -333,7 +333,7 @@ $os = Get-CimInstance Win32_OperatingSystem
 Info "$($os.Caption) ($($os.Version))"
 $gpu = @(Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue | Where-Object { $_.Name -match "NVIDIA" })
 $HasNvidia = $gpu.Count -gt 0
-if ($HasNvidia) { Ok "NVIDIA GPU found ($($gpu[0].Name)): hardware transcoding on." }
+if ($HasNvidia) { Ok "NVIDIA GPU found ($($gpu[0].Name)): hardware transcoding is tested once ffmpeg is in place." }
 else { Info "No NVIDIA GPU found: software transcoding (works fine for a few streams)." }
 
 # ---------------------------------------------------------------------------
@@ -453,7 +453,16 @@ Ok "Node.js: $Node"
 # ffmpeg + ffprobe into bin\.
 $Ffmpeg = Join-Path $BinDir "ffmpeg.exe"
 $Ffprobe = Join-Path $BinDir "ffprobe.exe"
-if (-not ((Test-Path $Ffmpeg) -and (Test-Path $Ffprobe))) {
+# bin\ffmpeg.version holds the pinned version that was copied in. An upgrade
+# that pins a different ffmpeg replaces the old binaries (before 1.0.19 an
+# existing ffmpeg.exe was kept forever).
+$FfmpegVersionFile = Join-Path $BinDir "ffmpeg.version"
+$haveFfmpegVersion = ""
+if (Test-Path $FfmpegVersionFile) { $haveFfmpegVersion = "$(Get-Content $FfmpegVersionFile -Raw)".Trim() }
+if (-not ((Test-Path $Ffmpeg) -and (Test-Path $Ffprobe)) -or $haveFfmpegVersion -ne $FfmpegSpec.Version) {
+    if ($haveFfmpegVersion -ne $FfmpegSpec.Version -and (Test-Path $Ffmpeg)) {
+        Info "replacing ffmpeg $(if ($haveFfmpegVersion) { $haveFfmpegVersion } else { '(unknown version)' }) with the pinned $($FfmpegSpec.Version)"
+    }
     $zip = Join-Path $env:TEMP "f7five0-ffmpeg.zip"
     Download $FfmpegSpec.Url $zip $FfmpegSpec.Sha256 $FfmpegSpec.Publisher
     $unz = Join-Path $env:TEMP "f7five0-ffmpeg"
@@ -463,8 +472,22 @@ if (-not ((Test-Path $Ffmpeg) -and (Test-Path $Ffprobe))) {
     Copy-Item $bin.FullName $Ffmpeg -Force
     Copy-Item (Join-Path $bin.DirectoryName "ffprobe.exe") $Ffprobe -Force
     Remove-Item -Recurse -Force $unz, $zip
+    Set-Content -Path $FfmpegVersionFile -Value $FfmpegSpec.Version -Encoding ASCII
 }
 Ok "ffmpeg: $Ffmpeg"
+
+# NVENC: an NVIDIA card is not enough. The pinned ffmpeg needs a driver new
+# enough for its NVENC SDK (ffmpeg 9.x wants driver 610+, which GeForce
+# 10-series cards never get), so run one tiny encode through the transcode
+# path and turn NVENC on only when it works. The services test it again at
+# start (backend/app/services/nvenc_check.py), so an upgrade that keeps
+# NVENC_ENABLED=true still falls back to the CPU on its own.
+$NvencOk = $false
+if ($HasNvidia) {
+    $NvencOk = Test-NvencEncode $Ffmpeg
+    if ($NvencOk) { Ok "NVENC test encode worked: hardware transcoding on." }
+    else { Warn "NVENC test encode failed (often the NVIDIA driver is older than this ffmpeg needs): software transcoding. Details in the install log." }
+}
 
 # NSSM into bin\.
 $Nssm = Join-Path $BinDir "nssm.exe"
@@ -776,7 +799,7 @@ $want = [ordered]@{
     "STREAM_HMAC_SECRET"      = New-Secret 64
     "FFMPEG_BIN"              = $Ffmpeg
     "FFPROBE_BIN"             = $Ffprobe
-    "NVENC_ENABLED"           = if ($HasNvidia) { "true" } else { "false" }
+    "NVENC_ENABLED"           = if ($NvencOk) { "true" } else { "false" }
     "TRANSCODE_CACHE_DIR"     = Join-Path $DataDir "transcode-cache"
     "ART_ROOT"                = Join-Path $DataDir "art"
     "METADATA_CACHE_ROOT"     = Join-Path $DataDir "metadata-cache"
