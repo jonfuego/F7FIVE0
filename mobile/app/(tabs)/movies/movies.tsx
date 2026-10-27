@@ -11,7 +11,7 @@ import { ChipBar } from "@/ui/ChipBar";
 import { LibraryScreen, libraryBody } from "@/ui/LibraryScreen";
 import { PosterCard } from "@/ui/PosterCard";
 import type { FilterOption, SortOption } from "@/ui/sortFilter";
-import { toggleDir } from "@/ui/sortFilter";
+import { titleSortKey, toggleDir } from "@/ui/sortFilter";
 import { SortFilterBar } from "@/ui/SortFilterBar";
 import { useAlphaRail } from "@/ui/useAlphaRail";
 import { useGrid } from "@/ui/useGrid";
@@ -19,7 +19,7 @@ import { useViewPref } from "@/state/viewPrefs";
 import { isSortFilterState, sortFilterInitial, useSortFilter } from "@/ui/useSortFilter";
 
 const MOVIE_SORTS: SortOption<Movie>[] = [
-  { key: "title", label: "Title", value: (m) => m.title },
+  { key: "title", label: "Title", value: (m) => titleSortKey(m.title, m.sort_title) },
   { key: "year", label: "Year", value: (m) => m.year ?? null },
   { key: "runtime", label: "Runtime", value: (m) => m.runtime_min ?? null },
   { key: "added", label: "Date added", value: (m) => m.created_at ?? null },

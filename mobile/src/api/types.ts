@@ -82,6 +82,8 @@ export interface Movie {
   tmdb_rating?: number | null;
   /** When the movie entered the library ("Date added" sort). */
   created_at?: string | null;
+  /** Admin sort override; null for most rows. */
+  sort_title?: string | null;
   // The API returns cast/crew as objects ({name, character, ...}); older/other
   // shapes may send plain strings, so accept both and normalize in the UI.
   cast?: (CastMember | string)[] | null;
@@ -128,6 +130,8 @@ export interface Series {
   poster_path?: string | null;
   /** When the show entered the library ("Date added" sort). */
   created_at?: string | null;
+  /** Admin sort override; null for most rows. */
+  sort_title?: string | null;
 }
 
 export interface MusicVideo {

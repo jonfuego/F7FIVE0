@@ -9,14 +9,14 @@ import { RefreshableGrid } from "@/ui/RefreshableGrid";
 import { LibraryScreen, libraryBody } from "@/ui/LibraryScreen";
 import { useGrid } from "@/ui/useGrid";
 import type { FilterOption, SortOption } from "@/ui/sortFilter";
-import { toggleDir } from "@/ui/sortFilter";
+import { titleSortKey, toggleDir } from "@/ui/sortFilter";
 import { SortFilterBar } from "@/ui/SortFilterBar";
 import { Tile } from "@/ui/Tile";
 import { useViewPref } from "@/state/viewPrefs";
 import { isSortFilterState, sortFilterInitial, useSortFilter } from "@/ui/useSortFilter";
 
 const MV_SORTS: SortOption<MusicVideoArtist>[] = [
-  { key: "name", label: "Name", value: (a) => a.name },
+  { key: "name", label: "Name", value: (a) => titleSortKey(a.name) },
   { key: "videos", label: "Videos", value: (a) => a.video_count },
 ];
 

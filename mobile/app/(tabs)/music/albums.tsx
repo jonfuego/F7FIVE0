@@ -13,7 +13,7 @@ import { RefreshableGrid } from "@/ui/RefreshableGrid";
 import { LibraryScreen, libraryBody } from "@/ui/LibraryScreen";
 import { PosterCard } from "@/ui/PosterCard";
 import type { FilterOption, SortOption } from "@/ui/sortFilter";
-import { toggleDir } from "@/ui/sortFilter";
+import { titleSortKey, toggleDir } from "@/ui/sortFilter";
 import { SortFilterBar } from "@/ui/SortFilterBar";
 import { useAlphaRail } from "@/ui/useAlphaRail";
 import { useGrid } from "@/ui/useGrid";
@@ -21,7 +21,7 @@ import { useViewPref } from "@/state/viewPrefs";
 import { isSortFilterState, sortFilterInitial, useSortFilter } from "@/ui/useSortFilter";
 
 const ALBUM_SORTS: SortOption<Album>[] = [
-  { key: "title", label: "Title", value: (a) => a.title },
+  { key: "title", label: "Title", value: (a) => titleSortKey(a.title) },
   { key: "artist", label: "Artist", value: (a) => a.artist_name ?? "" },
   { key: "released", label: "Released", value: (a) => a.release_date ?? "" },
   { key: "added", label: "Date added", value: (a) => a.created_at ?? null },

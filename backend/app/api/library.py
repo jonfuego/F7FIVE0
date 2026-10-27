@@ -254,6 +254,7 @@ def list_movies(
                 "id", "overview", "tmdb_id", "imdb_id", "radarr_id",
                 "genres", "tmdb_vote_count",
                 "metadata_synced_at", "metadata_status", "created_at",
+                "sort_title",
             )},
             **_movie_merged_fields(m),
             "poster_path": posters.get(m.id),
@@ -366,6 +367,7 @@ def list_series(
         SeriesOut.model_validate({
             **{k: getattr(s, k) for k in (
                 "id", "overview", "tvdb_id", "tmdb_id", "sonarr_id", "created_at",
+                "sort_title",
             )},
             **_series_merged_fields(s),
             "poster_path": posters.get(s.id),

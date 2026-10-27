@@ -183,6 +183,11 @@ class MovieOut(BaseModel):
     metadata_status: Optional[str] = None
     # When the row entered the library (sort key "Date added" in the app).
     created_at: Optional[datetime] = None
+    # Manual sort override. Null on the vast majority of rows; admins
+    # set this from the detail-page editor when the algorithmic
+    # article-strip doesn't produce the desired ordering. On the list
+    # too, so the phone app's on-device Title sort matches the server.
+    sort_title: Optional[str] = None
 
 
 class MovieDetailOut(MovieOut):
@@ -191,10 +196,6 @@ class MovieDetailOut(MovieOut):
 
     cast: list[dict] = Field(default_factory=list)
     directors: list[dict] = Field(default_factory=list)
-    # Manual sort override. Null on the vast majority of rows; admins
-    # set this from the detail-page editor when the algorithmic
-    # article-strip doesn't produce the desired ordering.
-    sort_title: Optional[str] = None
 
 
 class EpisodeOut(BaseModel):
@@ -225,12 +226,12 @@ class SeriesOut(BaseModel):
     sonarr_id: Optional[int] = None
     # When the row entered the library (sort key "Date added" in the app).
     created_at: Optional[datetime] = None
+    # Manual sort override; see MovieOut.sort_title.
+    sort_title: Optional[str] = None
 
 
 class SeriesDetailOut(SeriesOut):
     episodes: list[EpisodeOut] = Field(default_factory=list)
-    # Manual sort override; see MovieDetailOut.sort_title.
-    sort_title: Optional[str] = None
 
 
 class TrackOut(BaseModel):
