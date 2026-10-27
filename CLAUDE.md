@@ -783,6 +783,12 @@ INSTALL.md for the operator view.
   `lib/view-prefs.ts`); the app uses `useViewPref` from
   `mobile/src/state/viewPrefs.ts`. Don't keep view state only in
   localStorage or AsyncStorage; the app's AsyncStorage copy is a cache.
+- Title sort matches the server everywhere. The server orders by
+  `_sort_expr` (the sort override, else the title, lowercased, one leading
+  "the ", "a " or "an " dropped). The phone sorts its lists on the device, so
+  every Title or Name sort option uses `ui/sortFilter.ts::titleSortKey`, and the
+  movie and series lists carry `sort_title` for it. Before this, the phone filed
+  every "The ..." title under T.
 - Poster wall on return (web): the Movies page used to throw its list away on
   unmount, so every return showed placeholders until `/api/library/movies` came
   back (about half the time to the first 20 posters), then rendered the tiles;
