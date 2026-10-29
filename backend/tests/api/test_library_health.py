@@ -100,6 +100,24 @@ def test_health_unreachable_folders(client, db_session):
     assert r.json()["unreachable_folders"] == 1
 
 
+def test_health_unmatched_and_missing_art_per_kind(client, db_session):
+    """The Library health page draws these maps (L-05); pin their shape."""
+    _movie(db_session, "No ids, no poster")
+    db_session.add(Movie(title="Matched", tmdb_id=603))
+    db_session.add(Artist(name="Unmatched artist"))
+    db_session.commit()
+
+    with _fake_folders([]):
+        body = client.get("/api/admin/library/health").json()
+    assert set(body["unmatched"]) == {"movie", "series", "artist", "album"}
+    assert set(body["missing_art"]) == {"movie", "series", "artist", "album"}
+    assert body["unmatched"]["movie"] == 1
+    assert body["unmatched"]["artist"] == 1
+    assert body["unmatched"]["series"] == 0
+    assert body["missing_art"]["movie"] == 2
+    assert body["missing_art"]["artist"] == 1
+
+
 # ---------------------------------------------------------------------------
 # GET /api/admin/library/health/missing-files
 # ---------------------------------------------------------------------------
