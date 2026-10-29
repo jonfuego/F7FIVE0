@@ -106,9 +106,22 @@ var
   TmdbLink: TNewStaticText;
   InstallFailed: Boolean;
 
+// An upgrade is a COMPLETED install, not just an .env: install.ps1 writes .env
+// partway through a first install, before the admin account, so a rerun after
+// a first install that stopped must show the admin page again. Same test as
+// Test-CompletedInstall in common.ps1: .env plus data\install-complete.json
+// (written at the end of every successful install.ps1 run), or, for installs
+// made before that marker, the F7FIVE0-API service (install.ps1 registers it
+// only after the admin account). PrepareToInstall stops the service but never
+// removes it, so the answer is the same at ssPostInstall.
 function IsUpgrade: Boolean;
+var
+  Dir: String;
 begin
-  Result := FileExists(AddBackslash(WizardDirValue) + '.env');
+  Dir := AddBackslash(WizardDirValue);
+  Result := FileExists(Dir + '.env') and
+    (FileExists(Dir + 'data\install-complete.json') or
+     RegKeyExists(HKEY_LOCAL_MACHINE, 'SYSTEM\CurrentControlSet\Services\F7FIVE0-API'));
 end;
 
 // Is there a <Root>\<version>\bin\psql.exe? (Root is Program Files\PostgreSQL.)

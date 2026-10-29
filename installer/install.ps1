@@ -277,7 +277,10 @@ $EnvFile    = Join-Path $InstallDir ".env"
 $BackendDir = Join-Path $InstallDir "backend"
 $WebDir     = Join-Path $InstallDir "web"
 $VenvPy     = Join-Path $BackendDir ".venv\Scripts\python.exe"
-$IsUpgrade  = Test-Path $EnvFile
+# An upgrade is a COMPLETED install, not just an .env: a first install that
+# stopped partway already wrote .env, and its rerun must still create the admin
+# account (Test-CompletedInstall in common.ps1; F7FIVE0.iss IsUpgrade matches).
+$IsUpgrade  = Test-CompletedInstall $InstallDir ([bool](Get-Service -Name "F7FIVE0-API" -ErrorAction SilentlyContinue))
 
 foreach ($d in @($InstallDir, $BinDir, $RuntimeDir, $DataDir, $LogsDir)) {
     if (-not (Test-Path $d)) { New-Item -ItemType Directory -Path $d | Out-Null }
@@ -741,7 +744,12 @@ if (-not $IsUpgrade) {
             return ("$out").Trim()
         } finally { $ErrorActionPreference = $prev }
     }
-    $DbPassword = New-Secret 24
+    # A rerun after a first install that stopped once .env was written: keep
+    # the database password .env already has (Merge-EnvFile never replaces
+    # DATABASE_URL), or the role would get a password .env does not know.
+    $DbPassword = Get-DbUrlPassword (Get-EnvValue "DATABASE_URL") $DbUser
+    if ($DbPassword) { Info "reusing the database password already in .env" }
+    else { $DbPassword = New-Secret 24 }
     $ready = $false
     $lastErr = ""
     for ($i = 0; $i -lt 30; $i++) {
@@ -751,7 +759,7 @@ if (-not $IsUpgrade) {
     }
     if (-not $ready) { Fail "Could not sign in to PostgreSQL as 'postgres' on 127.0.0.1:5432 ($lastErr). Check the password and that the PostgreSQL service is running. If Setup reused the password saved in postgres-superuser.txt ($saved) and PostgreSQL has a different one, correct or delete that file and run Setup again; see INSTALL.md, 'Already have PostgreSQL?'." }
     $verb = if ((Psql "SELECT 1 FROM pg_roles WHERE rolname='$DbUser'") -eq "1") { "ALTER" } else { "CREATE" }
-    $r = Psql "$verb ROLE $DbUser WITH LOGIN PASSWORD '$DbPassword';"
+    $r = Psql ("$verb ROLE $DbUser WITH LOGIN PASSWORD '" + $DbPassword.Replace("'", "''") + "';")
     if ($script:PsqlExit -ne 0) { Fail "Could not create the database role: $r" }
     if ((Psql "SELECT 1 FROM pg_database WHERE datname='$DbName'") -ne "1") {
         $r = Psql "CREATE DATABASE $DbName OWNER $DbUser ENCODING 'UTF8' TEMPLATE template0;"
@@ -1264,6 +1272,9 @@ $summaryFile = Join-Path $LogsDir "setup-summary.txt"
 try { [IO.File]::WriteAllLines($summaryFile, $summary, (New-Object Text.UTF8Encoding($false))) } catch { }
 # Let Users read Setup's own summary without elevation. Service logs stay private.
 Grant-SetupLogRead $summaryFile
+# Last: this install is complete, so the next Setup is an upgrade (see
+# Test-CompletedInstall). A run that stopped before here never writes it.
+try { Write-InstallComplete $InstallDir $VersionNow } catch { Warn "could not write $InstallCompleteMarker ($($_.Exception.Message)); the next Setup still sees the services and upgrades" }
 } catch {
     Write-Host ""
     Write-Host $_.Exception.Message -ForegroundColor Red
