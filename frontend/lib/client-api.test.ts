@@ -8,7 +8,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ApiError, apiGet, refreshSession } from "./client-api.ts";
+import { ApiError, apiDelete, apiGet, apiPost, refreshSession } from "./client-api.ts";
 
 // Minimal Response-returning fetch stub. The data paths 401 once, then 200
 // after the shared refresh; the refresh path counts its calls and stalls
@@ -194,5 +194,86 @@ test("apiGet: a 401 from refresh redirects to /login", async () => {
   } finally {
     g.window = origWindow;
     stub.restore();
+  }
+});
+
+// The art dialog (components/ArtOverrideModal.tsx) used plain fetch(), so an
+// expired access token showed a raw "token_expired". Its calls now go through
+// apiPost / apiDelete; these cover the multipart upload and the delete.
+test("a FormData upload is sent untouched and resent after one refresh", async () => {
+  const origFetch = globalThis.fetch;
+  const calls: { url: string; body: unknown; ct: string | undefined }[] = [];
+  let refreshCalls = 0;
+  globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
+    const url = String(input);
+    if (url === "/api/session/refresh") {
+      refreshCalls += 1;
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    }
+    const headers = (init?.headers ?? {}) as Record<string, string>;
+    calls.push({ url, body: init?.body, ct: headers["content-type"] });
+    if (calls.length === 1) {
+      return new Response(JSON.stringify({ detail: "token_expired" }), { status: 401 });
+    }
+    return new Response(JSON.stringify({ role: "thumb" }), { status: 200 });
+  }) as typeof fetch;
+  try {
+    const form = new FormData();
+    form.append("file", new Blob([new Uint8Array([1, 2, 3])], { type: "image/png" }), "a.png");
+    const out = await apiPost<{ role: string }>("/api/admin/art/artist/x/thumb", form);
+    assert.equal(out.role, "thumb");
+    assert.equal(refreshCalls, 1);
+    assert.equal(calls.length, 2);
+    for (const c of calls) {
+      // Same FormData object both times, no JSON content-type, so the browser
+      // writes the multipart boundary itself.
+      assert.equal(c.body, form);
+      assert.equal(c.ct, undefined);
+    }
+  } finally {
+    globalThis.fetch = origFetch;
+  }
+});
+
+test("a JSON body still goes out as JSON", async () => {
+  const origFetch = globalThis.fetch;
+  let seen: { body: unknown; ct: string | undefined } | null = null;
+  globalThis.fetch = (async (_input: unknown, init?: RequestInit) => {
+    const headers = (init?.headers ?? {}) as Record<string, string>;
+    seen = { body: init?.body, ct: headers["content-type"] };
+    return new Response(JSON.stringify({ ok: true }), { status: 200 });
+  }) as typeof fetch;
+  try {
+    await apiPost("/api/admin/art/artist/x/thumb/from-url", { url: "https://e.test/a.jpg" });
+    assert.deepEqual(seen, {
+      body: JSON.stringify({ url: "https://e.test/a.jpg" }),
+      ct: "application/json",
+    });
+  } finally {
+    globalThis.fetch = origFetch;
+  }
+});
+
+test("apiDelete refreshes on token_expired and resolves on 204", async () => {
+  const origFetch = globalThis.fetch;
+  let hits = 0;
+  let refreshCalls = 0;
+  globalThis.fetch = (async (input: unknown) => {
+    if (String(input) === "/api/session/refresh") {
+      refreshCalls += 1;
+      return new Response(null, { status: 200 });
+    }
+    hits += 1;
+    if (hits === 1) {
+      return new Response(JSON.stringify({ detail: "token_expired" }), { status: 401 });
+    }
+    return new Response(null, { status: 204 });
+  }) as typeof fetch;
+  try {
+    assert.equal(await apiDelete("/api/admin/art/artist/x/thumb"), undefined);
+    assert.equal(refreshCalls, 1);
+    assert.equal(hits, 2);
+  } finally {
+    globalThis.fetch = origFetch;
   }
 });

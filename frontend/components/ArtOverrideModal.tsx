@@ -10,6 +10,11 @@
 // On success the modal calls `onApplied()` and the parent re-fetches
 // so the cache-busted image replaces the old one.
 //
+// Every call goes through lib/client-api, so an expired access token is
+// refreshed once (shared with the rest of the page) and the call retried,
+// instead of the dialog showing a raw token_expired. The upload passes its
+// FormData through apiPost untouched; the BFF streams it on to the API.
+//
 // Admin-gated: parents must only mount this when the current user is
 // an admin. We don't re-check here to avoid a second /me round trip.
 
@@ -20,6 +25,8 @@ import { Icon } from "@/components/Icon";
 import { X } from "lucide-react";
 import { SourceCallouts, SourceTag } from "@/components/SourceTag";
 import { candidateTileSrc, type ArtCandidate } from "@/lib/art-candidate";
+import { ApiError, apiDelete, apiGet, apiPost } from "@/lib/client-api";
+import { errorText } from "@/lib/error-detail";
 
 export type ArtKind = "artist" | "movie" | "series" | "music_video" | "mix";
 export type ArtRole = "thumb" | "poster" | "backdrop" | "cover";
@@ -116,24 +123,16 @@ export function ArtOverrideModal({
       setSearchLoading(true);
       setSearchError(null);
       try {
-        const res = await fetch(
+        const body = await apiGet<ArtSearchResponse>(
           `/api/admin/art/search?kind=${encodeURIComponent(entityKind)}&id=${encodeURIComponent(entityId)}`,
-          { cache: "no-store" },
         );
-        if (cancelled) return;
-        if (!res.ok) {
-          setSearchError(await extractError(res));
-          setCandidates([]);
-          return;
-        }
-        const body = (await res.json()) as ArtSearchResponse;
         if (!cancelled) {
           setCandidates(Array.isArray(body.candidates) ? body.candidates : []);
           setSearchNotes(Array.isArray(body.notes) ? body.notes : []);
         }
       } catch (err) {
         if (!cancelled) {
-          setSearchError(err instanceof Error ? err.message : "Search failed.");
+          setSearchError(errorText(err, "Search failed."));
           setCandidates([]);
         }
       } finally {
@@ -156,15 +155,11 @@ export function ArtOverrideModal({
     try {
       const body = new FormData();
       body.append("file", file);
-      const res = await fetch(basePath, { method: "POST", body });
-      if (!res.ok) {
-        setError(await extractError(res));
-        return;
-      }
+      await apiPost(basePath, body);
       onApplied();
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Upload failed.");
+      setError(errorText(err, "Upload failed."));
     } finally {
       setBusy(false);
     }
@@ -179,19 +174,11 @@ export function ArtOverrideModal({
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch(`${basePath}/from-url`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ url: trimmed }),
-      });
-      if (!res.ok) {
-        setError(await extractError(res));
-        return;
-      }
+      await apiPost(`${basePath}/from-url`, { url: trimmed });
       onApplied();
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Fetch failed.");
+      setError(errorText(err, "Fetch failed."));
     } finally {
       setBusy(false);
     }
@@ -202,22 +189,14 @@ export function ArtOverrideModal({
       setBusy(true);
       setError(null);
       try {
-        const res = await fetch(`${basePath}/from-search`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            source: candidate.source,
-            ref: candidate.ref,
-          }),
+        await apiPost(`${basePath}/from-search`, {
+          source: candidate.source,
+          ref: candidate.ref,
         });
-        if (!res.ok) {
-          setError(await extractError(res));
-          return;
-        }
         onApplied();
         onClose();
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Apply failed.");
+        setError(errorText(err, "Apply failed."));
       } finally {
         setBusy(false);
       }
@@ -229,15 +208,16 @@ export function ArtOverrideModal({
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch(basePath, { method: "DELETE" });
-      if (!res.ok && res.status !== 404) {
-        setError(await extractError(res));
-        return;
+      try {
+        await apiDelete(basePath);
+      } catch (err) {
+        // 404: already cleared, which is what the admin asked for.
+        if (!(err instanceof ApiError && err.status === 404)) throw err;
       }
       onApplied();
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Remove failed.");
+      setError(errorText(err, "Remove failed."));
     } finally {
       setBusy(false);
     }
@@ -508,17 +488,4 @@ function TabButton({
       {children}
     </button>
   );
-}
-
-async function extractError(res: Response): Promise<string> {
-  try {
-    const body = await res.json();
-    if (body && typeof body === "object" && "detail" in body) {
-      const detail = (body as { detail?: unknown }).detail;
-      if (typeof detail === "string") return detail;
-    }
-  } catch {
-    // fall through
-  }
-  return `HTTP ${res.status}`;
 }
