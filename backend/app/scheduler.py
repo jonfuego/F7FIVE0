@@ -216,6 +216,16 @@ def _scan_folders(only: Optional[list] = None) -> bool:
         if only is None:
             has_music_videos = bool(library_folders.folders(db, "music_videos"))
         db.commit()
+        # Fold same-library twin movies (older scans made one per folder) into one
+        # movie with several versions. Never merges across libraries.
+        try:
+            from app.services import movie_versions
+            merged = movie_versions.merge_twins(db)
+            if merged:
+                log.info("merged %d twin movies into versions", merged)
+        except Exception:
+            log.exception("movie twins merge raised")
+            db.rollback()
         # Everything is saved: re-queue enrichment for rows that missed it.
         try:
             scan_library.schedule_catch_up(db)

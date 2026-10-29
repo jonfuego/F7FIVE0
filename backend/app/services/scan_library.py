@@ -35,9 +35,12 @@ watch history survives a drive that is briefly offline. A folder that can't
 be opened at all is skipped for that pass and its files are left as they are.
 
 Several folders per library: TV and music merge across folders (one show,
-one artist, one album). Movies do not: the same movie found in two folders
-shows as two entries (decision 2026-10-03). The second entry can't share the
-TMDB id (unique), so it copies the details and art of the first.
+one artist, one album). Movies merge within a library: the same movie found
+in two folders of one library is one entry with two files ("versions", picked
+on the movie page; decision 2026-10-18, which replaced the 2026-10-03 "two
+entries" rule). The same movie in two different libraries stays two entries;
+the second can't share the TMDB id (unique), so it copies the details and art
+of the first. `movie_versions.merge_twins` folds twins older scans made.
 
 Saving as it goes: a scan commits every BATCH_SIZE items and at the end of
 each library, so rows show up in the app while the scan runs and a scan that
@@ -798,10 +801,20 @@ def _movie_roots(db: Session, movie: Movie, prefixes: list[str]) -> set[int]:
     return {i for i in (_root_index(p, prefixes) for p in paths) if i is not None}
 
 
-def _match_movie(db: Session, found: FoundMovie, ri: int, prefixes: list[str]) -> tuple[Optional[Movie], Optional[Movie]]:
-    """Find the movie a new file belongs to. Returns (movie, twin_of): a
-    match whose files all live in another folder is not reused; the caller
-    makes a separate entry and copies details from `twin_of`."""
+def _movie_libraries(db: Session, movie: Movie) -> set[Optional[uuid.UUID]]:
+    return set(db.scalars(select(MediaFile.library_id).where(
+        MediaFile.kind == MediaKind.movie, MediaFile.ref_id == movie.id,
+    )).all())
+
+
+def _match_movie(
+    db: Session, found: FoundMovie, ri: int, prefixes: list[str], lib_id: Optional[uuid.UUID] = None,
+) -> tuple[Optional[Movie], Optional[Movie]]:
+    """Find the movie a new file belongs to. Returns (movie, twin_of). A match
+    with a file in the same folder or the same library is reused: the file
+    becomes another version of it. A match whose files all live in another
+    library is not; the caller makes a separate entry and copies details from
+    `twin_of`."""
     cands: list[Movie] = []
     if found.tmdb_id:
         m = db.scalar(select(Movie).where(Movie.tmdb_id == found.tmdb_id))
@@ -817,6 +830,9 @@ def _match_movie(db: Session, found: FoundMovie, ri: int, prefixes: list[str]) -
     owners = {m.id: _movie_roots(db, m, prefixes) for m in cands}
     for m in cands:
         if ri in owners[m.id]:
+            return m, None
+    for m in cands:
+        if lib_id in _movie_libraries(db, m):
             return m, None
     for m in cands:
         if not owners[m.id]:
@@ -859,6 +875,22 @@ def _copy_movie_art(db: Session, src: Movie, dst: Movie, stats: FolderScanStats)
         _save_art_bytes(db, ENTITY_MOVIE, dst.id, role, data, f"copy:{src.id}", stats)
 
 
+def _art_from_other_folder(db: Session, movie_id, role: str, folder: str) -> bool:
+    """True when the movie's art for `role` is a sidecar imported from a
+    different folder that still has it. With two versions of one movie in two
+    folders, the first folder's poster stays instead of the two folders
+    replacing each other's on every scan."""
+    row = db.get(ArtOverride, (ENTITY_MOVIE, movie_id, role))
+    if row is None or row.source_kind != SOURCE_LOCAL or not row.source_ref:
+        return False
+    src = row.source_ref.split("|", 1)[0]
+    if not os.path.isabs(src):
+        return False
+    if os.path.normcase(os.path.dirname(src)) == os.path.normcase(folder):
+        return False
+    return os.path.exists(src)
+
+
 def scan_movies(
     db: Session, stats: Optional[FolderScanStats] = None, on_progress: Optional[ProgressFn] = None,
 ) -> FolderScanStats:
@@ -888,7 +920,7 @@ def _scan_movies_root(
         if ref is not None:
             movie = db.get(Movie, ref)
         if movie is None:
-            movie, twin_of = _match_movie(db, found, ri, prefixes)
+            movie, twin_of = _match_movie(db, found, ri, prefixes, lib_id)
         new = movie is None
         if new:
             movie = Movie(title=found.title, year=found.year, added_at=_mtime(found.path) or datetime.now(timezone.utc))
@@ -927,10 +959,12 @@ def _scan_movies_root(
         folder = found.folder
         stem = os.path.splitext(os.path.basename(found.path))[0]
         if folder:
-            _import_art_file(db, entity_kind=ENTITY_MOVIE, entity_id=movie.id, role=ROLE_POSTER,
-                             image_path=_find_sidecar(folder, ("poster", "folder", "cover", f"{stem}-poster".lower())), stats=stats)
-            _import_art_file(db, entity_kind=ENTITY_MOVIE, entity_id=movie.id, role=ROLE_BACKDROP,
-                             image_path=_find_sidecar(folder, ("fanart", "backdrop", "background", f"{stem}-fanart".lower())), stats=stats)
+            for role, names in ((ROLE_POSTER, ("poster", "folder", "cover", f"{stem}-poster".lower())),
+                                (ROLE_BACKDROP, ("fanart", "backdrop", "background", f"{stem}-fanart".lower()))):
+                if _art_from_other_folder(db, movie.id, role, folder):
+                    continue  # another version's folder already gave this movie its art
+                _import_art_file(db, entity_kind=ENTITY_MOVIE, entity_id=movie.id, role=role,
+                                 image_path=_find_sidecar(folder, names), stats=stats)
         if twin is not None:
             _copy_movie_art(db, twin, movie, stats)
         if match:

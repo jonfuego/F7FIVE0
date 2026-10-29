@@ -359,34 +359,64 @@ def two_movie_roots(libs, tmp_path, monkeypatch):
     return a, b
 
 
-def test_movies_in_two_folders_show_twice(db_session, two_movie_roots, fake_probe, system_user):
+def test_movies_in_two_folders_of_one_library_are_one_movie(db_session, two_movie_roots, fake_probe, system_user):
+    """L-08: a second copy in another folder of the same library is a second
+    version (media file) of the one movie, not a second movie."""
     a, b = two_movie_roots
     _touch(a / "Heat (1995)" / "Heat (1995).mkv", 100)
     _png(a / "Heat (1995)" / "poster.png")
     _touch(b / "Heat (1995)" / "Heat (1995) 2160p.mkv", 200)
+    _png(b / "Heat (1995)" / "poster.png")
     _touch(b / "Alien (1979)" / "Alien (1979).mkv")
 
     stats = scan_library.scan_movies(db_session)
     heats = db_session.scalars(select(Movie).where(Movie.title == "Heat")).all()
-    assert len(heats) == 2 and stats.movies == 3
-    first, second = sorted(heats, key=lambda m: m.created_at)
-    # Each entry owns one file.
-    for m in heats:
-        files = db_session.scalars(select(MediaFile).where(MediaFile.ref_id == m.id)).all()
-        assert len(files) == 1
-    # The duplicate copies the first entry's poster.
-    art = db_session.get(ArtOverride, ("movie", second.id, "poster"))
-    assert art is not None and art.source_ref.startswith("copy:")
+    assert len(heats) == 1 and stats.movies == 2
+    heat = heats[0]
+    files = db_session.scalars(select(MediaFile).where(MediaFile.ref_id == heat.id)).all()
+    assert sorted(os.path.basename(f.path) for f in files) == ["Heat (1995) 2160p.mkv", "Heat (1995).mkv"]
+    # The first folder's poster stays; the second folder's doesn't replace it.
+    art = db_session.get(ArtOverride, ("movie", heat.id, "poster"))
+    poster_ref = art.source_ref
+    assert poster_ref.startswith(str(a / "Heat (1995)"))
 
-    # Rescan is stable: still two Heats, nothing re-probed.
+    # Rescan is stable: one Heat, nothing re-probed, the poster not re-imported.
     fake_probe.clear()
     stats = scan_library.scan_movies(db_session)
-    assert stats.movies == 0 and fake_probe == []
+    assert stats.movies == 0 and fake_probe == [] and stats.art_imported == 0
+    assert len(db_session.scalars(select(Movie).where(Movie.title == "Heat")).all()) == 1
+    assert db_session.get(ArtOverride, ("movie", heat.id, "poster")).source_ref == poster_ref
+
+
+@pytest.fixture()
+def two_movie_libraries(libs, tmp_path, db_session):
+    """Two named movie libraries, one folder each."""
+    from app.models.library import Library, LibraryFolder, LibraryKind
+    a, b = libs["movies"], tmp_path / "movies-b"
+    b.mkdir()
+    for name, path in (("Movies", a), ("Kids", b)):
+        lib = Library(name=name, kind=LibraryKind.movies, sort_order=0)
+        db_session.add(lib)
+        db_session.flush()
+        db_session.add(LibraryFolder(library_id=lib.id, path=str(path)))
+    db_session.flush()
+    return a, b
+
+
+def test_same_movie_in_two_libraries_stays_two_entries(db_session, two_movie_libraries, fake_probe, system_user):
+    from app.services import movie_versions
+    a, b = two_movie_libraries
+    _touch(a / "Heat (1995)" / "Heat (1995).mkv")
+    _touch(b / "Heat (1995)" / "Heat (1995).mkv")
+    scan_library.scan_movies(db_session)
+    heats = db_session.scalars(select(Movie).where(Movie.title == "Heat")).all()
+    assert len(heats) == 2
+    assert movie_versions.merge_twins(db_session) == 0
     assert len(db_session.scalars(select(Movie).where(Movie.title == "Heat")).all()) == 2
 
 
-def test_duplicate_movie_copies_tmdb_details(db_session, two_movie_roots, fake_probe, system_user):
-    a, b = two_movie_roots
+def test_duplicate_movie_in_another_library_copies_tmdb_details(db_session, two_movie_libraries, fake_probe, system_user):
+    a, b = two_movie_libraries
     _touch(a / "Heat (1995)" / "Heat (1995).mkv")
     scan_library.scan_movies(db_session)
     first = db_session.scalar(select(Movie))
