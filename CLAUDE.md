@@ -1006,3 +1006,34 @@ is only proven by a real update on a VM: the tests use a stub Setup.
   and phone. Follow-ups: the TV rail and the PWA shortcut still say "Continue
   Watching"; the "Birmingham (Board Mix)" card has no art; the dock-over-page
   screenshot is unconfirmed.
+- 2026-10-29 (Hermes, 1.0.18 hand-test fixes): the squash.fuegofam.com hand
+  test of 1.0.18 on the FuegoTest VM found these; each fix is its own branch and
+  PR (#3 to #13), merged `--no-ff` to `main` in this order:
+  `fix/organizer-libraries` (L-10, Organizer read `r.libraries` from a bare
+  list; overlaps PR #2), `fix/library-health-counts` (L-05, Unmatched and
+  Missing art cards; overlaps PR #2), `fix/rerun-after-failed-install` (I-11,
+  "upgrade" now means `.env` plus `data\install-complete.json` or a registered
+  F7FIVE0-API service; the rerun reuses the DB password in `.env`),
+  `fix/finish-page-warnings` (I-03, the finish page summary is a scrolling memo),
+  `fix/album-artist-radio` (W-10), `fix/art-modal-refresh` (A-07/A-12/A-05, the
+  art dialog goes through client-api; File info path case; no error code
+  prefix), `fix/watch-title-queue` (watch title never shows an unrelated queue
+  item), `fix/movie-versions-merge` (L-08, same-library copies are versions:
+  scan reuses the movie and `merge_twins` runs after each folder scan),
+  `fix/back-keeps-place` (W-06), `fix/install-native-stderr` (venv Python runs
+  through `Invoke-VenvPy` so a redirected install.ps1 doesn't stop on alembic's
+  INFO stderr), `fix/node-acl-service-user` (I-14, `runtime\node` is
+  `icacls /reset` after the Move-Item from %TEMP%, or a -ServiceUser account
+  can't start F7FIVE0-Web). Checks on the merged tree: pytest 1435 passed, web
+  tests 405 + tsc + build, lint 0 errors, installer Pester 93, ISCC compiles.
+  A Setup built from it (1.0.19-hermes) passed I-14 on the VM (fresh
+  `-ServiceUser` install, all three services run as the account before and after
+  a silent Setup over it). CI on the PRs is red only for new advisories
+  (Next.js GHSA-2464-fhr4-w9xw critical RCE and two more, undici in mobile,
+  Pillow/certifi/dnspython in the lock) and the flaky
+  `test_organizer_roundtrip` undo state on Linux; those need their own fix
+  before a release. Still open from the hand test (feature calls for Jon): web
+  movie download (W-05), bulk Select (L-07), favicon at 16 px (W-20), artist
+  mixes want a pasted id (W-12), albums under "Other" (W-16), art "Remove
+  override" loses the previous picture (A-07). Not hand retested yet: I-03,
+  I-11, L-05, L-08, L-10 to L-15, W-06, W-10.
