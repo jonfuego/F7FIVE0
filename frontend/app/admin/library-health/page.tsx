@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import { apiGet, apiDelete, ApiError } from "@/lib/client-api";
 import { smallButtonCls } from "../admin-ui";
+import { emptyMissingListText, kindBreakdown, kindTotal } from "@/lib/library-health";
 
 type HealthCounts = {
   missing_files_total: number;
@@ -72,7 +73,8 @@ export default function LibraryHealthPage() {
   return (
     <>
       <AdminPageHeader title="Library health">
-        Missing files, probe errors, and unreachable folders.
+        Missing files, probe errors, unreachable folders, unmatched items, and
+        missing art.
       </AdminPageHeader>
 
       {loadError && (
@@ -85,6 +87,16 @@ export default function LibraryHealthPage() {
           <CountCard label="Eligible for cleanup" value={counts.missing_files_eligible} />
           <CountCard label="Probe errors" value={counts.probe_errors} />
           <CountCard label="Unreachable folders" value={counts.unreachable_folders} />
+          <CountCard
+            label="Unmatched"
+            value={kindTotal(counts.unmatched)}
+            detail={kindBreakdown(counts.unmatched)}
+          />
+          <CountCard
+            label="Missing art"
+            value={kindTotal(counts.missing_art)}
+            detail={kindBreakdown(counts.missing_art)}
+          />
         </div>
       )}
 
@@ -132,17 +144,18 @@ export default function LibraryHealthPage() {
       )}
 
       {!loadError && counts && missing.length === 0 && (
-        <p className="body-2 text-ink-2">No missing files eligible for cleanup.</p>
+        <p className="body-2 text-ink-2">{emptyMissingListText(counts.missing_files_total)}</p>
       )}
     </>
   );
 }
 
-function CountCard({ label, value }: { label: string; value: number }) {
+function CountCard({ label, value, detail }: { label: string; value: number; detail?: string }) {
   return (
     <div className="rounded-lg bg-surface-2 p-4">
       <p className="caption text-ink-2">{label}</p>
       <p className="title-2 tabular-nums text-ink">{value}</p>
+      {detail && <p className="caption tabular-nums text-ink-3">{detail}</p>}
     </div>
   );
 }
