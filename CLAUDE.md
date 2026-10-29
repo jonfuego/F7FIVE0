@@ -408,8 +408,14 @@ INSTALL.md for the operator view.
 - Library folders: several per library (`app/services/library_folders.py`).
   Source is the `libraries` table once Admin > Library folders saves (then for
   every library), else `LIBRARY_ROOT_*` split on `;`. TV and music merge
-  across folders; movies don't (same movie in two folders = two entries, the
-  second copies details/art since `tmdb_id` is unique). An unreachable folder
+  across folders, and movies merge within a library: the same movie (TMDB tag,
+  or title and year) in two folders of one library is one movie with two
+  `media_files` (versions; `scan_library._match_movie`), and
+  `movie_versions.merge_twins` runs after every folder scan to fold twins older
+  scans made. Two libraries never merge: there the second entry copies
+  details/art since `tmdb_id` is unique. Movie APIs list `media_files` best
+  version first (`version_pick.sort_versions`), so a client that plays
+  `media_files[0]` plays the default version. An unreachable folder
   is skipped and its files keep their state; removing a folder in Admin marks
   its files missing.
 - NAS sign-in: the services run as LocalSystem, which has no account on a NAS,
