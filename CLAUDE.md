@@ -1037,3 +1037,16 @@ is only proven by a real update on a VM: the tests use a stub Setup.
   mixes want a pasted id (W-12), albums under "Other" (W-16), art "Remove
   override" loses the previous picture (A-07). Not hand retested yet: I-03,
   I-11, L-05, L-08, L-10 to L-15, W-06, W-10.
+- 2026-10-29 (Hermes, security advisories): merged `fix/security-advisories`
+  (PR #14) after CI went red on new advisories: next and eslint-config-next
+  16.4.3 (two critical unauthenticated RCEs and a DoS in <=16.4.0), undici
+  6.29.1 in the phone lock, Pillow 13.0.0 (no 12.x fix), certifi 2026.10.23,
+  dnspython 2.9.1. decode-uri-component GHSA-qr28-fpjm-wq7f is a reviewed
+  runtime exception in `mobile/npm-audit-exceptions.json` (the only fix is
+  ESM-only and query-string 7 under expo-router 6 requires it); it retires with
+  the Expo SDK upgrade. Side fix: `api/art.py` registers image/webp, because
+  Python 3.12's mimetypes has no .webp entry and the sized art copies went out
+  as application/octet-stream on Setup installs. CI green on the PR (all jobs);
+  locally pytest 1433 on Python 3.12.10 with the new lock, web 405 + build,
+  mobile jest 476 + verify. Not yet checked on a real install: art and posters
+  render (Pillow 13 thumbnails), web pages under Next 16.4.3.
