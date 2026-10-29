@@ -921,11 +921,20 @@ try {
 # ---------------------------------------------------------------------------
 Step "Backend packages"
 # ---------------------------------------------------------------------------
+# Python tools (pip, alembic, the app CLI) log to stderr. When this script's
+# output is redirected (install.ps1 *> log), Windows PowerShell 5.1 turns each
+# stderr line into an error record, and with "Stop" the first INFO line ends
+# the install. Run them with "Continue" and judge them by exit code only.
+function Invoke-VenvPy {
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try { & $VenvPy @args } finally { $ErrorActionPreference = $prev }
+}
 if (-not (Test-Path $VenvPy)) {
     & $Py -m venv (Join-Path $BackendDir ".venv")
     if ($LASTEXITCODE -ne 0) { Fail "could not create the Python virtual environment" }
 }
-& $VenvPy -m pip install --disable-pip-version-check -q --upgrade pip
+Invoke-VenvPy -m pip install --disable-pip-version-check -q --upgrade pip
 # Install the hash-pinned lock (SEC-P0-1): --require-hashes refuses any dist
 # whose SHA-256 is not pinned, so a swapped or tampered wheel fails the
 # install rather than running with SYSTEM/service authority.
@@ -965,7 +974,7 @@ if ($pipRc -ne 0) {
     Fail "pip install failed ($pipRc). Full output: $pipOut"
 }
 # Compile now: a -ServiceUser account can't write __pycache__ in backend\.
-& $VenvPy -m compileall -q (Join-Path $BackendDir "app") | Out-Null
+Invoke-VenvPy -m compileall -q (Join-Path $BackendDir "app") | Out-Null
 Ok "Python packages installed"
 
 # ---------------------------------------------------------------------------
@@ -974,7 +983,7 @@ Step "Database migrations"
 $env:PYTHONPATH = $BackendDir
 Push-Location $InstallDir
 try {
-    & $VenvPy -m alembic -c (Join-Path $InstallDir "alembic.ini") upgrade head
+    Invoke-VenvPy -m alembic -c (Join-Path $InstallDir "alembic.ini") upgrade head
     if ($LASTEXITCODE -ne 0) { Fail "alembic upgrade failed ($LASTEXITCODE)" }
 } finally { Pop-Location }
 Ok "schema up to date"
@@ -984,7 +993,7 @@ if (-not $IsUpgrade -and $AdminUser) {
     $env:F7FIVE0_ADMIN_PASSWORD = $AdminPassword
     Push-Location $BackendDir
     try {
-        & $VenvPy -m app.cli create-admin --username $AdminUser --name $AdminUser
+        Invoke-VenvPy -m app.cli create-admin --username $AdminUser --name $AdminUser
         $rc = $LASTEXITCODE
     } finally {
         Pop-Location
