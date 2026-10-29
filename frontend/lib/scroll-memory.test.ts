@@ -5,8 +5,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  markRestore, pageKey, readPosition, RESTORE_LIMIT_MS, restoreStep, savePosition, takeRestore,
-  type KeyValueStore,
+  backTarget, clearLeave, markRestore, pageKey, readPosition, recordLeave, RESTORE_LIMIT_MS,
+  restoreStep, savePosition, shouldRestore, takeRestore, type KeyValueStore,
 } from "./scroll-memory.ts";
 
 function store(): KeyValueStore & { data: Map<string, string> } {
@@ -83,4 +83,50 @@ test("restore stops when the user scrolls or the time limit passes", () => {
     restoreStep({ target: 2400, scrollY: 300, maxScroll: 300, elapsedMs: RESTORE_LIMIT_MS, userScrolled: false }),
     "give-up",
   );
+});
+
+// W-06: the Back arrow on an artist opened from Songs went to "/music" (a fixed
+// href), which redirected to Songs with the mark used up: top of the list.
+test("the Back arrow goes back in history to the list the item was opened from", () => {
+  const s = store();
+  // Songs (history length 3) -> artist link pushes a 4th entry.
+  recordLeave(s, "/music/songs", "/music/artists/7", 4);
+  assert.equal(backTarget(s, "/music/artists/7", 4), "/music/songs");
+  // Albums -> album the same way.
+  recordLeave(s, "/music/albums", "/music/12", 5);
+  assert.equal(backTarget(s, "/music/12", 5), "/music/albums");
+});
+
+test("the Back arrow uses its href when the list is not the page before this one", () => {
+  const s = store();
+  assert.equal(backTarget(s, "/movies/3", 2), null, "nothing recorded (direct link)");
+  recordLeave(s, "/movies", "/movies/3", 2);
+  assert.equal(backTarget(s, "/movies/4", 2), null, "a different item");
+  // movies -> movie 3 -> (link) movie 5 -> (link) movie 3 again: history grew.
+  assert.equal(backTarget(s, "/movies/3", 4), null, "same item pushed again later");
+  clearLeave(s);
+  assert.equal(backTarget(s, "/movies/3", 2), null, "cleared after use");
+});
+
+test("a redirect on the same URL or junk in storage records nothing", () => {
+  const s = store();
+  recordLeave(s, "/movies", "/movies", 2);
+  assert.equal(backTarget(s, "/movies", 2), null);
+  s.setItem("f7five0.scroll.leave", "{not json");
+  assert.equal(backTarget(s, "/movies/3", 2), null);
+  s.setItem("f7five0.scroll.leave", JSON.stringify({ from: 1, to: "/movies/3", len: 2 }));
+  assert.equal(backTarget(s, "/movies/3", 2), null);
+});
+
+// W-06: browser Back sometimes did not restore (384 instead of 600): React
+// renders a popstate navigation inside the popstate event, so the list mounted
+// before the bubbling listener marked it.
+test("a mount inside the popstate event restores even without the mark", () => {
+  const s = store();
+  assert.equal(shouldRestore(s, "/music/songs", "popstate"), true);
+  assert.equal(shouldRestore(s, "/music/songs", "click"), false);
+  assert.equal(shouldRestore(s, "/music/songs", undefined), false);
+  markRestore(s, "/music/songs");
+  assert.equal(shouldRestore(s, "/music/songs", undefined), true);
+  assert.equal(shouldRestore(s, "/music/songs", undefined), false, "the mark is used once");
 });
