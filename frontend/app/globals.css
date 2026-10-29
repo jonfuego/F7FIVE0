@@ -1519,6 +1519,12 @@ button { border: 0; background: transparent; color: inherit; font: inherit; curs
   display: grid; place-items: center;
   padding: 16px;
   cursor: default;
+  /* On the movie page the sheet sits inside the kicker (uppercase, wide
+     tracking, bold, red). Reset those so the file path shows its real case. */
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 400;
+  color: var(--ink);
 }
 .detail .ep-info {
   width: min(520px, 100%);

@@ -23,6 +23,7 @@ import type {
   OverrideOut,
   OverrideUpdate,
 } from "@/lib/types";
+import { detailText } from "@/lib/error-detail";
 
 type TabId = "general" | "details" | "art" | "match" | "refresh" | "metadata";
 
@@ -1245,7 +1246,8 @@ async function extractError(res: Response): Promise<string> {
     const body = await res.json();
     if (body && typeof body === "object" && "detail" in body) {
       const detail = (body as { detail?: unknown }).detail;
-      if (typeof detail === "string") return detail;
+      // Drop a leading machine code ("already_matched: ...") for the screen.
+      if (typeof detail === "string") return detailText(detail);
       if (Array.isArray(detail) && detail.length > 0) {
         return JSON.stringify(detail[0]);
       }
