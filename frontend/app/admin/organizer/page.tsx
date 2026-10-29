@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import { apiGet, apiPut, apiPost, apiDelete, ApiError } from "@/lib/client-api";
+import { LIBRARIES_PATH, organizerLibraries, parseLibraries } from "@/lib/libraries";
 import { inputCls, primaryButtonCls, smallButtonCls } from "../admin-ui";
 
 // ---------------------------------------------------------------------------
@@ -108,11 +109,10 @@ export default function OrganizerPage() {
 
   // Load the list of libraries
   useEffect(() => {
-    apiGet<{ libraries: LibraryOut[] }>("/api/library/libraries")
+    // The backend answers a bare array of libraries, not `{libraries: [...]}`.
+    apiGet<unknown>(LIBRARIES_PATH)
       .then((r) => {
-        const libs = (r.libraries ?? []).filter(
-          (l) => l.kind === "movies" || l.kind === "tv" || l.kind === "music",
-        );
+        const libs: LibraryOut[] = organizerLibraries(parseLibraries(r));
         setLibraries(libs);
         if (libs.length > 0 && !selectedId) setSelectedId(libs[0].id);
       })

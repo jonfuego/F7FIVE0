@@ -151,6 +151,14 @@ def test_member_libraries_endpoint_hides_b(member_client, world):
     assert str(world.lib_b.id) not in ids
 
 
+def test_libraries_endpoint_is_a_bare_list(admin_client, world):
+    # The web (lib/libraries.ts, Admin > Organizer) parses a bare array of
+    # {id, name, kind, sort_order}; a wrapper object would empty those lists.
+    body = admin_client.get("/api/libraries").json()
+    assert isinstance(body, list) and body
+    assert set(body[0]) == {"id", "name", "kind", "sort_order"}
+
+
 def test_member_detail_and_per_file_404_for_b(member_client, world):
     assert member_client.get(f"/api/movies/{world.movie_b.id}").status_code == 404
     # Positive control: A is reachable.
