@@ -26,6 +26,7 @@ import { loadFeatures } from "@/lib/features";
 import { prefHeight, readQualityPref, writeQualityPref } from "@/lib/quality";
 import { browserClientCaps } from "@/lib/playback-caps";
 import { artSized } from "@/lib/art-url";
+import { watchTitle } from "@/lib/watch-title";
 
 const AUDIO_CONTAINERS = new Set([
   "mp3", "m4a", "aac", "wav", "flac", "ogg", "oga", "opus", "wma",
@@ -400,7 +401,14 @@ export default function WatchPage() {
               minWidth: 0,
             }}
           >
-            {stream?.title ?? queueCurrent?.title ?? "Loading…"}
+            {/* Never the dock queue's current item for an unrelated file:
+                a movie opened while a song is queued showed the song. */}
+            {watchTitle({
+              mediaFileId,
+              streamTitle: stream?.title,
+              queueCurrent,
+              useDockAudio,
+            })}
           </div>
           <button
             type="button"
