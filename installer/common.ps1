@@ -444,6 +444,42 @@ function Merge-EnvFile([string]$Path, $Want, [hashtable]$PortKeys, [string[]]$Fi
 }
 
 # ---------------------------------------------------------------------------
+# New install or upgrade (install.ps1; F7FIVE0.iss IsUpgrade makes the same
+# test). .env alone is not enough: install.ps1 writes it partway through a first
+# install, before the admin account exists, so a rerun after a first install
+# that stopped must still be a new install (wizard pages, admin account).
+# An install is complete when install.ps1 reached its end (it writes
+# data\install-complete.json on every successful run, new install or upgrade),
+# or, for installs made before that marker existed, when the F7FIVE0-API
+# service is registered (install.ps1 registers it only after the admin
+# account step, in every version). Uninstall removes the services; it keeps
+# data\ unless -RemoveData, which deletes .env too.
+# ---------------------------------------------------------------------------
+$InstallCompleteMarker = "data\install-complete.json"
+
+function Test-CompletedInstall([string]$Root, [bool]$ServiceRegistered) {
+    if (-not (Test-Path -LiteralPath (Join-Path $Root ".env"))) { return $false }
+    if (Test-Path -LiteralPath (Join-Path $Root $InstallCompleteMarker)) { return $true }
+    return $ServiceRegistered
+}
+
+function Write-InstallComplete([string]$Root, [string]$Version) {
+    $record = [ordered]@{ version = $Version; completed_at = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ") }
+    [IO.File]::WriteAllText((Join-Path $Root $InstallCompleteMarker), ($record | ConvertTo-Json), (New-Object Text.UTF8Encoding($false)))
+}
+
+# The password of $User in a DATABASE_URL (postgresql+psycopg://user:pw@host/db),
+# or "" when the URL is blank or is for another user. A rerun of a first install
+# that stopped after .env was written reuses it: Merge-EnvFile never replaces an
+# existing DATABASE_URL, so the role must keep the password .env already has.
+function Get-DbUrlPassword([string]$Url, [string]$User) {
+    $m = [regex]::Match("$Url".Trim().Trim([char]34, [char]39), '^postgres(?:ql)?(?:\+[A-Za-z0-9_]+)?://([^:@/]+):([^@/]*)@')
+    if (-not $m.Success) { return "" }
+    if ([Uri]::UnescapeDataString($m.Groups[1].Value) -ne $User) { return "" }
+    return [Uri]::UnescapeDataString($m.Groups[2].Value)
+}
+
+# ---------------------------------------------------------------------------
 # What is wrong with the signing secrets in an .env, as short sentences (empty
 # when both are fine). The backend refuses to start in production on any of
 # these (backend/app/config.py: secret_problems); Setup can only replace a blank
