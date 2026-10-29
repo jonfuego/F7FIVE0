@@ -446,6 +446,13 @@ if (-not $nodeOk) {
     Expand-Archive -Path $zip -DestinationPath $unz -Force
     if (Test-Path $NodeDir) { Remove-Item -Recurse -Force $NodeDir }
     Move-Item (Get-ChildItem $unz | Select-Object -First 1).FullName $NodeDir
+    # Move-Item keeps the ACL the folder had in %TEMP% (the admin's profile:
+    # only that admin, SYSTEM and Administrators). "Securing the install
+    # folder" already ran, so put the folder back on the install folder's
+    # inherited rights; otherwise a -ServiceUser account can't run node.exe
+    # and F7FIVE0-Web fails to start (hand test I-14).
+    & icacls $NodeDir /reset /T /C /Q | Out-Null
+    if ($LASTEXITCODE -ne 0) { Fail "could not set permissions on $NodeDir (icacls $LASTEXITCODE)" }
     Remove-Item -Force $zip
 }
 Ok "Node.js: $Node"
