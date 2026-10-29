@@ -3,20 +3,23 @@
 // The backend builds the radio queue at /api/library/auto-playlist/artist-radio.
 // This helper owns the URL and the "best-effort" rule (any failure or an empty
 // answer starts nothing), and takes the fetcher and the queue action as
-// arguments so it stays pure and testable. Callers pass apiGet and the queue's
-// playNextBlock, which plays right away when nothing is playing and otherwise
-// slots the radio in after the current track.
+// arguments so it stays pure and testable. Callers pass apiGet and the queue
+// action that fits the button:
+// - the album page passes playAlbum, so the radio replaces the queue and
+//   starts at once (same as Artist radio on the artist page);
+// - the player track menu passes playNextBlock, which slots the radio in
+//   after the track that is playing.
 
 export type ArtistRadioDeps<T> = {
   get: (path: string) => Promise<{ items?: T[] } | null | undefined>;
-  playNextBlock: (items: T[]) => void;
+  play: (items: T[]) => void;
 };
 
 export function artistRadioPath(artistId: string): string {
   return `/api/library/auto-playlist/artist-radio/${encodeURIComponent(artistId)}`;
 }
 
-// Returns true when a radio block was handed to the queue.
+// Returns true when the radio items were handed to the queue.
 export async function startArtistRadio<T>(
   artistId: string | null | undefined,
   deps: ArtistRadioDeps<T>,
@@ -25,7 +28,7 @@ export async function startArtistRadio<T>(
   try {
     const data = await deps.get(artistRadioPath(artistId));
     if (Array.isArray(data?.items) && data.items.length > 0) {
-      deps.playNextBlock(data.items);
+      deps.play(data.items);
       return true;
     }
   } catch {
