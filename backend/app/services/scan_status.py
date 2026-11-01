@@ -97,6 +97,9 @@ def _counts(label: str, state: str, stats) -> dict:
         "probed": stats.files_probed,
         "missing": stats.files_missing,
         "errors": stats.errors,
+        # The per-file errors behind the count ({path, reason}, capped), for the
+        # Scans row's error list.
+        "error_items": list(getattr(stats, "error_items", None) or [])[:50],
     }
 
 

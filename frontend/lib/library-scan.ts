@@ -30,6 +30,9 @@ export function showArrSync(arr: ArrFeatures | null | undefined): boolean {
   return !!arr && (arr.radarr || arr.sonarr || arr.lidarr);
 }
 
+/** One per-file scan error. `path` is empty when the whole library failed. */
+export type ScanErrorItem = { path: string; reason: string };
+
 export type LibraryScanCounts = {
   state: string;
   total?: number;
@@ -38,6 +41,8 @@ export type LibraryScanCounts = {
   probed?: number;
   missing?: number;
   errors?: number;
+  /** The per-file errors behind `errors` ({path, reason}, the first 50). */
+  error_items?: ScanErrorItem[];
 };
 
 /** GET /api/admin/podcasts/refresh: the podcast feed refresh. */

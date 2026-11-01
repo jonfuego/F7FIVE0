@@ -1,5 +1,8 @@
 // "Needs attention": shown only when something does. Each item is one line of
-// text and a link to where it gets fixed. Warning tone, with an icon and a
+// text (plus the detail behind it, such as the first file a scan failed on) and
+// a link to the exact list that explains it: the Scans row's error list
+// (?show=), or the Library health list (?view=). The text links there too.
+// Warning tone, with an icon and a
 // count so the state never rests on colour alone.
 
 import Link from "next/link";
@@ -24,10 +27,10 @@ export function NeedsAttention({ items }: { items: AttentionItem[] }) {
             key={item.id}
             className="flex flex-wrap items-center justify-between gap-x-4 border-t border-line py-1 first:border-t-0"
           >
-            <div className="min-w-0 py-2">
-              <p className="text-[15px] leading-[22px] text-ink">{item.text}</p>
-              {item.detail ? <p className="caption text-ink-3">{item.detail}</p> : null}
-            </div>
+            <Link href={item.href} className="group min-w-0 flex-1 py-2" data-testid={`attention-${item.id}`}>
+              <p className="text-[15px] leading-[22px] text-ink group-hover:underline">{item.text}</p>
+              {item.detail ? <p className="caption break-all text-ink-3">{item.detail}</p> : null}
+            </Link>
             <Link
               href={item.href}
               className="inline-flex min-h-tap items-center text-sm font-semibold text-hive-text hover:underline"

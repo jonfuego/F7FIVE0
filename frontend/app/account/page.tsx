@@ -1,4 +1,7 @@
-// Account page. Two self-service forms: display name and password.
+// Account page: display name, password, passkeys, session, the address for a
+// phone, and the Android app. Styled like the Admin pages (AdminPageHeader, one
+// bordered panel per section, a section list on the left, v3 tokens only, 44 px
+// touch targets).
 //
 // All traffic goes through the Next BFF under /api/session/me/*. The
 // page loads the current profile once, then each form owns its own
@@ -9,9 +12,16 @@
 
 "use client";
 
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import QRCode from "qrcode";
 import { AuthShell } from "@/components/AuthShell";
+import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import {
+  inputCls as adminInputCls,
+  primaryButtonCls as adminPrimaryButtonCls,
+  smallButtonCls as adminSmallButtonCls,
+} from "@/app/admin/admin-ui";
+import { QR_DARK, QR_LIGHT } from "@/lib/qr-colors";
 import { apiGet } from "@/lib/client-api";
 import { loadMe } from "@/lib/load-me";
 import { useFeatures } from "@/lib/features";
@@ -44,21 +54,24 @@ export default function AccountPage() {
     };
   }, [load]);
 
+  const features = useFeatures();
+  const showPasskeys = features?.passkeys?.enabled === true;
+  const sections = ACCOUNT_SECTIONS.filter((sec) => sec.id !== "passkeys" || showPasskeys);
+
   return (
     <AuthShell>
-      <div className="mx-auto max-w-2xl">
-        <h1 className="text-2xl font-semibold tracking-tight">Account</h1>
-        <p className="mt-1 text-sm text-neutral-500">
-          Update your display name or change your password.
-        </p>
+      <div className="mx-auto w-full max-w-[1240px] px-4 py-6 md:px-6">
+        <AdminPageHeader title="Account">
+          Your name, password, passkeys, and the app for your phone.
+        </AdminPageHeader>
 
         {loadError ? (
-          <div className="mt-6 rounded-md border border-red-900/60 bg-red-950/40 px-4 py-3 text-sm text-red-200">
+          <div role="alert" className="border border-line bg-hive-tint px-4 py-5 text-sm text-hive-text">
             <p>{loadError}</p>
             <button
               type="button"
               onClick={() => load()}
-              className="mt-3 rounded-md border border-red-800/60 px-3 py-1.5 text-xs text-red-100 hover:border-red-600"
+              className="mt-3 min-h-tap border border-line-strong px-3 text-xs font-semibold text-ink hover:border-ink-2"
             >
               Try again
             </button>
@@ -66,17 +79,50 @@ export default function AccountPage() {
         ) : me === null ? (
           <LoadingSkeleton />
         ) : (
-          <div className="mt-6 space-y-6">
-            <ProfileCard me={me} onChanged={setMe} />
-            <PasskeysCard />
-            <PasswordCard />
-            <SessionCard me={me} />
-            <AnywhereCard />
-            <AndroidAppCard />
+          <div className="grid grid-cols-1 gap-5 min-[720px]:grid-cols-[220px_minmax(0,1fr)]">
+            <AccountSectionList sections={sections} />
+            <div className="min-w-0 space-y-5">
+              <ProfileCard me={me} onChanged={setMe} />
+              <PasskeysCard />
+              <PasswordCard />
+              <SessionCard me={me} />
+              <AnywhereCard />
+              <AndroidAppCard />
+            </div>
           </div>
         )}
       </div>
     </AuthShell>
+  );
+}
+
+// The in-page section list, styled like the Admin section list: a column on
+// the left on wide screens, wrapped links above the content under about 720 px.
+const ACCOUNT_SECTIONS: { id: string; label: string }[] = [
+  { id: "profile", label: "Profile" },
+  { id: "passkeys", label: "Passkeys" },
+  { id: "password", label: "Password" },
+  { id: "session", label: "Session" },
+  { id: "phone", label: "Open on your phone" },
+  { id: "android", label: "Android app" },
+];
+
+const sectionLinkCls =
+  "relative flex min-h-tap items-center px-3 text-sm font-semibold text-ink-2 hover:bg-surface-2 hover:text-ink";
+
+function AccountSectionList({ sections }: { sections: { id: string; label: string }[] }) {
+  return (
+    <nav aria-label="Account sections" data-testid="account-section-list">
+      <ul className="flex flex-wrap gap-1 min-[720px]:sticky min-[720px]:top-20 min-[720px]:flex-col">
+        {sections.map((sec) => (
+          <li key={sec.id}>
+            <a href={`#${sec.id}`} className={sectionLinkCls}>
+              {sec.label}
+            </a>
+          </li>
+        ))}
+      </ul>
+    </nav>
   );
 }
 
@@ -121,9 +167,9 @@ function ProfileCard({
   }
 
   return (
-    <section className="rounded-xl border border-neutral-800 bg-neutral-900/40 p-6">
-      <h2 className="text-base font-semibold">Profile</h2>
-      <p className="mt-1 text-xs text-neutral-500">
+    <section id="profile" aria-labelledby="profile-heading" className={sectionCls}>
+      <h2 id="profile-heading" className={headingCls}>Profile</h2>
+      <p className={introCls}>
         Your username is managed by an admin and cannot be changed here.
       </p>
       <form onSubmit={onSubmit} className="mt-4 space-y-4">
@@ -209,9 +255,9 @@ function PasswordCard() {
   }
 
   return (
-    <section className="rounded-xl border border-neutral-800 bg-neutral-900/40 p-6">
-      <h2 className="text-base font-semibold">Password</h2>
-      <p className="mt-1 text-xs text-neutral-500">
+    <section id="password" aria-labelledby="password-heading" className={sectionCls}>
+      <h2 id="password-heading" className={headingCls}>Password</h2>
+      <p className={introCls}>
         Changing your password signs you out everywhere. You will need to sign in again.
       </p>
       <form onSubmit={onSubmit} className="mt-4 space-y-4" autoComplete="off">
@@ -360,28 +406,28 @@ function PasskeysCard() {
   if (!supported || !enabled) return null;
 
   return (
-    <section className="rounded-xl border border-neutral-800 bg-neutral-900/40 p-6">
-      <h2 className="text-base font-semibold">Passkeys</h2>
-      <p className="mt-1 text-xs text-neutral-500">
+    <section id="passkeys" aria-labelledby="passkeys-heading" className={sectionCls}>
+      <h2 id="passkeys-heading" className={headingCls}>Passkeys</h2>
+      <p className={introCls}>
         Sign in with your fingerprint or device lock instead of a password. Your
         passkey works here and in the F7FIVE0 Android app
-        {rpId ? <> for <span className="text-neutral-300">{rpId}</span></> : null}.
+        {rpId ? <> for <span className="text-ink">{rpId}</span></> : null}.
       </p>
 
       <div className="mt-4 space-y-2">
         {items === null ? (
-          <div className="h-10 animate-pulse rounded-md bg-neutral-800/60" />
+          <div className="h-10 animate-pulse bg-surface-2" />
         ) : items.length === 0 ? (
-          <p className="text-sm text-neutral-400">No passkeys yet.</p>
+          <p className="text-[15px] text-ink-3">No passkeys yet.</p>
         ) : (
           items.map((p) => (
             <div
               key={p.id}
-              className="flex items-center justify-between rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm"
+              className="flex flex-wrap items-center justify-between gap-3 border-t border-line py-2 text-sm first:border-t-0"
             >
               <div>
-                <div className="text-neutral-100">{p.name}</div>
-                <div className="text-xs text-neutral-500">
+                <div className="text-[15px] text-ink">{p.name}</div>
+                <div className="caption text-ink-3">
                   Added {formatCreated(p.created_at)}
                   {p.last_used_at ? ` · last used ${formatCreated(p.last_used_at)}` : ""}
                 </div>
@@ -390,14 +436,14 @@ function PasskeysCard() {
                 <button
                   type="button"
                   onClick={() => onRename(p.id, p.name)}
-                  className="rounded-md border border-neutral-700 px-2 py-1 text-xs text-neutral-300 hover:border-neutral-500"
+                  className={smallButtonCls}
                 >
                   Rename
                 </button>
                 <button
                   type="button"
                   onClick={() => onDelete(p.id)}
-                  className="rounded-md border border-rose-900/60 px-2 py-1 text-xs text-rose-300 hover:border-rose-700"
+                  className={`${smallButtonCls} text-hive-text`}
                 >
                   Delete
                 </button>
@@ -428,15 +474,15 @@ function defaultPasskeyName(): string {
 
 function SessionCard({ me }: { me: Me }) {
   return (
-    <section className="rounded-xl border border-neutral-800 bg-neutral-900/40 p-6">
-      <h2 className="text-base font-semibold">Session</h2>
-      <div className="mt-3 grid grid-cols-[min-content_1fr] gap-x-4 gap-y-2 text-sm">
-        <div className="text-neutral-500">Role</div>
-        <div className="text-neutral-200">
+    <section id="session" aria-labelledby="session-heading" className={sectionCls}>
+      <h2 id="session-heading" className={headingCls}>Session</h2>
+      <div className="mt-3 grid grid-cols-[min-content_1fr] gap-x-4 gap-y-2 text-[15px]">
+        <div className="text-ink-3">Role</div>
+        <div className="text-ink">
           {me.role === "admin" ? "Admin" : "Member"}
         </div>
-        <div className="text-neutral-500">Created</div>
-        <div className="text-neutral-200">{formatCreated(me.created_at)}</div>
+        <div className="text-ink-3">Created</div>
+        <div className="tabular-nums text-ink">{formatCreated(me.created_at)}</div>
       </div>
     </section>
   );
@@ -444,11 +490,11 @@ function SessionCard({ me }: { me: Me }) {
 
 function LoadingSkeleton() {
   return (
-    <div className="mt-6 space-y-6">
+    <div className="space-y-5">
       {[0, 1].map((i) => (
         <div
           key={i}
-          className="h-48 animate-pulse rounded-xl border border-neutral-800 bg-neutral-900/40"
+          className="h-48 animate-pulse border border-line bg-surface-1"
         />
       ))}
     </div>
@@ -458,7 +504,7 @@ function LoadingSkeleton() {
 type FormStatus = { kind: "success" | "error"; message: string } | null;
 
 function StatusLine({ status }: { status: NonNullable<FormStatus> }) {
-  const color = status.kind === "success" ? "text-emerald-400" : "text-rose-400";
+  const color = status.kind === "success" ? "text-positive" : "text-hive-text";
   return (
     <p role="status" className={`text-sm ${color}`}>
       {status.message}
@@ -473,11 +519,11 @@ function Field({
 }: {
   label: string;
   htmlFor: string;
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   return (
     <div>
-      <label htmlFor={htmlFor} className="block text-sm text-neutral-300">
+      <label htmlFor={htmlFor} className="caption block text-ink-2">
         {label}
       </label>
       <div className="mt-1">{children}</div>
@@ -485,14 +531,20 @@ function Field({
   );
 }
 
-const inputCls =
-  "w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 outline-none focus:border-neutral-500";
+const inputCls = `${adminInputCls} min-h-tap`;
 
 const readonlyInputCls =
-  "w-full rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-2 text-sm text-neutral-400 outline-none cursor-not-allowed";
+  "min-h-tap w-full rounded-lg border border-line bg-surface-2 px-3 py-2 text-sm text-ink-3 outline-none cursor-not-allowed";
 
-const primaryButtonCls =
-  "rounded-lg bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-900 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60";
+const primaryButtonCls = `${adminPrimaryButtonCls} min-h-tap`;
+
+const smallButtonCls = `${adminSmallButtonCls} min-h-tap px-3`;
+
+// The Admin look (app/admin): a plain bordered panel per section, title-2
+// headings, body-size intro text, v3 tokens only.
+const sectionCls = "scroll-mt-20 border border-line bg-surface-1 p-4";
+const headingCls = "title-2 text-ink";
+const introCls = "body mt-1 max-w-2xl text-ink-2";
 
 function formatCreated(iso: string): string {
   try {
@@ -555,7 +607,7 @@ function AnywhereCard() {
   useEffect(() => {
     if (!url) return;
     let cancelled = false;
-    QRCode.toDataURL(url, { margin: 1, width: 176, color: { dark: "#000000", light: "#ffffff" } })
+    QRCode.toDataURL(url, { margin: 1, width: 176, color: { dark: QR_DARK, light: QR_LIGHT } })
       .then((data) => !cancelled && setQr(data))
       .catch(() => !cancelled && setQr(null));
     return () => {
@@ -566,9 +618,9 @@ function AnywhereCard() {
   if (!features) return null;
 
   return (
-    <section className="rounded-xl border border-neutral-800 bg-neutral-900/40 p-6">
-      <h2 className="text-base font-semibold">{remote ? "Listen from anywhere" : "Open on your phone"}</h2>
-      <p className="mt-1 text-xs text-neutral-500">
+    <section id="phone" aria-labelledby="phone-heading" className={sectionCls}>
+      <h2 id="phone-heading" className={headingCls}>{remote ? "Listen from anywhere" : "Open on your phone"}</h2>
+      <p className={introCls}>
         {remote
           ? "This address works at home and away. Scan it with your phone's camera, or type it into the Android app."
           : "Scan with your phone's camera to open F7FIVE0. Remote access isn't set up, so this only works on your home network. An admin can turn it on in Admin > Remote access."}
@@ -579,11 +631,11 @@ function AnywhereCard() {
           <img src={qr} alt={`QR code for ${url}`} width={176} height={176} className="rounded-md" />
         ) : null}
         <div className="min-w-0">
-          <p className="break-all font-sans text-sm text-neutral-200">{url}</p>
+          <p className="break-all font-sans text-[15px] text-ink">{url}</p>
           <button
             type="button"
             onClick={() => void navigator.clipboard?.writeText(url)}
-            className="mt-3 rounded-md border border-neutral-700 px-3 py-1.5 text-xs text-neutral-300 hover:bg-neutral-800"
+            className={`${smallButtonCls} mt-3`}
           >
             Copy address
           </button>
@@ -620,38 +672,38 @@ function AndroidAppCard() {
   }, []);
 
   return (
-    <section className="rounded-xl border border-neutral-800 bg-neutral-900/40 p-6">
-      <h2 className="text-base font-semibold">Android app</h2>
-      <p className="mt-1 text-xs text-neutral-500">
+    <section id="android" aria-labelledby="android-heading" className={sectionCls}>
+      <h2 id="android-heading" className={headingCls}>Android app</h2>
+      <p className={introCls}>
         Install F7FIVE0 on your Android phone. Music keeps playing with the screen locked,
         and you stay signed in.
       </p>
       {apk === undefined ? (
-        <div className="mt-4 h-10 w-48 animate-pulse rounded-md bg-neutral-800/60" />
+        <div className="mt-4 h-10 w-48 animate-pulse bg-surface-2" />
       ) : apk === null ? (
-        <p className="mt-4 text-sm text-neutral-400">The Android app isn&apos;t available yet.</p>
+        <p className="mt-4 text-[15px] text-ink-3">The Android app isn&apos;t available yet.</p>
       ) : (
         <>
           <a
             href="/download/android"
-            className="mt-4 inline-flex items-center rounded-md bg-hive px-4 py-2 text-sm font-semibold text-on-hive hover:bg-hive-hover"
+            className="mt-4 inline-flex min-h-tap items-center rounded-md bg-hive px-4 text-sm font-semibold text-on-hive hover:bg-hive-hover"
           >
             Download for Android
           </a>
-          <p className="mt-2 text-xs text-neutral-500">
+          <p className="caption mt-2 tabular-nums text-ink-3">
             {apk.version ? `Version ${apk.version}` : apk.name}
             {apk.size > 0 ? ` · ${(apk.size / (1024 * 1024)).toFixed(0)} MB` : ""}
           </p>
-          <p className="mt-3 text-xs text-neutral-500">
+          <p className="body-2 mt-3 max-w-2xl text-ink-2">
             Open the downloaded file on your phone. If Android asks, allow installs from your
             browser, then tap Install. The app opens with this server already filled in; sign
             in with your F7FIVE0 username and password. Already have the app? Installing this
             file updates it in place.
           </p>
           {apk.armv7 ? (
-            <p className="mt-2 text-xs text-neutral-500">
+            <p className="caption mt-2 text-ink-3">
               Older 32-bit phone or TV box?{" "}
-              <a href="/download/android?abi=armv7" className="underline hover:text-neutral-300">
+              <a href="/download/android?abi=armv7" className="font-semibold text-hive-text hover:underline">
                 Get the 32-bit build
               </a>
               .

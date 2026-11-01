@@ -6,6 +6,11 @@ Endpoints:
       unreachable folders, unmatched items, missing art.
   GET  /api/admin/library/health/missing-files
       Eligible missing-file candidates (7+ days, reachable folder).
+  GET  /api/admin/library/health/files?state=missing|error&limit=&offset=
+      Every missing file, or every file ffprobe could not read, newest problem
+      first, a page at a time. The drill-down behind the count tiles.
+  GET  /api/admin/library/health/unreachable-folders
+      Library folders the service cannot open right now.
   DELETE /api/admin/library/health/missing-files/{media_file_id}
       Remove a single eligible candidate; deletes the item when its last
       file goes. Returns 409 if the file is back on disk.
@@ -17,7 +22,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import delete, exists, func, select, update
 from sqlalchemy.orm import Session
@@ -63,6 +68,29 @@ class MissingFileItem(BaseModel):
     item_title: Optional[str]
     library_kind: Optional[str]
     days_missing: int
+
+
+class HealthFileItem(BaseModel):
+    media_file_id: uuid.UUID
+    path: str
+    item_title: Optional[str]
+    library_kind: Optional[str]
+    kind: str
+    state: str
+    # Days since the scan first missed it (missing files only).
+    days_missing: Optional[int] = None
+    # Whether this file can be removed now (missing 7+ days, folder reachable).
+    eligible: bool = False
+
+
+class HealthFilesPage(BaseModel):
+    total: int
+    items: list[HealthFileItem]
+
+
+class UnreachableFolder(BaseModel):
+    path: str
+    library_kind: str
 
 
 # ---------------------------------------------------------------------------
@@ -382,6 +410,69 @@ def list_missing_files(
             library_kind=_library_kind_for_file(db, mf),
             days_missing=_days_missing(mf),
         ))
+    return out
+
+
+@router.get("/health/files", response_model=HealthFilesPage)
+def list_health_files(
+    _admin: Annotated[User, Depends(require_admin)],
+    db: Annotated[Session, Depends(get_db)],
+    state: Annotated[str, Query(pattern="^(missing|error)$")],
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> HealthFilesPage:
+    """Every missing file (longest missing first) or every probe error (most
+    recently seen first). The Missing files and Probe errors tiles open this."""
+    wanted = ScanState.missing if state == "missing" else ScanState.error
+    total = db.scalar(
+        select(func.count()).select_from(MediaFile).where(MediaFile.scan_state == wanted)
+    ) or 0
+    q = select(MediaFile).where(MediaFile.scan_state == wanted)
+    if wanted == ScanState.missing:
+        q = q.order_by(MediaFile.missing_since.is_(None), MediaFile.missing_since, MediaFile.path)
+    else:
+        q = q.order_by(MediaFile.updated_at.desc(), MediaFile.path)
+    rows = db.scalars(q.offset(offset).limit(limit)).all()
+
+    all_roots: list[str] = []
+    reachable: set[str] = set()
+    if wanted == ScanState.missing and rows:
+        all_roots = _all_folder_roots(db)
+        reachable = _reachable_roots(db)
+
+    items = [
+        HealthFileItem(
+            media_file_id=mf.id,
+            path=mf.path,
+            item_title=_item_title(db, mf),
+            library_kind=_library_kind_for_file(db, mf),
+            kind=mf.kind.value,
+            state=state,
+            days_missing=_days_missing(mf) if wanted == ScanState.missing else None,
+            eligible=wanted == ScanState.missing and _is_eligible(mf, reachable, all_roots),
+        )
+        for mf in rows
+    ]
+    return HealthFilesPage(total=total, items=items)
+
+
+@router.get("/health/unreachable-folders", response_model=list[UnreachableFolder])
+def list_unreachable_folders(
+    _admin: Annotated[User, Depends(require_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> list[UnreachableFolder]:
+    """Library folders the service cannot open right now (path-map translated),
+    the same test the Unreachable folders count uses."""
+    reachable = _reachable_roots(db)
+    out: list[UnreachableFolder] = []
+    seen: set[str] = set()
+    for kind, paths in library_folders.all_folders(db).items():
+        for p in paths:
+            tp = (translate_path(p, db) or p).rstrip("\\/")
+            if tp in reachable or tp in seen:
+                continue
+            seen.add(tp)
+            out.append(UnreachableFolder(path=tp, library_kind=kind))
     return out
 
 
