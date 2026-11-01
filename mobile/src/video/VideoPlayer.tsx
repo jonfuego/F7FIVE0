@@ -521,6 +521,11 @@ export function VideoPlayer({ mediaFileId, resumeSec = 0, onClose, onPlayNext }:
               : undefined
           }
           onLoad={(d) => {
+            // Show the controls when the picture starts: the hide timer runs
+            // from mount, so a slow start used to hide them before the first
+            // frame.
+            setControlsVisible(true);
+            scheduleHide();
             if (stream.mode === "hls") setPinned(pinnedVideoTrack(d.videoTracks));
             if (d.duration > 0) setSeekable(d.duration);
             const rel = positionRef.current - base;
@@ -536,6 +541,13 @@ export function VideoPlayer({ mediaFileId, resumeSec = 0, onClose, onPlayNext }:
           selectedTextTrack={selectedTextTrack}
         />
       )}
+      {/* Tap target over the picture. Since react-native-video 6.16 the
+          Android view (media3 PlayerView) swallows taps, so a Pressable around
+          <Video> never sees them (upstream issue 4750) and the controls could
+          not be brought back once hidden. A tap on this plain view bubbles to
+          the Pressable above. collapsable={false} keeps Android from
+          flattening it away. */}
+      <View style={StyleSheet.absoluteFill} collapsable={false} />
       {controlsVisible ? (
         <View style={styles.overlay} pointerEvents="box-none">
           <View style={styles.topBar}>
