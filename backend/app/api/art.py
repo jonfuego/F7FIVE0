@@ -17,6 +17,7 @@ SQLAlchemy session so either both commit or neither does.
 """
 from __future__ import annotations
 
+import mimetypes
 import os
 import uuid
 from datetime import datetime
@@ -39,6 +40,11 @@ from app.services import art_search as art_search_service
 from app.services import security as security_service
 from app.services.arr._base import ArrClientError
 from app.services.signed_urls import session_authorizes
+
+# Python 3.12's mimetypes has no .webp entry and falls back to the Windows
+# registry, which may not have one either, so the sized WEBP copies went out as
+# application/octet-stream. Register it so FileResponse picks image/webp.
+mimetypes.add_type("image/webp", ".webp")
 
 
 # ---------------------------------------------------------------------------

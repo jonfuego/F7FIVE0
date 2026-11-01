@@ -119,7 +119,7 @@ export function PlayerTrackMenu({
   }
   async function artistRadio() {
     setOpen(false);
-    await startArtistRadio<QueueItem>(artistId, { get: apiGet, playNextBlock });
+    await startArtistRadio<QueueItem>(artistId, { get: apiGet, play: playNextBlock });
   }
   // Navigate only. No pause / stop / queue clear here, so the dock keeps
   // playing while the Now Playing route closes behind the push.

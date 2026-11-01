@@ -158,8 +158,10 @@ which ones the server can open, and save. A scan starts right away.
 
 - TV shows and music merge across folders: a show with seasons on two drives
   is one show, an artist in two folders is one artist.
-- Movies don't merge: the same movie in two folders shows up twice (for
-  example a 4K copy and a 1080p copy), each with its own file.
+- Movies merge too: the same movie in two folders (for example a 4K copy
+  and a 1080p copy) shows up once, and its page has a Version picker. The
+  best copy plays unless you pick another. The same movie in two different
+  libraries stays two entries, one per library.
 - A folder that's offline (a NAS asleep, a drive unplugged) is skipped; its
   movies and episodes stay in the library until it's back.
 - Removing a folder takes its items out of the library. Nothing is deleted

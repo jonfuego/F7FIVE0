@@ -99,7 +99,13 @@ function AlbumHero({ album }: { album: AlbumDetail }) {
   async function onArtistRadio() {
     setRadioBusy(true);
     try {
-      await startArtistRadio<QueueItem>(album.artist_id, { get: apiGet, playNextBlock });
+      // Replace the queue and play now, like Artist radio on the artist page.
+      // playNextBlock would only slot the radio in after the current track,
+      // so an idle or paused player never started it.
+      await startArtistRadio<QueueItem>(album.artist_id, {
+        get: apiGet,
+        play: (items) => playAlbum(items, { shuffle: false }),
+      });
     } finally {
       setRadioBusy(false);
     }

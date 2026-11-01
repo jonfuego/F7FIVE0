@@ -57,6 +57,20 @@ test("adding to a queue that already has a current track leaves playing alone", 
   assert.equal(reducer(restoredPaused, { type: "playNext", item: item("d") }).playing, false);
 });
 
+test("artist radio from the album page (playAlbum) replaces a paused queue and plays its first track", () => {
+  // The album page used to hand radio to playNextBlock, which only inserts
+  // after the current track, so a paused or playing queue never started it.
+  const radio = [item("r1"), item("r2")];
+  const s = reducer(restoredPaused, { type: "playAlbum", items: radio, shuffle: false });
+  assert.deepEqual(s.items.map((i) => i.media_file_id), ["r1", "r2"]);
+  assert.equal(s.currentIndex, 0);
+  assert.equal(s.playing, true);
+  const viaBlock = reducer(restoredPaused, { type: "playNextBlock", items: radio });
+  assert.equal(viaBlock.currentIndex, 0);
+  assert.equal(viaBlock.items[0].media_file_id, "a");
+  assert.equal(viaBlock.playing, false);
+});
+
 test("hydrate keeps the restored flag, so a restored paused queue does not start on its own", () => {
   const s = reducer(INITIAL_STATE, { type: "hydrate", state: restoredPaused });
   assert.equal(s.playing, false);

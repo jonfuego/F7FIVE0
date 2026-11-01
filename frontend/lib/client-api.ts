@@ -3,6 +3,7 @@
 // All authenticated data fetches from client components should go through
 // apiGet / apiPost so that a single expired access token triggers exactly
 // one /api/session/refresh round-trip and the caller never sees the 401.
+// apiPost also takes a FormData body for multipart uploads (sent untouched).
 //
 // Only a real 401 from the refresh call (the refresh token is rejected) bounces
 // the user to /login; the promise then never resolves (we replace the whole
@@ -141,8 +142,13 @@ function redirectToLogin(): void {
 
 function doFetch(path: string, opts: Options): Promise<Response> {
   const headers: Record<string, string> = {};
-  let body: string | undefined;
-  if (opts.body !== undefined) {
+  let body: string | FormData | undefined;
+  if (typeof FormData !== "undefined" && opts.body instanceof FormData) {
+    // Multipart upload: hand the FormData to fetch as-is so the browser sets
+    // the boundary content-type and streams the file. A FormData can be sent
+    // again, so the retry after a refresh carries the same file.
+    body = opts.body;
+  } else if (opts.body !== undefined) {
     headers["content-type"] = "application/json";
     body = JSON.stringify(opts.body);
   }

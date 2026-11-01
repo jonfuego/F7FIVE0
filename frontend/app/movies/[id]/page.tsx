@@ -25,6 +25,7 @@ import {
   joinMeta,
 } from "@/lib/format";
 import { movieActivityLine } from "@/lib/movie-activity";
+import { chosenVersion, readyVersions, versionLabels } from "@/lib/movie-versions";
 import { useProgressMap } from "@/lib/progress";
 import { invalidateLists } from "@/lib/list-cache";
 import type { CastMember, MediaFile, MovieDetail, OverrideOut } from "@/lib/types";
@@ -155,32 +156,6 @@ export default function MovieDetailPage() {
   );
 }
 
-function _versionLabel(f: MediaFile): string {
-  const res = f.height ? `${f.height}p` : null;
-  const codec = f.video_codec ? f.video_codec.toUpperCase() : null;
-  if (res && codec) return `${res} ${codec}`;
-  if (res) return res;
-  if (codec) return codec;
-  return "Unknown";
-}
-
-function _bestFile(files: MediaFile[]): MediaFile | null {
-  if (!files.length) return null;
-  const codecScore = (c: string | null | undefined): number => {
-    if (!c) return 0;
-    const n = c.toLowerCase().replace(/[-\.]/g, "");
-    if (n === "hevc" || n === "h265") return 2;
-    if (n === "avc" || n === "h264") return 1;
-    return 0;
-  };
-  return [...files].sort((a, b) => {
-    if (a.is_preferred_version !== b.is_preferred_version) return a.is_preferred_version ? -1 : 1;
-    if ((b.height ?? 0) !== (a.height ?? 0)) return (b.height ?? 0) - (a.height ?? 0);
-    if ((b.bitrate_kbps ?? 0) !== (a.bitrate_kbps ?? 0)) return (b.bitrate_kbps ?? 0) - (a.bitrate_kbps ?? 0);
-    return codecScore(b.video_codec) - codecScore(a.video_codec);
-  })[0];
-}
-
 function MovieHero({
   movie,
   isAdmin,
@@ -205,16 +180,10 @@ function MovieHero({
       : null;
   const meta = joinMeta([movie.year, runtime, rating]);
 
-  const readyFiles = useMemo(
-    () => (movie.media_files ?? []).filter((f) => f.scan_state === "ready"),
-    [movie.media_files],
-  );
-  const defaultFile = useMemo(() => _bestFile(readyFiles), [readyFiles]);
+  const readyFiles = useMemo(() => readyVersions(movie.media_files), [movie.media_files]);
+  const labels = useMemo(() => versionLabels(readyFiles), [readyFiles]);
   const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
-  const primary =
-    readyFiles.find((f) => f.id === (selectedFileId ?? defaultFile?.id)) ??
-    defaultFile ??
-    (movie.media_files[0] ?? null);
+  const primary = chosenVersion(readyFiles, selectedFileId) ?? (movie.media_files[0] ?? null);
   const playHref = primary ? `/watch/${primary.id}` : null;
   const sortedCast = useMemo(
     () =>
@@ -281,7 +250,7 @@ function MovieHero({
               </label>
               <select
                 id="version-select"
-                value={selectedFileId ?? defaultFile?.id ?? ""}
+                value={primary?.id ?? ""}
                 onChange={(e) => setSelectedFileId(e.target.value)}
                 style={{
                   fontSize: 13,
@@ -294,7 +263,7 @@ function MovieHero({
               >
                 {readyFiles.map((f) => (
                   <option key={f.id} value={f.id}>
-                    {_versionLabel(f)}{f.is_preferred_version ? " (preferred)" : ""}
+                    {labels.get(f.id)}
                   </option>
                 ))}
               </select>

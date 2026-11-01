@@ -277,7 +277,10 @@ $EnvFile    = Join-Path $InstallDir ".env"
 $BackendDir = Join-Path $InstallDir "backend"
 $WebDir     = Join-Path $InstallDir "web"
 $VenvPy     = Join-Path $BackendDir ".venv\Scripts\python.exe"
-$IsUpgrade  = Test-Path $EnvFile
+# An upgrade is a COMPLETED install, not just an .env: a first install that
+# stopped partway already wrote .env, and its rerun must still create the admin
+# account (Test-CompletedInstall in common.ps1; F7FIVE0.iss IsUpgrade matches).
+$IsUpgrade  = Test-CompletedInstall $InstallDir ([bool](Get-Service -Name "F7FIVE0-API" -ErrorAction SilentlyContinue))
 
 foreach ($d in @($InstallDir, $BinDir, $RuntimeDir, $DataDir, $LogsDir)) {
     if (-not (Test-Path $d)) { New-Item -ItemType Directory -Path $d | Out-Null }
@@ -503,6 +506,13 @@ if (-not $nodeOk) {
     Expand-Archive -Path $zip -DestinationPath $unz -Force
     if (Test-Path $NodeDir) { Remove-Item -Recurse -Force $NodeDir }
     Move-Item (Get-ChildItem $unz | Select-Object -First 1).FullName $NodeDir
+    # Move-Item keeps the ACL the folder had in %TEMP% (the admin's profile:
+    # only that admin, SYSTEM and Administrators). "Securing the install
+    # folder" already ran, so put the folder back on the install folder's
+    # inherited rights; otherwise a -ServiceUser account can't run node.exe
+    # and F7FIVE0-Web fails to start (hand test I-14).
+    & icacls $NodeDir /reset /T /C /Q | Out-Null
+    if ($LASTEXITCODE -ne 0) { Fail "could not set permissions on $NodeDir (icacls $LASTEXITCODE)" }
     Remove-Item -Force $zip
 }
 Ok "Node.js: $Node"
@@ -798,7 +808,12 @@ if (-not $IsUpgrade) {
             return ("$out").Trim()
         } finally { $ErrorActionPreference = $prev }
     }
-    $DbPassword = New-Secret 24
+    # A rerun after a first install that stopped once .env was written: keep
+    # the database password .env already has (Merge-EnvFile never replaces
+    # DATABASE_URL), or the role would get a password .env does not know.
+    $DbPassword = Get-DbUrlPassword (Get-EnvValue "DATABASE_URL") $DbUser
+    if ($DbPassword) { Info "reusing the database password already in .env" }
+    else { $DbPassword = New-Secret 24 }
     $ready = $false
     $lastErr = ""
     for ($i = 0; $i -lt 30; $i++) {
@@ -808,7 +823,7 @@ if (-not $IsUpgrade) {
     }
     if (-not $ready) { Fail "Could not sign in to PostgreSQL as 'postgres' on 127.0.0.1:5432 ($lastErr). Check the password and that the PostgreSQL service is running. If Setup reused the password saved in postgres-superuser.txt ($saved) and PostgreSQL has a different one, correct or delete that file and run Setup again; see INSTALL.md, 'Already have PostgreSQL?'." }
     $verb = if ((Psql "SELECT 1 FROM pg_roles WHERE rolname='$DbUser'") -eq "1") { "ALTER" } else { "CREATE" }
-    $r = Psql "$verb ROLE $DbUser WITH LOGIN PASSWORD '$DbPassword';"
+    $r = Psql ("$verb ROLE $DbUser WITH LOGIN PASSWORD '" + $DbPassword.Replace("'", "''") + "';")
     if ($script:PsqlExit -ne 0) { Fail "Could not create the database role: $r" }
     if ((Psql "SELECT 1 FROM pg_database WHERE datname='$DbName'") -ne "1") {
         $r = Psql "CREATE DATABASE $DbName OWNER $DbUser ENCODING 'UTF8' TEMPLATE template0;"
@@ -970,11 +985,20 @@ try {
 # ---------------------------------------------------------------------------
 Step "Backend packages"
 # ---------------------------------------------------------------------------
+# Python tools (pip, alembic, the app CLI) log to stderr. When this script's
+# output is redirected (install.ps1 *> log), Windows PowerShell 5.1 turns each
+# stderr line into an error record, and with "Stop" the first INFO line ends
+# the install. Run them with "Continue" and judge them by exit code only.
+function Invoke-VenvPy {
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try { & $VenvPy @args } finally { $ErrorActionPreference = $prev }
+}
 if (-not (Test-Path $VenvPy)) {
     & $Py -m venv (Join-Path $BackendDir ".venv")
     if ($LASTEXITCODE -ne 0) { Fail "could not create the Python virtual environment" }
 }
-& $VenvPy -m pip install --disable-pip-version-check -q --upgrade pip
+Invoke-VenvPy -m pip install --disable-pip-version-check -q --upgrade pip
 # Install the hash-pinned lock (SEC-P0-1): --require-hashes refuses any dist
 # whose SHA-256 is not pinned, so a swapped or tampered wheel fails the
 # install rather than running with SYSTEM/service authority.
@@ -1014,7 +1038,7 @@ if ($pipRc -ne 0) {
     Fail "pip install failed ($pipRc). Full output: $pipOut"
 }
 # Compile now: a -ServiceUser account can't write __pycache__ in backend\.
-& $VenvPy -m compileall -q (Join-Path $BackendDir "app") | Out-Null
+Invoke-VenvPy -m compileall -q (Join-Path $BackendDir "app") | Out-Null
 Ok "Python packages installed"
 
 # ---------------------------------------------------------------------------
@@ -1023,7 +1047,7 @@ Step "Database migrations"
 $env:PYTHONPATH = $BackendDir
 Push-Location $InstallDir
 try {
-    & $VenvPy -m alembic -c (Join-Path $InstallDir "alembic.ini") upgrade head
+    Invoke-VenvPy -m alembic -c (Join-Path $InstallDir "alembic.ini") upgrade head
     if ($LASTEXITCODE -ne 0) { Fail "alembic upgrade failed ($LASTEXITCODE)" }
 } finally { Pop-Location }
 Ok "schema up to date"
@@ -1033,7 +1057,7 @@ if (-not $IsUpgrade -and $AdminUser) {
     $env:F7FIVE0_ADMIN_PASSWORD = $AdminPassword
     Push-Location $BackendDir
     try {
-        & $VenvPy -m app.cli create-admin --username $AdminUser --name $AdminUser
+        Invoke-VenvPy -m app.cli create-admin --username $AdminUser --name $AdminUser
         $rc = $LASTEXITCODE
     } finally {
         Pop-Location
@@ -1321,6 +1345,9 @@ $summaryFile = Join-Path $LogsDir "setup-summary.txt"
 try { [IO.File]::WriteAllLines($summaryFile, $summary, (New-Object Text.UTF8Encoding($false))) } catch { }
 # Let Users read Setup's own summary without elevation. Service logs stay private.
 Grant-SetupLogRead $summaryFile
+# Last: this install is complete, so the next Setup is an upgrade (see
+# Test-CompletedInstall). A run that stopped before here never writes it.
+try { Write-InstallComplete $InstallDir $VersionNow } catch { Warn "could not write $InstallCompleteMarker ($($_.Exception.Message)); the next Setup still sees the services and upgrades" }
 } catch {
     Write-Host ""
     Write-Host $_.Exception.Message -ForegroundColor Red

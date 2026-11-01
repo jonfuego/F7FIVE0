@@ -24,6 +24,16 @@ from app.models.user import User
 from app.services import library_settings, organizer
 
 
+@pytest.fixture(autouse=True)
+def _no_arr_rescan_thread(monkeypatch):
+    """apply_run and undo_run start a daemon thread that opens its own session to
+    ask Radarr/Sonarr/Lidarr to rescan. The test engine is one shared in-memory
+    SQLite connection (StaticPool), so that thread's session close/rollback could
+    land in the middle of undo's writes and leave the journal at "undoing"
+    (flaky on CI). No *arr app is configured here, so skip the thread."""
+    monkeypatch.setattr(organizer, "_trigger_arr_rescans", lambda *a, **k: None)
+
+
 # ---------------------------------------------------------------------------
 # Minimal audio file builders (same helpers as test_tag_writer.py)
 # ---------------------------------------------------------------------------

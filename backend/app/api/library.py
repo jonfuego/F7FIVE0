@@ -46,6 +46,7 @@ from app.models.tv import Episode, Series
 from app.models.user import User
 from app.services import arr_settings, history_keys, library_access, scan_status
 from app.services.bio_excerpt import bio_excerpt
+from app.services.version_pick import sort_versions
 from app.services.art import resolve_art, resolve_art_batch
 
 
@@ -258,7 +259,7 @@ def list_movies(
             **_movie_merged_fields(m),
             "poster_path": posters.get(m.id),
             "backdrop_path": backdrops.get(m.id),
-            "media_files": [_mf_out(f) for f in files.get(m.id, [])],
+            "media_files": [_mf_out(f) for f in sort_versions(files.get(m.id, []))],
         })
         for m in rows
     ]
@@ -318,7 +319,7 @@ def get_movie(
             entity_id=m.id,
             role=ROLE_BACKDROP,
         ),
-        "media_files": [_mf_out(f) for f in files.get(m.id, [])],
+        "media_files": [_mf_out(f) for f in sort_versions(files.get(m.id, []))],
         # Heavy JSONB columns. The DB attribute is `movie_cast` to dodge the
         # Python builtin / SQL keyword shadow; the JSON output uses `cast`.
         "cast": m.movie_cast or [],

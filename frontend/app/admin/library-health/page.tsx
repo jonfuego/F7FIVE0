@@ -16,6 +16,7 @@ import {
   healthViewFromSearch, healthViewHref, type HealthView,
 } from "@/lib/library-health-view";
 import { smallButtonCls } from "../admin-ui";
+import { emptyMissingListText, kindBreakdown, kindTotal } from "@/lib/library-health";
 
 type HealthCounts = {
   missing_files_total: number;
@@ -109,6 +110,13 @@ export default function LibraryHealthPage() {
         </div>
       )}
 
+      {counts && (
+        <div className="mb-6 grid grid-cols-2 gap-3 min-[600px]:grid-cols-4">
+          <InfoTile label="Unmatched" value={kindTotal(counts.unmatched)} detail={kindBreakdown(counts.unmatched)} />
+          <InfoTile label="Missing art" value={kindTotal(counts.missing_art)} detail={kindBreakdown(counts.missing_art)} />
+        </div>
+      )}
+
       {view ? (
         <section
           id={`health-list-${view}`}
@@ -121,7 +129,7 @@ export default function LibraryHealthPage() {
           </h2>
           <p className="body-2 mb-4 max-w-2xl text-ink-2">{LIST_DESCRIPTION[view]}</p>
           {view === "eligible" ? (
-            <EligibleList onChanged={loadCounts} />
+            <EligibleList onChanged={loadCounts} missingTotal={counts?.missing_files_total ?? 0} />
           ) : view === "unreachable" ? (
             <UnreachableList />
           ) : (
@@ -156,6 +164,18 @@ function CountTile({
       <span className="caption block text-ink-2">{label}</span>
       <span className="title-2 block tabular-nums text-ink">{value.toLocaleString("en-US")}</span>
     </button>
+  );
+}
+
+/** A count with no list behind it (unmatched items and missing art are fixed
+ *  from each item's page), so it is not a tab. */
+function InfoTile({ label, value, detail }: { label: string; value: number; detail: string }) {
+  return (
+    <div className="border border-transparent bg-surface-2 p-4">
+      <span className="caption block text-ink-2">{label}</span>
+      <span className="title-2 block tabular-nums text-ink">{value.toLocaleString("en-US")}</span>
+      {detail ? <span className="caption block tabular-nums text-ink-3">{detail}</span> : null}
+    </div>
   );
 }
 
@@ -210,7 +230,7 @@ function daysText(days: number | null): string {
   return `Missing ${days} ${days === 1 ? "day" : "days"}`;
 }
 
-function EligibleList({ onChanged }: { onChanged: () => void }) {
+function EligibleList({ onChanged, missingTotal }: { onChanged: () => void; missingTotal: number }) {
   const [items, setItems] = useState<MissingFileItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const { removing, removeErrors, removeFile } = useRemove((id) => {
@@ -226,7 +246,9 @@ function EligibleList({ onChanged }: { onChanged: () => void }) {
 
   if (error) return <p className="body-2 text-hive-text">{error}</p>;
   if (items === null) return <div className="h-16 animate-pulse bg-surface-2" />;
-  if (items.length === 0) return <p className="body-2 text-ink-2">{HEALTH_EMPTY_TEXT.eligible}</p>;
+  // The list only holds files missing 7+ days in a reachable folder, so say how
+  // many are missing in all (lib/library-health.ts), not just "none eligible".
+  if (items.length === 0) return <p className="body-2 text-ink-2">{emptyMissingListText(missingTotal)}</p>;
   return (
     <ul className="space-y-2">
       {items.map((f) => (

@@ -17,7 +17,7 @@ test("path targets the artist-radio auto-playlist and encodes the id", () => {
   );
 });
 
-test("hands the fetched items to playNextBlock", async () => {
+test("hands the fetched items to the play action", async () => {
   const paths: string[] = [];
   const played: string[][] = [];
   const ok = await startArtistRadio<string>("ar1", {
@@ -25,7 +25,7 @@ test("hands the fetched items to playNextBlock", async () => {
       paths.push(p);
       return { items: ["t1", "t2"] };
     },
-    playNextBlock: (items) => played.push(items),
+    play: (items) => played.push(items),
   });
   assert.equal(ok, true);
   assert.deepEqual(paths, ["/api/library/auto-playlist/artist-radio/ar1"]);
@@ -39,7 +39,7 @@ test("no artist id starts nothing and does not fetch", async () => {
       fetched = true;
       return { items: ["t1"] };
     },
-    playNextBlock: () => assert.fail("should not play"),
+    play: () => assert.fail("should not play"),
   });
   assert.equal(ok, false);
   assert.equal(fetched, false);
@@ -49,7 +49,7 @@ test("empty or malformed answers start nothing", async () => {
   for (const answer of [{ items: [] }, {}, null, undefined]) {
     const ok = await startArtistRadio<string>("ar1", {
       get: async () => answer,
-      playNextBlock: () => assert.fail("should not play"),
+      play: () => assert.fail("should not play"),
     });
     assert.equal(ok, false);
   }
@@ -60,7 +60,7 @@ test("a failed fetch is swallowed", async () => {
     get: async () => {
       throw new Error("boom");
     },
-    playNextBlock: () => assert.fail("should not play"),
+    play: () => assert.fail("should not play"),
   });
   assert.equal(ok, false);
 });

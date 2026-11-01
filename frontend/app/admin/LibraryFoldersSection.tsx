@@ -4,8 +4,8 @@
 // folders it can open, as the account its services run under, and starts a
 // folder scan. Watching and starting scans lives in Admin > Scans.
 //
-// TV and music merge across folders; the same movie in two folders shows up
-// twice. Removing a folder takes its items out of the library without
+// TV and music merge across folders, and so do movies: the same movie in two
+// folders is one movie with a Version picker. Removing a folder takes its items out of the library without
 // deleting anything. See app/services/library_folders.py.
 //
 // NAS sign-in: the services run as LocalSystem, which has no account on a NAS,
@@ -30,7 +30,7 @@ import type {
 type Draft = Record<LibraryFolderKind, string[]>;
 
 const HINT: Record<LibraryFolderKind, string> = {
-  movies: "The same movie in two folders shows up twice.",
+  movies: "The same movie in two folders shows up once, with a Version picker.",
   tv: "Shows merge across folders: seasons on two drives make one show.",
   music: "Artists and albums merge across folders.",
   music_videos: "Artists merge across folders.",

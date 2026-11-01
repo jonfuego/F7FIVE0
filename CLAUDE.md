@@ -418,8 +418,14 @@ INSTALL.md for the operator view.
 - Library folders: several per library (`app/services/library_folders.py`).
   Source is the `libraries` table once Admin > Library folders saves (then for
   every library), else `LIBRARY_ROOT_*` split on `;`. TV and music merge
-  across folders; movies don't (same movie in two folders = two entries, the
-  second copies details/art since `tmdb_id` is unique). An unreachable folder
+  across folders, and movies merge within a library: the same movie (TMDB tag,
+  or title and year) in two folders of one library is one movie with two
+  `media_files` (versions; `scan_library._match_movie`), and
+  `movie_versions.merge_twins` runs after every folder scan to fold twins older
+  scans made. Two libraries never merge: there the second entry copies
+  details/art since `tmdb_id` is unique. Movie APIs list `media_files` best
+  version first (`version_pick.sort_versions`), so a client that plays
+  `media_files[0]` plays the default version. An unreachable folder
   is skipped and its files keep their state; removing a folder in Admin marks
   its files missing.
 - NAS sign-in: the services run as LocalSystem, which has no account on a NAS,
@@ -1058,3 +1064,47 @@ is only proven by a real update on a VM: the tests use a stub Setup.
   and phone. Follow-ups: the TV rail and the PWA shortcut still say "Continue
   Watching"; the "Birmingham (Board Mix)" card has no art; the dock-over-page
   screenshot is unconfirmed.
+- 2026-10-29 (Hermes, 1.0.18 hand-test fixes): the squash.fuegofam.com hand
+  test of 1.0.18 on the FuegoTest VM found these; each fix is its own branch and
+  PR (#3 to #13), merged `--no-ff` to `main` in this order:
+  `fix/organizer-libraries` (L-10, Organizer read `r.libraries` from a bare
+  list; overlaps PR #2), `fix/library-health-counts` (L-05, Unmatched and
+  Missing art cards; overlaps PR #2), `fix/rerun-after-failed-install` (I-11,
+  "upgrade" now means `.env` plus `data\install-complete.json` or a registered
+  F7FIVE0-API service; the rerun reuses the DB password in `.env`),
+  `fix/finish-page-warnings` (I-03, the finish page summary is a scrolling memo),
+  `fix/album-artist-radio` (W-10), `fix/art-modal-refresh` (A-07/A-12/A-05, the
+  art dialog goes through client-api; File info path case; no error code
+  prefix), `fix/watch-title-queue` (watch title never shows an unrelated queue
+  item), `fix/movie-versions-merge` (L-08, same-library copies are versions:
+  scan reuses the movie and `merge_twins` runs after each folder scan),
+  `fix/back-keeps-place` (W-06), `fix/install-native-stderr` (venv Python runs
+  through `Invoke-VenvPy` so a redirected install.ps1 doesn't stop on alembic's
+  INFO stderr), `fix/node-acl-service-user` (I-14, `runtime\node` is
+  `icacls /reset` after the Move-Item from %TEMP%, or a -ServiceUser account
+  can't start F7FIVE0-Web). Checks on the merged tree: pytest 1435 passed, web
+  tests 405 + tsc + build, lint 0 errors, installer Pester 93, ISCC compiles.
+  A Setup built from it (1.0.19-hermes) passed I-14 on the VM (fresh
+  `-ServiceUser` install, all three services run as the account before and after
+  a silent Setup over it). CI on the PRs is red only for new advisories
+  (Next.js GHSA-2464-fhr4-w9xw critical RCE and two more, undici in mobile,
+  Pillow/certifi/dnspython in the lock) and the flaky
+  `test_organizer_roundtrip` undo state on Linux; those need their own fix
+  before a release. Still open from the hand test (feature calls for Jon): web
+  movie download (W-05), bulk Select (L-07), favicon at 16 px (W-20), artist
+  mixes want a pasted id (W-12), albums under "Other" (W-16), art "Remove
+  override" loses the previous picture (A-07). Not hand retested yet: I-03,
+  I-11, L-05, L-08, L-10 to L-15, W-06, W-10.
+- 2026-10-29 (Hermes, security advisories): merged `fix/security-advisories`
+  (PR #14) after CI went red on new advisories: next and eslint-config-next
+  16.4.3 (two critical unauthenticated RCEs and a DoS in <=16.4.0), undici
+  6.29.1 in the phone lock, Pillow 13.0.0 (no 12.x fix), certifi 2026.10.23,
+  dnspython 2.9.1. decode-uri-component GHSA-qr28-fpjm-wq7f is a reviewed
+  runtime exception in `mobile/npm-audit-exceptions.json` (the only fix is
+  ESM-only and query-string 7 under expo-router 6 requires it); it retires with
+  the Expo SDK upgrade. Side fix: `api/art.py` registers image/webp, because
+  Python 3.12's mimetypes has no .webp entry and the sized art copies went out
+  as application/octet-stream on Setup installs. CI green on the PR (all jobs);
+  locally pytest 1433 on Python 3.12.10 with the new lock, web 405 + build,
+  mobile jest 476 + verify. Not yet checked on a real install: art and posters
+  render (Pillow 13 thumbnails), web pages under Next 16.4.3.

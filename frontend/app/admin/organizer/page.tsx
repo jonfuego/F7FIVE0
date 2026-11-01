@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import { apiGet, apiPut, apiPost, apiDelete, ApiError } from "@/lib/client-api";
-import { loadLibraries, organizerLibraries } from "@/lib/libraries";
+import { LIBRARIES_PATH, organizerLibraries, parseLibraries } from "@/lib/libraries";
 import { inputCls, primaryButtonCls, smallButtonCls } from "../admin-ui";
 
 // ---------------------------------------------------------------------------
@@ -110,12 +110,10 @@ export default function OrganizerPage() {
 
   // Load the list of libraries
   useEffect(() => {
-    // GET /api/libraries answers a bare array; loadLibraries parses it. The page
-    // used to read `{libraries: [...]}`, which never existed, so it always said
-    // "No music, movies, or TV libraries found."
-    loadLibraries(apiGet)
-      .then((all) => {
-        const libs: LibraryOut[] = organizerLibraries(all);
+    // The backend answers a bare array of libraries, not `{libraries: [...]}`.
+    apiGet<unknown>(LIBRARIES_PATH)
+      .then((r) => {
+        const libs: LibraryOut[] = organizerLibraries(parseLibraries(r));
         setLibraries(libs);
         if (libs.length > 0 && !selectedId) setSelectedId(libs[0].id);
         setLibrariesLoaded(true);

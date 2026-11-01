@@ -17,6 +17,7 @@ import { colorForTitle, hueFromString } from "@/lib/format";
 import { emptyLibraryText } from "@/lib/library-scan";
 import { albumToQueueItems, useQueue } from "@/lib/queue";
 import { useScanState } from "@/lib/use-scan-state";
+import { useScrollRestoration } from "@/lib/scroll-restoration";
 import type { Album, AlbumDetail, OverrideOut } from "@/lib/types";
 import { useViewPref } from "@/lib/use-view-pref";
 import { artSized } from "@/lib/art-url";
@@ -24,6 +25,7 @@ import { artSized } from "@/lib/art-url";
 type EditInitial = OverrideOut & { algorithmic_sort_hint: string };
 
 export default function MusicAlbumsPage() {
+  useScrollRestoration();
   // Saved view: being on Albums makes it the Music browse tab (stored on the
   // server per user), once per visit.
   const [browse, setBrowse, browseLoaded] = useViewPref("music.browse");

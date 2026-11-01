@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from app.models.media_file import MediaFile
+from app.models.media_file import MediaFile, ScanState
 
 
 def _codec_score(codec: Optional[str]) -> int:
@@ -24,16 +24,23 @@ def _codec_score(codec: Optional[str]) -> int:
     return 0
 
 
+def _key(f: MediaFile) -> tuple:
+    return (
+        not bool(f.is_preferred_version),
+        -(f.height or 0),
+        -(f.bitrate_kbps or 0),
+        -_codec_score(f.video_codec),
+    )
+
+
 def best_file(files: list[MediaFile]) -> Optional[MediaFile]:
     """Return the best version from a list, or None for an empty list."""
     if not files:
         return None
-    return min(
-        files,
-        key=lambda f: (
-            not bool(f.is_preferred_version),
-            -(f.height or 0),
-            -(f.bitrate_kbps or 0),
-            -_codec_score(f.video_codec),
-        ),
-    )
+    return min(files, key=_key)
+
+
+def sort_versions(files: list[MediaFile]) -> list[MediaFile]:
+    """Ready files first, best version first (stable otherwise). Clients that
+    play `media_files[0]` (home hero, phone, TV) then play the default version."""
+    return sorted(files, key=lambda f: (f.scan_state != ScanState.ready, *_key(f)))

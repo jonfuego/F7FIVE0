@@ -27,7 +27,8 @@ export type MediaFile = {
   duration_sec: number | null;
   bitrate_kbps: number | null;
   scan_state: "pending" | "ready" | "missing" | "error" | string;
-  is_preferred_version: boolean | null;
+  // The admin-pinned version of a movie or episode. Optional: older servers omit it.
+  is_preferred?: boolean;
 };
 
 export type CastMember = {

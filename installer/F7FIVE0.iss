@@ -104,11 +104,25 @@ var
   OptionsPage: TInputQueryWizardPage;
   PortsPage: TInputQueryWizardPage;
   TmdbLink: TNewStaticText;
+  SummaryMemo: TNewMemo;
   InstallFailed: Boolean;
 
+// An upgrade is a COMPLETED install, not just an .env: install.ps1 writes .env
+// partway through a first install, before the admin account, so a rerun after
+// a first install that stopped must show the admin page again. Same test as
+// Test-CompletedInstall in common.ps1: .env plus data\install-complete.json
+// (written at the end of every successful install.ps1 run), or, for installs
+// made before that marker, the F7FIVE0-API service (install.ps1 registers it
+// only after the admin account). PrepareToInstall stops the service but never
+// removes it, so the answer is the same at ssPostInstall.
 function IsUpgrade: Boolean;
+var
+  Dir: String;
 begin
-  Result := FileExists(AddBackslash(WizardDirValue) + '.env');
+  Dir := AddBackslash(WizardDirValue);
+  Result := FileExists(Dir + '.env') and
+    (FileExists(Dir + 'data\install-complete.json') or
+     RegKeyExists(HKEY_LOCAL_MACHINE, 'SYSTEM\CurrentControlSet\Services\F7FIVE0-API'));
 end;
 
 // Is there a <Root>\<version>\bin\psql.exe? (Root is Program Files\PostgreSQL.)
@@ -340,6 +354,34 @@ begin
   PortsPage.Values[0] := '3001';
 end;
 
+// Shows the summary on the finish page in a read-only memo that scrolls.
+// A static label just clips: with a warning or two under "Needs attention"
+// the text ran under the "Open F7FIVE0" checkbox and the rest was lost.
+procedure ShowFinishSummary(Summary: String);
+begin
+  StringChangeEx(Summary, #13#10, #10, True);
+  StringChangeEx(Summary, #10, #13#10, True);
+  if SummaryMemo = nil then
+  begin
+    SummaryMemo := TNewMemo.Create(WizardForm);
+    SummaryMemo.Parent := WizardForm.FinishedPage;
+    SummaryMemo.ReadOnly := True;
+    SummaryMemo.WordWrap := True;
+    SummaryMemo.ScrollBars := ssVertical;
+    SummaryMemo.WantReturns := False;
+    SummaryMemo.Color := clBtnFace;
+  end;
+  WizardForm.FinishedLabel.Visible := False;
+  WizardForm.RunList.Top := WizardForm.FinishedPage.Height - ScaleY(60);
+  SummaryMemo.Left := WizardForm.FinishedLabel.Left;
+  SummaryMemo.Top := WizardForm.FinishedLabel.Top;
+  SummaryMemo.Width := WizardForm.FinishedLabel.Width;
+  SummaryMemo.Height := WizardForm.RunList.Top - SummaryMemo.Top - ScaleY(8);
+  SummaryMemo.Text := Summary;
+  SummaryMemo.SelStart := 0;
+  SummaryMemo.Visible := True;
+end;
+
 procedure CurPageChanged(CurPageID: Integer);
 var
   Summary: AnsiString;
@@ -351,12 +393,7 @@ begin
     // install.ps1 writes a short summary (addresses, home network access,
     // anything that still needs doing).
     if LoadStringFromFile(ExpandConstant('{app}\logs\setup-summary.txt'), Summary) then
-    begin
-      WizardForm.FinishedLabel.Caption := String(Summary);
-      WizardForm.FinishedLabel.AutoSize := False;
-      WizardForm.FinishedLabel.Height := WizardForm.FinishedPage.Height - WizardForm.FinishedLabel.Top - ScaleY(70);
-      WizardForm.RunList.Top := WizardForm.FinishedPage.Height - ScaleY(60);
-    end;
+      ShowFinishSummary(String(Summary));
   end;
 end;
 
