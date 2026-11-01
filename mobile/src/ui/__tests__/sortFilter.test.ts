@@ -1,4 +1,4 @@
-import { applySortFilter, compareValues, toggleDir, type FilterOption, type SortOption } from "../sortFilter";
+import { applySortFilter, compareValues, titleSortKey, toggleDir, type FilterOption, type SortOption } from "../sortFilter";
 
 interface Row {
   title: string;
@@ -67,5 +67,33 @@ describe("toggleDir", () => {
   it("flips direction", () => {
     expect(toggleDir("asc")).toBe("desc");
     expect(toggleDir("desc")).toBe("asc");
+  });
+});
+
+describe("titleSortKey", () => {
+  it("drops one leading article and lowercases, like the server", () => {
+    expect(titleSortKey("The Abyss")).toBe("abyss");
+    expect(titleSortKey("A Quiet Place")).toBe("quiet place");
+    expect(titleSortKey("An American Werewolf in London")).toBe("american werewolf in london");
+    expect(titleSortKey("THE 'Burbs")).toBe("'burbs");
+    expect(titleSortKey("Theodore")).toBe("theodore");
+    expect(titleSortKey("A.I. Artificial Intelligence")).toBe("a.i. artificial intelligence");
+    expect(titleSortKey(null)).toBeNull();
+  });
+
+  it("uses the sort override when set", () => {
+    expect(titleSortKey("The Abyss", "Zzz")).toBe("zzz");
+    expect(titleSortKey("The Abyss", "  ")).toBe("abyss");
+  });
+
+  it("files The titles under their first real word in a Title sort", () => {
+    type M = { title: string };
+    const list: M[] = [{ title: "The Abyss" }, { title: "Accepted" }, { title: "Beetlejuice" }, { title: "The Burbs" }];
+    const out = applySortFilter(list, {
+      sorts: [{ key: "title", label: "Title", value: (m) => titleSortKey(m.title) }],
+      sortKey: "title",
+      dir: "asc",
+    });
+    expect(out.map((m) => m.title)).toEqual(["The Abyss", "Accepted", "Beetlejuice", "The Burbs"]);
   });
 });

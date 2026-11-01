@@ -21,6 +21,15 @@ export interface FilterOption<T> {
   predicate: (item: T) => boolean;
 }
 
+/** Title sort key that matches the server's order (`api/library.py::_sort_expr`):
+ * the admin's sort override when set, else the title, lowercased, with one
+ * leading "the ", "a " or "an " dropped, so "The Abyss" files under A. */
+export function titleSortKey(title: string | null | undefined, override?: string | null): string | null {
+  const base = (override && override.trim()) || title;
+  if (base == null) return null;
+  return String(base).toLowerCase().replace(/^(the|a|an)\s+/, "");
+}
+
 /** Compare two sort values, nulls last, strings case-insensitively. */
 export function compareValues(a: string | number | null | undefined, b: string | number | null | undefined): number {
   const an = a == null;

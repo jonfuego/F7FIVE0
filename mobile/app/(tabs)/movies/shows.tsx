@@ -10,7 +10,7 @@ import { QueryState } from "@/ui/QueryState";
 import { RefreshableGrid } from "@/ui/RefreshableGrid";
 import { LibraryScreen, libraryBody } from "@/ui/LibraryScreen";
 import type { FilterOption, SortOption } from "@/ui/sortFilter";
-import { toggleDir } from "@/ui/sortFilter";
+import { titleSortKey, toggleDir } from "@/ui/sortFilter";
 import { SortFilterBar } from "@/ui/SortFilterBar";
 import { useAlphaRail } from "@/ui/useAlphaRail";
 import { useGrid } from "@/ui/useGrid";
@@ -18,7 +18,7 @@ import { useViewPref } from "@/state/viewPrefs";
 import { isSortFilterState, sortFilterInitial, useSortFilter } from "@/ui/useSortFilter";
 
 const SHOW_SORTS: SortOption<Series>[] = [
-  { key: "title", label: "Title", value: (s) => s.title },
+  { key: "title", label: "Title", value: (s) => titleSortKey(s.title, s.sort_title) },
   { key: "year", label: "Year", value: (s) => s.year ?? null },
   { key: "added", label: "Date added", value: (s) => s.created_at ?? null },
 ];

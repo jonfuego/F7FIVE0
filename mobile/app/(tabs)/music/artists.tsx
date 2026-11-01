@@ -9,7 +9,7 @@ import { QueryState } from "@/ui/QueryState";
 import { RefreshableGrid } from "@/ui/RefreshableGrid";
 import { LibraryScreen, libraryBody } from "@/ui/LibraryScreen";
 import type { FilterOption, SortOption } from "@/ui/sortFilter";
-import { toggleDir } from "@/ui/sortFilter";
+import { titleSortKey, toggleDir } from "@/ui/sortFilter";
 import { SortFilterBar } from "@/ui/SortFilterBar";
 import { Tile } from "@/ui/Tile";
 import { useAlphaRail } from "@/ui/useAlphaRail";
@@ -18,7 +18,7 @@ import { useViewPref } from "@/state/viewPrefs";
 import { isSortFilterState, sortFilterInitial, useSortFilter } from "@/ui/useSortFilter";
 
 const ARTIST_SORTS: SortOption<Artist>[] = [
-  { key: "name", label: "Name", value: (a) => a.name },
+  { key: "name", label: "Name", value: (a) => titleSortKey(a.name) },
   { key: "albums", label: "Albums", value: (a) => a.album_count },
 ];
 

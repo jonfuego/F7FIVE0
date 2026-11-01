@@ -14,14 +14,14 @@ import { LibraryScreen, libraryBody } from "@/ui/LibraryScreen";
 import type { FilterOption, SortOption } from "@/ui/sortFilter";
 import { SortFilterBar } from "@/ui/SortFilterBar";
 import { TrackRow } from "@/ui/TrackRow";
-import { toggleDir } from "@/ui/sortFilter";
+import { titleSortKey, toggleDir } from "@/ui/sortFilter";
 import { useAlphaRail } from "@/ui/useAlphaRail";
 import { useViewPref } from "@/state/viewPrefs";
 import { isSortFilterState, sortFilterInitial, useSortFilter } from "@/ui/useSortFilter";
 import type { SongRow } from "@/api/types";
 
 const SONG_SORTS: SortOption<SongRow>[] = [
-  { key: "title", label: "Title", value: (s) => s.title },
+  { key: "title", label: "Title", value: (s) => titleSortKey(s.title) },
   { key: "artist", label: "Artist", value: (s) => s.artist_name },
   { key: "album", label: "Album", value: (s) => s.album_title },
   { key: "duration", label: "Length", value: (s) => s.duration_sec ?? 0 },
