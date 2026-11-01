@@ -820,7 +820,20 @@ INSTALL.md for the operator view.
   defaults to `https`. An explicit `http://` to a public host asks for confirmation
   on the sign-in screen before the address is saved or a password is sent
   (`isPublicCleartext`, `cleartextWarning`). Stamped addresses keep the scheme they
-  carry.
+  carry. That http only works because the manifest allows cleartext:
+  `mobile/plugins/withCleartext.js` sets `android:usesCleartextTraffic="true"` on
+  every prebuild (listed in `app.config.ts`, test `src/lib/__tests__/cleartext.test.ts`).
+  Android blocks http for apps targeting API 28+ without it, and through 1.0.19
+  the app could not sign in to a LAN server ("Can't reach that server"). The JS
+  rules above decide when http is fine; never remove the plugin.
+- Video taps on Android: since react-native-video 6.16 the Android view (media3
+  `PlayerView`) swallows touches, so a `Pressable` wrapped around `<Video>` never
+  gets `onPress` (upstream issue 4750, still open on 6.19.3). The phone player
+  (`mobile/src/video/VideoPlayer.tsx`) keeps a plain `View` (`collapsable={false}`,
+  absolute fill) right after the `<Video>` so a tap lands on an RN view and bubbles
+  to the Pressable that toggles the controls. Without it the controls hid after
+  5 s and never came back (1.0.18, every video). Keep that view, and never rely
+  on a native view passing a tap up to a JS touchable.
 - Saved library views (which Music browse tab, movie genre and sort, TV
   filter, Music Videos order, Mixes picker values; on the app the hub chips,
   sort/filter and genre) live on the server, per user, in `user_view_prefs`:
@@ -1156,3 +1169,34 @@ is only proven by a real update on a VM: the tests use a stub Setup.
   locally pytest 1433 on Python 3.12.10 with the new lock, web 405 + build,
   mobile jest 476 + verify. Not yet checked on a real install: art and posters
   render (Pillow 13 thumbnails), web pages under Next 16.4.3.
+- 2026-11-01 (Hermes, v1.0.19 and v1.0.20): Jon reported no on-screen controls on
+  music videos on Android; the cause was the react-native-video tap bug (every
+  video; see the video taps rule). v1.0.19 (versionCode 20) released from `main`
+  `9bc793d` with everything since 1.0.18: the hand-test and security merges
+  already on `main`, then merged `--no-ff`: `fix/nvenc-driver-floor`,
+  `fix/mobile-article-sort`, `fix/review-1.0.18` (PR #2, reworked: `main` merged
+  in; Organizer and `lib/libraries.ts` take main's loader, Library health keeps
+  PR #2's tiles plus main's Unmatched and Missing art counts as info tiles and
+  main's empty-list text; its red CI was only the pip-audit gate),
+  `fix/video-controls-tap`, `chore/app-1.0.19`, and `fix/advisories-nov` (CI went
+  red on new advisories after the merge: pyasn1 0.6.5 in the lock, an npm
+  override pins node-forge 1.4.2 (proven with `npx expo export --platform
+  android`), two stale exceptions removed). The PR #2 Python pin was checked
+  here: the python.org 3.12.10 file matches the manifest hash and is Valid,
+  signed by Python Software Foundation. Checks on the merged tree: pytest 1450
+  passed (11 skipped), web tsc + 414 tests + build, lint 0 errors, mobile tsc +
+  jest 479 + lint 0 errors, installer parse clean, download-verify,
+  update-verify, winget-line and duckdns-migrate pass, Pester 93 of 93 (Pester
+  3.4 under Windows PowerShell 5.1; the tests fail in setup under Pester 5). The
+  dev database (C:\f7dev, 55432) went 0029 to 0033 on PostgreSQL with no error.
+  The arm64-only release APK cannot start on the x86_64 emulator (1.0.18 fails
+  the same way), so an x86_64 copy of the same code was tested: controls show at
+  start, hide after 5 s, a tap brings them back, Pause and Back 10 work. That
+  test also found the app could not reach a plain-http server at all. v1.0.20
+  (versionCode 21) from `main` `8e69a97`: `fix/android-cleartext` (see the server
+  addresses rule) and `chore/app-1.0.20`. On the emulator with no hand edits,
+  sign-in to `http://10.0.2.2:3101`, art and a music video all work over http;
+  `aapt2 dump xmltree` shows the flag in the signed APK. jest 482, CI and CodeQL
+  green on both release commits, both Release runs published Setup, APK, zip,
+  SBOMs and `SHA256SUMS.txt`. Not done: a real phone check (controls tap, LAN
+  sign-in), a clean-VM Setup, and Jon's update of the live server from 1.0.18.
