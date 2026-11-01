@@ -37,7 +37,7 @@ from app.api.media_files import content_disposition, optional_current_user
 from app.api.schemas import ClientErrorReport, MinClientVersionOut
 from app.config import settings
 from app.models.user import User
-from app.services import android_app, apk_stamp, arr_settings
+from app.services import android_app, apk_stamp, arr_settings, nvenc_check
 from app.services import security as security_service
 
 
@@ -79,7 +79,7 @@ def features() -> dict:
         },
         # Hardware (NVENC) transcoding. Without it the web player starts
         # transcoded video at 720p instead of the top of the ladder.
-        "transcode": {"hardware": bool(settings.nvenc_enabled)},
+        "transcode": {"hardware": nvenc_check.nvenc_usable()},
         # Which *arr apps are set up. Admin shows "Run *arr sync now" only when
         # at least one is; folder libraries have no *arr to sync.
         "arr": {

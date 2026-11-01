@@ -169,8 +169,9 @@ class Settings(BaseSettings):
     ffprobe_bin: str = "ffprobe"
     transcode_cache_dir: Path = _DATA_ROOT / "transcode-cache"
     transcode_cache_max_gb: int = 200
-    # NVIDIA hardware encoding. The installer turns this on only when it
-    # detects an NVIDIA GPU; ffmpeg falls back to libx264 when off.
+    # NVIDIA hardware encoding. Setup turns this on only when an NVIDIA GPU
+    # passes a test encode. Even when on, `services/nvenc_check.py` runs its
+    # own test encode once per process and uses libx264 if it fails.
     nvenc_enabled: bool = False
 
     # Offline download of non-direct-play video needs a server-side MP4

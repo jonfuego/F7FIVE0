@@ -254,3 +254,17 @@ def _forget_saved_path_mappings():
     path_map.invalidate()
     yield
     path_map.invalidate()
+
+
+@pytest.fixture(autouse=True)
+def _nvenc_probe_passes(monkeypatch):
+    """No test runs the real NVENC test encode. With `nvenc_enabled` on, the
+    probe answers "works", so tests that switch NVENC on keep meaning "a
+    working NVENC host". `tests/services/test_nvenc_check.py` replaces it to
+    test the failure path."""
+    from app.services import nvenc_check
+
+    nvenc_check.reset_cache()
+    monkeypatch.setattr(nvenc_check, "_probe", lambda: (True, ""))
+    yield
+    nvenc_check.reset_cache()
