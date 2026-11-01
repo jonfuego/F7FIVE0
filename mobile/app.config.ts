@@ -90,6 +90,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     "./plugins/withAbiFilter.js",
     // Android Auto media support (crit 44): automotive_app_desc + car metadata.
     "./plugins/withAndroidAuto.js",
+    // Plain-http servers on the LAN (Android blocks cleartext by default).
+    "./plugins/withCleartext.js",
     // Chromecast (phone only). Wires the react-native-google-cast options
     // provider + the Default Media Receiver (CC1AD845) into the Android
     // manifest. TV builds exclude it: react-native-google-cast is a phone/tablet
