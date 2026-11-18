@@ -541,9 +541,13 @@ class ContinueWatchingItemOut(BaseModel):
     UI needing another round trip.
     """
 
-    kind: str  # "movie" | "series" | "album" | "artist" (artist only with include_artists) | "music_video_release"
-    id: uuid.UUID  # parent id (movie/series/album/music_video_release)
-    media_file_id: uuid.UUID
+    kind: str  # "movie" | "series" | "album" | "artist" (artist only with include_artists) | "music_video_release" | "podcast_episode" (only with include_podcasts)
+    id: uuid.UUID  # parent id (movie/series/album/music_video_release); the episode id for podcast_episode
+    # Null only for a podcast episode with no file on the server (it plays
+    # through the publisher relay by episode id).
+    media_file_id: Optional[uuid.UUID] = None
+    # Set only for podcast_episode: the show, so the card can play the episode.
+    podcast_id: Optional[uuid.UUID] = None
     title: str
     subtitle: Optional[str] = None
     year: Optional[int] = None

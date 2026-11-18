@@ -1,15 +1,16 @@
-import { useRouter } from "expo-router";
-import React from "react";
-import { ScrollView, StyleSheet, Text, View, RefreshControl } from "react-native";
+import { useFocusEffect, useRouter } from "expo-router";
+import React, { useCallback, useRef } from "react";
+import { Alert, ScrollView, StyleSheet, Text, View, RefreshControl } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { useAlbums, useContinueWatching, useOnDeck, useRecent } from "@/api/queries";
-import type { AlbumDetail, RecentItem } from "@/api/types";
+import type { AlbumDetail, ContinueWatchingItem, RecentItem } from "@/api/types";
 import { albumToSongs } from "@/player/albumPlay";
 import { usePlayer } from "@/player/PlayerProvider";
 import { useApi } from "@/state/auth";
 import { colors, fonts, spacing, typography } from "@/state/theme";
 import { ContinueWatchingCard } from "@/ui/ContinueWatchingCard";
+import { continueArtFit, continueTarget } from "@/ui/continueTarget";
 import { MarqueeHeader } from "@/ui/MarqueeHeader";
 import { PosterCard } from "@/ui/PosterCard";
 import { QueryState } from "@/ui/QueryState";
@@ -24,7 +25,7 @@ function recentHref(it: RecentItem): string {
 export default function HomeScreen(): React.ReactElement {
   const router = useRouter();
   const api = useApi();
-  const { playSongs } = usePlayer();
+  const { playSongs, playEpisode } = usePlayer();
   // Tile Play: fetch the album detail and start it in the player, the same
   // way the album screen does. The card press still opens the detail screen.
   const playAlbumById = async (albumId: string) => {
@@ -36,7 +37,28 @@ export default function HomeScreen(): React.ReactElement {
       // Best-effort; nothing to play if the detail fetch fails.
     }
   };
-  const cont = useContinueWatching();
+  // Podcast episodes ride along, so the one you were listening to sits next to
+  // the movie you were watching instead of only on the Podcasts tab.
+  const cont = useContinueWatching({ podcasts: true });
+  // Home stays mounted under the tabs, so refresh the rail each time it comes
+  // back into view: an episode or movie just played should be at the front.
+  const contRef = useRef(cont);
+  contRef.current = cont;
+  useFocusEffect(
+    useCallback(() => {
+      const c = contRef.current;
+      if (!c.isFetching) void c.refetch();
+    }, []),
+  );
+  const openContinue = async (it: ContinueWatchingItem) => {
+    const target = continueTarget(it);
+    if (target.type === "watch") {
+      router.push(target.href as never);
+    } else if (target.type === "episode") {
+      const ok = await playEpisode(target.episode);
+      if (!ok) Alert.alert("Can't play that", "It isn't downloaded and the server can't be reached.");
+    }
+  };
   const recent = useRecent();
   const albums = useAlbums();
   // On Deck (Plex): the next episode for every started series, rolled forward
@@ -104,7 +126,8 @@ export default function HomeScreen(): React.ReactElement {
                   positionSec={it.position_sec}
                   durationSec={it.duration_sec}
                   width={220}
-                  onPress={() => router.push(`/watch/${it.media_file_id}`)}
+                  artFit={continueArtFit(it)}
+                  onPress={() => void openContinue(it)}
                 />
               ))}
             </ScrollView>
