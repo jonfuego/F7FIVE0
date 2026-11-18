@@ -15,6 +15,8 @@ interface ContinueWatchingCardProps {
   durationSec?: number | null;
   width: number;
   onPress: () => void;
+  /** "contain" shows square art (podcast covers) whole in the 16:9 frame. */
+  artFit?: "cover" | "contain";
   /** TV: take initial D-pad focus (first card on the browse screen). */
   hasTVPreferredFocus?: boolean;
 }
@@ -40,6 +42,7 @@ export function ContinueWatchingCard({
   durationSec,
   width,
   onPress,
+  artFit = "cover",
   hasTVPreferredFocus,
 }: ContinueWatchingCardProps): React.ReactElement {
   const api = useApi();
@@ -70,7 +73,7 @@ export function ContinueWatchingCard({
             source={{ uri, headers }}
             onError={() => setFailed(true)}
             style={[styles.art, frame]}
-            resizeMode="cover"
+            resizeMode={artFit}
             accessibilityIgnoresInvertColors
           />
         ) : (

@@ -30,8 +30,8 @@ from app.api.schemas import (
     TrackPlayCreateRequest, TrackPlayOut,
 )
 from app.models.art import (
-    ENTITY_ALBUM, ENTITY_ARTIST, ENTITY_MOVIE, ENTITY_MUSIC_VIDEO, ENTITY_SERIES,
-    ROLE_BACKDROP, ROLE_COVER, ROLE_POSTER, ROLE_THUMB,
+    ENTITY_ALBUM, ENTITY_ARTIST, ENTITY_MOVIE, ENTITY_MUSIC_VIDEO, ENTITY_PODCAST,
+    ENTITY_SERIES, ROLE_BACKDROP, ROLE_COVER, ROLE_POSTER, ROLE_THUMB,
 )
 from app.models.library import Library
 from app.models.markers import MediaMarker
@@ -41,6 +41,7 @@ from app.models.music import (
     Album, Artist, MusicVideo, MusicVideoRelease, Track,
 )
 from app.models.playback import WatchProgress
+from app.models.podcast import Podcast, PodcastEpisode, PodcastEpisodeProgress
 from app.models.track_play import TrackPlay
 from app.models.tv import Episode, Series
 from app.models.user import User
@@ -1811,6 +1812,7 @@ def list_continue_watching(
     user: Annotated[User, Depends(current_user)],
     db: Annotated[Session, Depends(get_db)],
     limit: int = Query(12, ge=1, le=50),
+    include_podcasts: bool = Query(False),
 ) -> list[ContinueWatchingItemOut]:
     """Unfinished items ordered by most-recent-update.
 
@@ -1819,7 +1821,70 @@ def list_continue_watching(
     shows up once (most recent episode wins). Completed rows are filtered
     server-side. Rows under MIN_PROGRESS_SECONDS are hidden so a misclick
     doesn't pollute the shelf.
+
+    `include_podcasts` adds podcast episodes the caller is partway through
+    (kind `podcast_episode`, one per show, interleaved by when they were last
+    played). Off by default: only clients that can play an episode by its id
+    ask for them (the phone's Home rail).
     """
+    out = _continue_video_and_music(db, user, limit)
+    if include_podcasts:
+        merged = out + _continue_podcasts(db, user, limit)
+        merged.sort(key=lambda it: _aware(it.updated_at), reverse=True)
+        out = merged[:limit]
+    return out
+
+
+def _aware(dt: datetime) -> datetime:
+    """SQLite hands back naive datetimes; treat them as UTC so rows from two
+    tables compare."""
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+
+
+def _continue_podcasts(
+    db: Session, user: User, limit: int,
+) -> list[ContinueWatchingItemOut]:
+    """The caller's own unfinished podcast episodes, newest first, one per show."""
+    rows = db.execute(
+        select(PodcastEpisodeProgress, PodcastEpisode, Podcast)
+        .join(PodcastEpisode, PodcastEpisode.id == PodcastEpisodeProgress.episode_id)
+        .join(Podcast, Podcast.id == PodcastEpisode.podcast_id)
+        .where(
+            PodcastEpisodeProgress.user_id == user.id,
+            PodcastEpisodeProgress.played_at.is_(None),
+            PodcastEpisodeProgress.position_sec >= MIN_PROGRESS_SECONDS,
+        )
+        .order_by(PodcastEpisodeProgress.updated_at.desc())
+        .limit(min(limit * 5, 250))
+    ).all()
+    if not rows:
+        return []
+    art = resolve_art_batch(
+        db, entity_kind=ENTITY_PODCAST, entity_ids={pod.id for _, _, pod in rows},
+        role=ROLE_COVER,
+    )
+    out: list[ContinueWatchingItemOut] = []
+    seen_show: set[uuid.UUID] = set()
+    for prog, ep, pod in rows:
+        if pod.id in seen_show:
+            continue
+        seen_show.add(pod.id)
+        out.append(ContinueWatchingItemOut(
+            kind="podcast_episode", id=ep.id, media_file_id=ep.media_file_id,
+            podcast_id=pod.id, title=ep.title, subtitle=pod.title,
+            poster_path=art.get(pod.id),
+            position_sec=prog.position_sec,
+            duration_sec=prog.duration_sec or ep.duration_sec,
+            updated_at=prog.updated_at,
+        ))
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _continue_video_and_music(
+    db: Session, user: User, limit: int,
+) -> list[ContinueWatchingItemOut]:
     overshoot = min(limit * 5, 250)
     rows = list(db.scalars(
         select(WatchProgress)

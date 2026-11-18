@@ -207,9 +207,15 @@ export interface AutoPlaylistItem {
 }
 
 export interface ContinueWatchingItem {
+  /** "movie" | "series" | "album" | "music_video_release" | "podcast_episode"
+   * (the last only when asked with include_podcasts). */
   kind: string;
+  /** The parent id; the episode id for a podcast episode. */
   id: string;
-  media_file_id: string;
+  /** Null only for a podcast episode with no file on the server. */
+  media_file_id?: string | null;
+  /** Podcast episodes only: the show. */
+  podcast_id?: string | null;
   title: string;
   subtitle?: string | null;
   year?: number | null;

@@ -109,8 +109,13 @@ export const useMusicVideoRelease = (id: string) =>
 export const useShows = () => useJsonQuery<Series[]>(["shows"], `/api/series?limit=${LIBRARY_LIMIT}`);
 export const useMusicVideoArtists = () =>
   useJsonQuery<MusicVideoArtist[]>(["music-videos"], "/api/music-videos/artists");
-export const useContinueWatching = () =>
-  useJsonQuery<ContinueWatchingItem[]>(["continue"], "/api/continue-watching?limit=20");
+/** Movies, shows, albums and music videos in progress, plus podcast episodes
+ * (the phone Home rail plays them; the TV layout has no Podcasts tab). */
+export const useContinueWatching = (opts: { podcasts?: boolean } = {}) =>
+  useJsonQuery<ContinueWatchingItem[]>(
+    opts.podcasts ? ["continue", "podcasts"] : ["continue"],
+    `/api/continue-watching?limit=20${opts.podcasts ? "&include_podcasts=true" : ""}`,
+  );
 export const useAllProgress = () => useJsonQuery<Progress[]>(["progress-all"], "/api/progress");
 export const useOnDeck = () => useJsonQuery<OnDeckItem[]>(["on-deck"], "/api/on-deck?limit=20");
 export const useRecent = () => useJsonQuery<RecentItem[]>(["recent"], "/api/recent?limit=20");
