@@ -35,13 +35,6 @@ export const viewport: Viewport = {
   viewportFit: "cover",
 };
 
-const FONTS_HREF =
-  "https://fonts.googleapis.com/css2?" +
-  [
-    "family=Archivo:wght@400;500;600;700;800;900",
-  ].join("&") +
-  "&display=swap";
-
 export default function RootLayout({
   children,
 }: {
@@ -50,9 +43,14 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
-        <link href={FONTS_HREF} rel="stylesheet" />
+        {/* Archivo is self-hosted (app/fonts.css); nothing loads from Google Fonts. */}
+        <link
+          rel="preload"
+          href="/fonts/archivo/archivo-latin.woff2"
+          as="font"
+          type="font/woff2"
+          crossOrigin=""
+        />
         <link rel="manifest" href="/manifest.json" />
         <link rel="apple-touch-icon" href="/icons/apple-touch-icon-180.png" />
         <meta name="apple-mobile-web-app-capable" content="yes" />

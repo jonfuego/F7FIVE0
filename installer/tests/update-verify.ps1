@@ -565,7 +565,7 @@ public static class Stub {
     $step = $iss.Substring($iss.IndexOf("procedure CurStepChanged"))
     $afterUpgradeBlock = $step.Substring($step.IndexOf("if not IsUpgrade then"))
     $afterUpgradeBlock = $afterUpgradeBlock.Substring($afterUpgradeBlock.IndexOf("end;"))
-    $leak = @("tmdbKey", "webPort", "apiPort", "streamPort", "adminUser", "adminPassword", "moviesDir", "tvDir", "musicDir", "musicVideosDir", "openFirewall", "postgresPassword")
+    $leak = @("tmdbKey", "webPort", "apiPort", "streamPort", "adminUser", "adminPassword", "moviesDir", "tvDir", "musicDir", "musicVideosDir", "openFirewall", "updateCheck", "postgresPassword")
     $leaked = @($leak | Where-Object { $afterUpgradeBlock -match [regex]::Escape("JsonPair('$_'") })
     Check "iss: an upgrade sends only appVersion and contactEmail (answers are inside 'if not IsUpgrade')" ($leaked.Count -eq 0 -and $afterUpgradeBlock -match "JsonPair\('appVersion'" -and $afterUpgradeBlock -match "JsonPair\('contactEmail'")
     Check "iss: every answer page is skipped on upgrade" ($iss -match "(?s)function ShouldSkipPage.*?IsUpgrade and \(\(PageID = MediaPage\.ID\).*?PortsPage\.ID\)\)")

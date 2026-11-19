@@ -22,6 +22,15 @@ AppVersion={#AppVersion}
 AppVerName=F7FIVE0 {#AppVersion}
 AppPublisher=F7FIVE0
 VersionInfoVersion={#AppVersionNumeric}
+; Product name and version stamped in Setup's file properties. SignPath
+; checks both on every signing request, so they must stay F7FIVE0 and the
+; release version (Inno puts the full AppVersion in ProductVersion, which
+; services/updates.py::read_pe_version reads).
+VersionInfoProductName=F7FIVE0
+VersionInfoDescription=F7FIVE0 Setup
+; The privacy policy (PRIVACY.md, copied into dist by build-dist.ps1) is shown
+; before the install starts; a silent install skips it.
+InfoBeforeFile=dist\PRIVACY.md
 DefaultDirName=C:\F7FIVE0
 UsePreviousAppDir=yes
 DirExistsWarning=no
@@ -101,6 +110,7 @@ var
   AdminPage: TInputQueryWizardPage;
   PgPage: TInputQueryWizardPage;
   NetPage: TInputOptionWizardPage;
+  UpdatesPage: TInputOptionWizardPage;
   OptionsPage: TInputQueryWizardPage;
   PortsPage: TInputQueryWizardPage;
   TmdbLink: TNewStaticText;
@@ -324,7 +334,18 @@ begin
   NetPage.Add('Let phones, TVs, and other computers on my home network connect');
   NetPage.Values[0] := True;
 
-  OptionsPage := CreateInputQueryPage(NetPage.ID,
+  UpdatesPage := CreateInputOptionPage(NetPage.ID,
+    'Updates', 'Should F7FIVE0 look for new versions?',
+    'Once a day F7FIVE0 can ask GitHub whether a newer version is out, and show it in ' +
+    'Admin > Updates. Nothing is sent but the question, and nothing installs itself: ' +
+    'you choose when to update.' + #13#10#13#10 +
+    'Leave it clear and F7FIVE0 only checks when you click Check now. ' +
+    'PRIVACY.md in the install folder lists everything F7FIVE0 contacts.',
+    False, False);
+  UpdatesPage.Add('Check GitHub for updates once a day');
+  UpdatesPage.Values[0] := True;
+
+  OptionsPage := CreateInputQueryPage(UpdatesPage.ID,
     'Optional extras', 'Both can be left blank',
     'TMDB API key: posters and descriptions for movies and shows. It is free: make a TMDB account, ' +
     'then request a key under Settings > API (link below). No key yet? Skip it and add it later ' +
@@ -401,7 +422,7 @@ function ShouldSkipPage(PageID: Integer): Boolean;
 begin
   Result := False;
   if IsUpgrade and ((PageID = MediaPage.ID) or (PageID = AdminPage.ID) or (PageID = PgPage.ID)
-      or (PageID = NetPage.ID) or (PageID = OptionsPage.ID) or (PageID = PortsPage.ID)) then
+      or (PageID = NetPage.ID) or (PageID = UpdatesPage.ID) or (PageID = OptionsPage.ID) or (PageID = PortsPage.ID)) then
     Result := True
   else if (PageID = PgPage.ID) and (not PostgresInstalled or SavedPostgresPassword) then
     Result := True;
@@ -483,7 +504,7 @@ end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 var
-  Cfg, CfgPath, Params, Lan: String;
+  Cfg, CfgPath, Params, Lan, Upd: String;
   ResultCode: Integer;
 begin
   if CurStep <> ssPostInstall then
@@ -491,6 +512,7 @@ begin
 
   CfgPath := ExpandConstant('{tmp}\f7five0-setup.json');
   if NetPage.Values[0] then Lan := '1' else Lan := '0';
+  if UpdatesPage.Values[0] then Upd := '1' else Upd := '0';
   Cfg := '{' + #13#10;
   if not IsUpgrade then
   begin
@@ -502,6 +524,7 @@ begin
       JsonPair('musicDir', MediaPage.Values[2], False) +
       JsonPair('musicVideosDir', MediaPage.Values[3], False) +
       JsonPair('openFirewall', Lan, False) +
+      JsonPair('updateCheck', Upd, False) +
       JsonPair('webPort', Trim(PortsPage.Values[0]), False) +
       JsonPair('apiPort', Trim(PortsPage.Values[1]), False) +
       JsonPair('streamPort', Trim(PortsPage.Values[2]), False) +

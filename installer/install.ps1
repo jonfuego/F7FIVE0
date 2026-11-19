@@ -90,6 +90,8 @@ param(
     [string] $TunnelToken = "",
     [string] $TmdbKey = "",
     [string] $ContactEmail = "",
+    # "0" turns off the daily GitHub update check (UPDATE_CHECK_ENABLED=false).
+    [string] $UpdateCheck = "",
     [string] $ServiceUser = ""
 )
 
@@ -252,6 +254,7 @@ $PublicHost     = Answer "publicHost" $PublicHost
 $DuckDnsToken   = Answer "duckDnsToken" $DuckDnsToken
 $TmdbKey        = Answer "tmdbKey" $TmdbKey
 $ContactEmail   = Answer "contactEmail" $ContactEmail
+$UpdateCheck    = Answer "updateCheck" $UpdateCheck
 $ServiceUser    = Answer "serviceUser" $ServiceUser
 $AppVersion     = Answer "appVersion" ""
 $ServicePassword = Answer "servicePassword" ""
@@ -881,6 +884,9 @@ $want = [ordered]@{
     "LIBRARY_ROOT_MUSIC_VIDEOS" = $MusicVideosDir
     "TMDB_API_KEY"            = $TmdbKey
     "MUSICBRAINZ_USER_AGENT_EMAIL" = $ContactEmail
+    # The wizard's "Check GitHub for updates" box (new installs only; an
+    # existing value is kept like every other key).
+    "UPDATE_CHECK_ENABLED"    = if ($UpdateCheck -eq "0") { "false" } else { "true" }
     "API_PORT"                = "$ApiPort"
     "STREAM_PORT"             = "$StreamPort"
     "WEB_PORT"                = "$WebPort"

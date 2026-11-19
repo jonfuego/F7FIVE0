@@ -9,8 +9,8 @@
 // data: or blob: or any https image (the Edit art picker previews candidates
 // straight from TMDB, iTunes, Cover Art Archive, TheAudioDB and whatever host
 // an *arr app returns, a list that changes by item and by source, so it can't
-// be a short allowlist; images cannot run script), and self-hosted fonts plus the vestigial Google Fonts
-// preconnect are allowed. 'unsafe-inline' for scripts/styles is kept on
+// be a short allowlist; images cannot run script). Fonts are self-hosted only (app/fonts.css); Google
+// Fonts is not allowed, so a page can never tell Google who opened it. 'unsafe-inline' for scripts/styles is kept on
 // purpose: Next injects inline hydration scripts and inline styles and this app
 // does not use per-request nonces.
 
@@ -27,8 +27,8 @@ export const CONTENT_SECURITY_POLICY = [
   "img-src 'self' data: blob: https: *.gstatic.com",
   "media-src 'self' blob:",
   "script-src 'self' 'unsafe-inline' www.gstatic.com",
-  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-  "font-src 'self' data: https://fonts.gstatic.com",
+  "style-src 'self' 'unsafe-inline'",
+  "font-src 'self' data:",
   "connect-src 'self' www.gstatic.com",
   "worker-src 'self' blob:",
   "frame-src 'self' www.gstatic.com",

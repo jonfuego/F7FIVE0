@@ -1,4 +1,5 @@
 @import "./f7five0-tokens.css";
+@import "./fonts.css";
 @import "../components/hive-wordmark.css";
 @tailwind base;
 @tailwind components;

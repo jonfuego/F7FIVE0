@@ -4,6 +4,34 @@ This page describes how the F7FIVE0 Windows installer is signed, who signs it,
 what gets signed, and how anyone can reproduce the build. It is the policy page
 that SignPath Foundation requires for an open source signing project.
 
+Free code signing provided by [SignPath.io](https://about.signpath.io),
+certificate by [SignPath Foundation](https://signpath.org).
+
+Status: F7FIVE0 is applying to SignPath Foundation. Until signing is
+switched on, releases ship an unsigned Setup.exe (see "How builds are produced"
+below), and the release notes say so.
+
+## Team roles
+
+F7FIVE0 has one maintainer, who holds every role:
+
+- Committers and reviewers: [Jon Fourneau (@jonfuego)](https://github.com/jonfuego).
+  Changes from anyone else arrive as pull requests and are reviewed by the
+  maintainer before they are merged.
+- Approvers: [Jon Fourneau (@jonfuego)](https://github.com/jonfuego). Every
+  signing request is approved by hand in SignPath, one release at a time.
+
+The maintainer's GitHub and SignPath accounts use multi-factor authentication.
+
+## Privacy
+
+This program will not transfer any information to other networked systems
+unless specifically requested by the user or the person installing or
+operating it. [PRIVACY.md](../PRIVACY.md) lists each outside service F7FIVE0
+can contact, what it sends, and how to turn it off. Setup shows the same
+policy before it installs anything and asks whether to check GitHub for
+updates.
+
 ## Project
 
 - Project: F7FIVE0, a self-hosted media server for Windows.

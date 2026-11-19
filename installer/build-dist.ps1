@@ -11,7 +11,7 @@
     installer\   install.ps1 / uninstall.ps1 / remote-access.ps1 / update.ps1 / common.ps1 / tunnel-logic.ps1 / pathmap-logic.ps1
     android\     F7FIVE0-<version>.apk (+ -armv7) and .sha256 files, when
                  -ApkDir is given. install.ps1 copies them into data\downloads.
-    alembic.ini  .env.example  LICENSE  README.md  INSTALL.md  VERSION
+    alembic.ini  .env.example  LICENSE  PRIVACY.md  README.md  INSTALL.md  VERSION
 
   Then, if Inno Setup is installed (or -Compile is passed), compiles
   installer\Output\F7FIVE0-Setup-<version>.exe.
@@ -80,7 +80,7 @@ foreach ($f in @("install.ps1", "uninstall.ps1", "common.ps1", "tunnel-logic.ps1
 # renders them from design\logos; the files in installer\branding\ are committed.
 $brandIco = Join-Path $PSScriptRoot "branding\f7five0.ico"
 if (Test-Path $brandIco) { Copy-Item $brandIco (Join-Path $Dist "installer\f7five0.ico") }
-foreach ($f in @("alembic.ini", ".env.example", "LICENSE", "README.md", "INSTALL.md")) {
+foreach ($f in @("alembic.ini", ".env.example", "LICENSE", "PRIVACY.md", "README.md", "INSTALL.md")) {
     $s = Join-Path $Repo $f
     if (Test-Path $s) { Copy-Item $s (Join-Path $Dist $f) }
 }
