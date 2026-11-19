@@ -475,3 +475,12 @@ It asks the same questions as Setup. Useful switches: `-InstallDir`,
 `-DuckDnsToken`, `-TunnelToken`) also sets up remote access from the
 console at the end of the install; most people use Admin > Remote access
 instead.
+
+### Silent install (winget, `Setup.exe /SILENT`)
+
+A silent install asks nothing, so it makes no account. When it finishes, open
+http://localhost:3001 on the server PC: the page asks you to create the admin
+account. That page works only from the server PC itself and only until the
+first account exists; a phone or another computer is told to finish on the
+server PC. `install.ps1 -NonInteractive` without an admin password does the
+same.

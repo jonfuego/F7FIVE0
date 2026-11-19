@@ -18,6 +18,13 @@ import {
 } from "@/lib/login-errors";
 import { passkeyErrorMessage } from "@/lib/passkey-errors";
 import { getPasskeyAssertion, passkeysSupported } from "@/lib/webauthn";
+import {
+  createAdminError,
+  loginView,
+  serverPcAddress,
+  validateNewAdmin,
+  type LoginView,
+} from "@/lib/first-run";
 import { HiveWordmark } from "@/components/HiveWordmark";
 
 // Wrapping the hook-using body in Suspense is what lets Next 14's static
@@ -65,6 +72,22 @@ function LoginPageInner() {
   const canPasskey = browserPasskeys && features?.passkeys?.enabled === true;
   useEffect(() => {
     setBrowserPasskeys(passkeysSupported());
+  }, []);
+
+  // A silent install makes no account: ask the API whether this server still
+  // needs its first admin (lib/first-run.ts). Any failure keeps sign-in.
+  const [view, setView] = useState<LoginView>("signin");
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/setup/state", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((state) => {
+        if (!cancelled) setView(loginView(state));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -174,6 +197,13 @@ function LoginPageInner() {
     }
   }
 
+  if (view === "create-admin") {
+    return <FirstRunAdmin onAccountExists={() => setView("signin")} />;
+  }
+  if (view === "finish-on-server") {
+    return <FinishOnServer />;
+  }
+
   return (
     <main className="login-shell">
       <div className="login-card">
@@ -247,6 +277,150 @@ function LoginPageInner() {
             {submitting ? "Signing in..." : "Sign in"}
           </button>
         </form>
+      </div>
+    </main>
+  );
+}
+
+// First visit after a silent install, on the server PC: create the admin, then
+// sign in through the normal BFF login so the session cookies are set.
+function FirstRunAdmin({ onAccountExists }: { onAccountExists: () => void }) {
+  const [username, setUsername] = useState("admin");
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function onSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (busy) return;
+    const problem = validateNewAdmin(username, password, confirm);
+    if (problem) {
+      setError(problem);
+      return;
+    }
+    setError(null);
+    setBusy(true);
+    const name = username.trim().toLowerCase();
+    try {
+      const res = await fetch("/api/setup/admin", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ username: name, password }),
+      });
+      if (!res.ok) {
+        const payload = await safeJson(res);
+        if (res.status === 409) onAccountExists();
+        setError(createAdminError(res.status, payload));
+        setBusy(false);
+        return;
+      }
+      const login = await fetch("/api/session/login", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-client-type": "browser" },
+        body: JSON.stringify({ username: name, password }),
+      });
+      // The account exists either way; a failed sign-in just shows the form.
+      window.location.replace(login.ok ? "/" : "/login");
+    } catch {
+      setError("Could not reach the server. Try again in a moment.");
+      setBusy(false);
+    }
+  }
+
+  const input =
+    "mt-1 w-full rounded-1 border border-line-strong bg-bg px-3 py-2 text-sm text-ink outline-none focus:border-ink";
+
+  return (
+    <main className="login-shell">
+      <div className="login-card">
+        <div className="mb-6">
+          <HiveWordmark href="/login" height={24} />
+          <h1 className="mt-4 text-lg font-bold text-ink">Create your admin account</h1>
+          <p className="mt-2 text-sm text-ink-2">
+            F7FIVE0 is installed. This account runs the server and invites everyone else.
+          </p>
+        </div>
+        <form onSubmit={onSubmit} className="space-y-4">
+          <div>
+            <label htmlFor="new-username" className="block text-sm text-ink-2">
+              Username
+            </label>
+            <input
+              id="new-username"
+              type="text"
+              autoComplete="username"
+              autoCapitalize="none"
+              spellCheck={false}
+              required
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              className={input}
+            />
+          </div>
+          <div>
+            <label htmlFor="new-password" className="block text-sm text-ink-2">
+              Password (8 or more characters)
+            </label>
+            <input
+              id="new-password"
+              type="password"
+              autoComplete="new-password"
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className={input}
+            />
+          </div>
+          <div>
+            <label htmlFor="new-confirm" className="block text-sm text-ink-2">
+              Confirm password
+            </label>
+            <input
+              id="new-confirm"
+              type="password"
+              autoComplete="new-password"
+              required
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              className={input}
+            />
+          </div>
+          {error && (
+            <p role="alert" className="text-sm text-danger">
+              {error}
+            </p>
+          )}
+          <button
+            type="submit"
+            disabled={busy}
+            className="min-h-tap w-full rounded-1 bg-hive px-4 py-2 text-sm font-semibold text-on-hive transition hover:bg-hive-hover disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {busy ? "Creating account..." : "Create account"}
+          </button>
+        </form>
+      </div>
+    </main>
+  );
+}
+
+// First visit after a silent install from a phone or another computer: the
+// admin can only be made on the server PC (the API refuses anyone else).
+function FinishOnServer() {
+  // Rendered only after the client-side state fetch, so window is there.
+  const address = serverPcAddress(typeof window === "undefined" ? null : window.location.port);
+  return (
+    <main className="login-shell">
+      <div className="login-card">
+        <div className="mb-6">
+          <HiveWordmark href="/login" height={24} />
+          <h1 className="mt-4 text-lg font-bold text-ink">Almost there</h1>
+          <p className="mt-2 text-sm text-ink-2">
+            F7FIVE0 is installed but has no account yet. On the PC where it is installed, open{" "}
+            <span className="font-semibold text-ink tabular-nums">{address}</span> and create the
+            admin account. Then come back here and sign in.
+          </p>
+        </div>
       </div>
     </main>
   );

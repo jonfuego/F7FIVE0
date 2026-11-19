@@ -41,6 +41,7 @@ from app.api import remote_access as remote_access_routes
 from app.api import tracks as tracks_routes
 from app.api import requests as requests_routes
 from app.api import sessions as sessions_routes
+from app.api import setup as setup_routes
 from app.api import stream as stream_routes
 from app.api import webhooks as webhook_routes
 
@@ -158,6 +159,9 @@ async def ready():
 
 # Routers
 app.include_router(auth_routes.router, prefix="/api/auth", tags=["auth"])
+# First-run admin (app/api/setup.py): open only while there is no account and
+# only to a browser on the server PC.
+app.include_router(setup_routes.router, prefix="/api/setup", tags=["setup"])
 # Passkeys (WebAuthn). Mounted under /api/auth so login/options + login/verify
 # sit beside /api/auth/login and flow through the tunnel's auth ingress. Routes:
 # /api/auth/passkey/{register,login}/{options,verify} and /api/auth/passkeys.

@@ -345,6 +345,7 @@ else { Info "No NVIDIA GPU found: software transcoding (works fine for a few str
 # ---------------------------------------------------------------------------
 Step "Collecting settings"
 # ---------------------------------------------------------------------------
+$DeferAdmin = $false
 if (-not $IsUpgrade) {
     if (-not $AdminUser) { $AdminUser = Ask "Admin username" "admin" }
     $AdminUser = $AdminUser.Trim().ToLower()
@@ -357,7 +358,15 @@ if (-not $IsUpgrade) {
         if ($p1.Length -lt 8) { Warn "Too short."; continue }
         $AdminPassword = $p1
     }
-    if (-not $AdminPassword -or $AdminPassword.Length -lt 8) { Fail "An admin password of 8+ characters is required." }
+    if (-not $AdminPassword -and $NonInteractive) {
+        # A silent install (winget, Setup /SILENT) has nobody to type a
+        # password. Make no account: the web app asks for the first admin on
+        # the first visit from this PC (backend app/api/setup.py).
+        $AdminUser = ""
+        $DeferAdmin = $true
+        Info "No admin password given: the first visit to http://localhost on this PC creates the admin account."
+    }
+    elseif (-not $AdminPassword -or $AdminPassword.Length -lt 8) { Fail "An admin password of 8+ characters is required." }
 
     if (-not ($MoviesDir -or $TvDir -or $MusicDir -or $MusicVideosDir) -and -not $NonInteractive) {
         Info "Point F7FIVE0 at your media folders. Leave any blank to skip it."
@@ -1341,7 +1350,11 @@ if ($PublicUrl) {
 if ($AndroidAppVersion) {
     $summary.Add("Android app $($AndroidAppVersion):  sign in on your phone's browser, then Account > Download for Android.")
 }
-if (-not $IsUpgrade) {
+if ($DeferAdmin) {
+    $summary.Add("")
+    $summary.Add("Next: open http://localhost:$WebPort on this PC to create your admin account.")
+    $summary.Add("  It only works from this PC, and only until the first account exists.")
+} elseif (-not $IsUpgrade) {
     $summary.Add("")
     $summary.Add("Sign in as '$AdminUser'. Your libraries fill in over the next few minutes.")
 }
