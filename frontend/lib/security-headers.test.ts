@@ -26,8 +26,10 @@ test("CSP allows what HLS and Cast need", () => {
 test("CSP serves fonts from this server only, never Google Fonts", () => {
   const fontSrc = CONTENT_SECURITY_POLICY.split("; ").find((d) => d.startsWith("font-src ")) ?? "";
   assert.equal(fontSrc, "font-src 'self' data:");
-  assert.ok(!CONTENT_SECURITY_POLICY.includes("fonts.googleapis.com"));
-  assert.ok(!CONTENT_SECURITY_POLICY.includes("fonts.gstatic.com"));
+  // Every source token in the policy; none may be a Google Fonts host.
+  const tokens = CONTENT_SECURITY_POLICY.split(/[;\s]+/).filter(Boolean);
+  const googleFonts = /^(https?:\/\/)?fonts\.(googleapis|gstatic)\.com$/;
+  assert.deepEqual(tokens.filter((t) => googleFonts.test(t)), []);
 });
 
 test("CSP lets the art picker tiles load https images but not http or scripts", () => {
