@@ -1019,3 +1019,12 @@ def test_scheduler_checks_for_updates_daily_with_jitter():
         assert job.max_instances == 1
     finally:
         scheduler.shutdown()
+
+
+def test_scheduler_skips_the_update_check_when_turned_off(monkeypatch):
+    monkeypatch.setattr(scheduler.settings, "update_check_enabled", False)
+    sched = scheduler.start()
+    try:
+        assert sched.get_job(scheduler.JOB_UPDATE_CHECK) is None
+    finally:
+        scheduler.shutdown()

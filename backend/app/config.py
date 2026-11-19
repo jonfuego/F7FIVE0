@@ -316,6 +316,10 @@ class Settings(BaseSettings):
     update_signer_subject: str = ""
     update_max_setup_mb: int = 1024
     server_version_file: str = ""
+    # Ask GitHub once a day whether a newer release is out (the only call the
+    # server makes on its own that the owner did not set up). False stops the
+    # daily check; Admin > Updates > Check now still works.
+    update_check_enabled: bool = True
 
     # Cloudflare
     cloudflare_tunnel_name: str = "f7five0"

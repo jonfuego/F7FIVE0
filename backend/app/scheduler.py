@@ -614,17 +614,21 @@ def start() -> BackgroundScheduler:
         # without waiting a full interval.
         next_run_time=datetime.now(timezone.utc) + timedelta(seconds=30),
     )
-    sched.add_job(
-        _run_update_check,
-        trigger=IntervalTrigger(days=1, jitter=UPDATE_CHECK_JITTER_SEC),
-        id=JOB_UPDATE_CHECK,
-        name="check GitHub for a newer F7FIVE0",
-        max_instances=1,
-        coalesce=True,
-        replace_existing=True,
-        # First look a few minutes after boot (spread out a little), then daily.
-        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=300 + random.randint(0, 300)),
-    )
+    # UPDATE_CHECK_ENABLED=false (Setup's "Check GitHub for updates" box left
+    # clear) means no scheduled call to GitHub at all. Admin > Updates still
+    # checks when an admin clicks Check now.
+    if settings.update_check_enabled:
+        sched.add_job(
+            _run_update_check,
+            trigger=IntervalTrigger(days=1, jitter=UPDATE_CHECK_JITTER_SEC),
+            id=JOB_UPDATE_CHECK,
+            name="check GitHub for a newer F7FIVE0",
+            max_instances=1,
+            coalesce=True,
+            replace_existing=True,
+            # First look a few minutes after boot (spread out a little), then daily.
+            next_run_time=datetime.now(timezone.utc) + timedelta(seconds=300 + random.randint(0, 300)),
+        )
     # Runs once, a minute after boot, so startup is not delayed. Cheap on every
     # later boot (it only stats files that already have their copies).
     sched.add_job(

@@ -209,6 +209,8 @@ jobs:
           | `sbom-*.cdx.json` | Software bill of materials. |
 
           Setup needs a 64-bit Windows 10 (1809 or newer) or Windows 11 PC, an administrator account, and an internet connection. Setup is not code-signed yet, so Windows may show "Windows protected your PC": choose **More info**, then **Run anyway**. Full guide: [INSTALL.md](https://github.com/{REPO}/blob/vX.Y.Z/INSTALL.md).
+
+          [Code signing policy](https://github.com/{REPO}/blob/vX.Y.Z/docs/code-signing-policy.md) | [Privacy](https://github.com/{REPO}/blob/vX.Y.Z/PRIVACY.md)
           '@
           $header = $header.Replace("X.Y.Z", "${{ steps.v.outputs.version }}").Replace("{REPO}", "${{ github.repository }}")
           Set-Content -Path notes.md -Value ($header + "`n`n" + (($generated | Out-String).Trim())) -Encoding utf8

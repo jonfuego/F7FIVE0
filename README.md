@@ -206,6 +206,18 @@ Settings live in `C:\F7FIVE0\.env` (every key is explained in
 
 </details>
 
+## Privacy
+
+F7FIVE0 runs on your PC and keeps your library, accounts and history there. No
+telemetry, no analytics, no F7FIVE0 account. [PRIVACY.md](PRIVACY.md) lists
+every outside service it can contact (metadata and artwork lookups, podcast
+feeds, the daily update check) and how to turn each one off.
+
+## Code signing policy
+
+How releases are built, signed and checked:
+[docs/code-signing-policy.md](docs/code-signing-policy.md).
+
 ## License
 
 Public domain under [The Unlicense](LICENSE). Do whatever you want with it.
