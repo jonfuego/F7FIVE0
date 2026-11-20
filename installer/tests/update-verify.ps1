@@ -568,6 +568,7 @@ public static class Stub {
     $leak = @("tmdbKey", "webPort", "apiPort", "streamPort", "adminUser", "adminPassword", "moviesDir", "tvDir", "musicDir", "musicVideosDir", "openFirewall", "updateCheck", "postgresPassword")
     $leaked = @($leak | Where-Object { $afterUpgradeBlock -match [regex]::Escape("JsonPair('$_'") })
     Check "iss: an upgrade sends only appVersion and contactEmail (answers are inside 'if not IsUpgrade')" ($leaked.Count -eq 0 -and $afterUpgradeBlock -match "JsonPair\('appVersion'" -and $afterUpgradeBlock -match "JsonPair\('contactEmail'")
+    Check "iss: a silent install skips the page checks (a blank admin password hung Setup on a MsgBox)" ($iss -match "(?s)function NextButtonClick.*?Result := True;.*?if WizardSilent then\s+Exit;.*?CurPageID = AdminPage\.ID")
     Check "iss: every answer page is skipped on upgrade" ($iss -match "(?s)function ShouldSkipPage.*?IsUpgrade and \(\(PageID = MediaPage\.ID\).*?PortsPage\.ID\)\)")
     # A rerun after a failed first install: Setup saved the postgres password
     # itself, so the wizard must not ask for it again.

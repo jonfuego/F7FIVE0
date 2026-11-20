@@ -448,6 +448,13 @@ var
   Port: Integer;
 begin
   Result := True;
+  // A silent install (winget, Setup /SILENT or /VERYSILENT) still "clicks"
+  // Next on every page nobody sees. Checking the blank admin password there
+  // showed a plain MsgBox, which /SUPPRESSMSGBOXES does not suppress, and
+  // Setup hung forever. Accept the defaults: install.ps1 handles a missing
+  // admin (the first visit from this PC creates it) and reports anything else.
+  if WizardSilent then
+    Exit;
   if CurPageID = AdminPage.ID then
   begin
     AdminPage.Values[0] := Lowercase(Trim(AdminPage.Values[0]));
