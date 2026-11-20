@@ -39,9 +39,27 @@ test("failures read as sentences, never codes", () => {
   assert.ok(!generic.includes("_"));
 });
 
-test("the server PC address keeps this page's port", () => {
-  assert.equal(serverPcAddress("3001"), "http://localhost:3001");
-  assert.equal(serverPcAddress("3101"), "http://localhost:3101");
-  assert.equal(serverPcAddress(""), "http://localhost:3001");
-  assert.equal(serverPcAddress("evil.example"), "http://localhost:3001");
+test("the server PC address uses the server's own web port", () => {
+  // Through a tunnel the page is on 443 or has no port; the API knows better.
+  assert.equal(serverPcAddress(3101, ""), "http://localhost:3101");
+  assert.equal(serverPcAddress(3101, "443"), "http://localhost:3101");
+  assert.equal(serverPcAddress(3001, "8443"), "http://localhost:3001");
+});
+
+test("an older API without web_port falls back to this page's port", () => {
+  assert.equal(serverPcAddress(undefined, "3001"), "http://localhost:3001");
+  assert.equal(serverPcAddress(null, "3101"), "http://localhost:3101");
+  assert.equal(serverPcAddress(undefined, ""), "http://localhost:3001");
+  assert.equal(serverPcAddress(undefined, "evil.example"), "http://localhost:3001");
+  assert.equal(serverPcAddress("3101", ""), "http://localhost:3001");
+  assert.equal(serverPcAddress(0, ""), "http://localhost:3001");
+  assert.equal(serverPcAddress(70000, "3101"), "http://localhost:3101");
+});
+
+test("the system username is reserved, with a sentence", () => {
+  assert.match(validateNewAdmin("__system__", "longenough", "longenough") ?? "", /used by F7FIVE0/);
+  assert.match(validateNewAdmin("__SYSTEM__", "longenough", "longenough") ?? "", /used by F7FIVE0/);
+  const msg = createAdminError(422, { detail: "username_reserved" });
+  assert.match(msg, /used by F7FIVE0/);
+  assert.ok(!msg.includes("username_reserved"));
 });

@@ -4,7 +4,7 @@
 // and "finish on the server PC" to anyone else. Pure: no React, no fetch, so
 // first-run.test.ts covers it.
 
-export type SetupState = { needs_admin: boolean; local: boolean };
+export type SetupState = { needs_admin: boolean; local: boolean; web_port?: number };
 
 export type LoginView = "signin" | "create-admin" | "finish-on-server";
 
@@ -19,6 +19,10 @@ export function loginView(state: unknown): LoginView {
 
 export const USERNAME_RE = /^[a-z0-9._-]{3,64}$/;
 
+// Names an existing row holds on every install (the seeded system user). The
+// API answers 422 username_reserved for them.
+export const RESERVED_USERNAMES: ReadonlySet<string> = new Set(["__system__"]);
+
 // Checked in the page before the request; the API checks the same rules.
 export function validateNewAdmin(
   username: string,
@@ -29,10 +33,13 @@ export function validateNewAdmin(
   if (!USERNAME_RE.test(u)) {
     return "Usernames are 3 to 64 characters: lowercase letters, digits, dot, dash, underscore.";
   }
+  if (RESERVED_USERNAMES.has(u)) return RESERVED_MESSAGE;
   if (password.length < 8) return "Use a password of at least 8 characters.";
   if (password !== confirm) return "The passwords do not match.";
   return null;
 }
+
+const RESERVED_MESSAGE = "That username is used by F7FIVE0 itself. Pick another one.";
 
 // The message for a failed POST /api/setup/admin. Never shows a raw code.
 export function createAdminError(status: number, payload: unknown): string {
@@ -46,12 +53,21 @@ export function createAdminError(status: number, payload: unknown): string {
   if (status === 403 || detail === "setup_local_only") {
     return "The admin account can only be created on the PC where F7FIVE0 is installed.";
   }
+  if (detail === "username_reserved") return RESERVED_MESSAGE;
   if (status === 422) return "Check the username and password and try again.";
   return "Could not create the account. Try again in a moment.";
 }
 
-// The address to open on the server PC: same port as this page, on localhost.
-export function serverPcAddress(port: string | undefined | null): string {
-  const p = (port ?? "").trim();
+// The address to open on the server PC. The server's own web port (from
+// /api/setup/state) wins: a visitor through a tunnel or proxy sees another port,
+// or none, in its address bar. This page's port is the fallback for an older API.
+export function serverPcAddress(
+  serverPort: unknown,
+  pagePort?: string | undefined | null,
+): string {
+  if (typeof serverPort === "number" && Number.isInteger(serverPort) && serverPort > 0 && serverPort < 65536) {
+    return `http://localhost:${serverPort}`;
+  }
+  const p = (pagePort ?? "").trim();
   return `http://localhost:${/^\d{2,5}$/.test(p) ? p : "3001"}`;
 }
