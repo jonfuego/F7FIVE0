@@ -1,15 +1,16 @@
 """Password hashing (app/services/security.py): argon2id for new hashes, legacy
 bcrypt-over-SHA-256 still verifies, and a legacy hash is marked for rehash.
 
-`_old_hash` rebuilds the pre-argon2 format on its own (not through the module),
-so these tests fail if the legacy branch stops accepting real stored hashes.
+OLD_HASH was made by the pre-argon2 code (bcrypt cost 4 over a base64 SHA-256
+of PW) and is kept as a fixed string, so these tests fail if the legacy branch
+stops accepting real stored hashes. The cost is read from the hash, so a low
+cost exercises the same code path as the production cost 12.
 """
 from __future__ import annotations
 
-import base64
-import hashlib
+import threading
+import time
 
-import bcrypt
 import pytest
 from argon2 import PasswordHasher
 
@@ -19,13 +20,7 @@ from app.services.security import (
 )
 
 PW = "correct horse battery staple"
-
-
-def _old_hash(plaintext: str, rounds: int = 4) -> str:
-    # The format hash_password wrote before argon2id (cost lowered for speed;
-    # the cost is read from the hash, so verification is the same code path).
-    pre = base64.b64encode(hashlib.sha256(plaintext.encode("utf-8")).digest())
-    return bcrypt.hashpw(pre, bcrypt.gensalt(rounds=rounds)).decode("ascii")
+OLD_HASH = "$2b$04$csUReca9X8ZGyOWlznsXmOEp6BKf5SiSh3LA8/A8p9T34CEsOplMW"
 
 
 def test_new_hashes_are_argon2id():
@@ -56,7 +51,7 @@ def test_long_passwords_that_share_72_bytes_differ():
 
 
 def test_legacy_bcrypt_hashes_still_verify_and_need_rehash():
-    old = _old_hash(PW)
+    old = OLD_HASH
     assert old.startswith("$2b$")
     assert verify_password(PW, old)
     assert not verify_password("wrong", old)
@@ -81,9 +76,9 @@ def test_sentinels_and_junk_never_verify_or_rehash(stored):
 
 def test_login_check_accepts_both_kinds_and_rejects_unknown_users():
     assert verify_login_password(PW, hash_password(PW))
-    assert verify_login_password(PW, _old_hash(PW))
+    assert verify_login_password(PW, OLD_HASH)
     assert not verify_login_password("wrong", hash_password(PW))
-    assert not verify_login_password("wrong", _old_hash(PW))
+    assert not verify_login_password("wrong", OLD_HASH)
     assert not verify_login_password(PW, None)
 
 
@@ -96,7 +91,43 @@ def test_login_check_runs_both_hashers_for_every_account(monkeypatch):
                         lambda p, h: calls.append("argon2") or real_argon2(p, h))
     monkeypatch.setattr(security, "_bcrypt_ok",
                         lambda p, h: calls.append("bcrypt") or real_bcrypt(p, h))
-    for stored in (None, hash_password(PW), _old_hash(PW), "!"):
+    for stored in (None, hash_password(PW), OLD_HASH, "!"):
         calls.clear()
         verify_login_password(PW, stored)
         assert sorted(calls) == ["argon2", "bcrypt"], stored
+
+
+def test_argon2_work_is_bounded(monkeypatch):
+    # A burst of sign-ins must not run more than ARGON2_MAX_CONCURRENT argon2
+    # operations (64 MiB each) at once.
+    running = 0
+    peak = 0
+    lock = threading.Lock()
+
+    class SlowHasher:
+        def _work(self):
+            nonlocal running, peak
+            with lock:
+                running += 1
+                peak = max(peak, running)
+            time.sleep(0.05)
+            with lock:
+                running -= 1
+
+        def verify(self, hashed, plaintext):
+            self._work()
+            return False
+
+        def hash(self, plaintext):
+            self._work()
+            return "$argon2id$fake"
+
+    monkeypatch.setattr(security, "_ARGON2", SlowHasher())
+    jobs = [threading.Thread(target=verify_login_password, args=(PW, None)) for _ in range(12)]
+    jobs += [threading.Thread(target=hash_password, args=(PW,)) for _ in range(4)]
+    for t in jobs:
+        t.start()
+    for t in jobs:
+        t.join(timeout=10)
+    assert peak >= 2  # they did overlap
+    assert peak <= security.ARGON2_MAX_CONCURRENT

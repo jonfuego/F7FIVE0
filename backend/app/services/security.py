@@ -8,6 +8,7 @@ import base64
 import hashlib
 import hmac
 import secrets
+import threading
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -36,6 +37,14 @@ from app.config import settings
 # migrate; an account that never signed in by then needs an admin reset.
 _ARGON2 = PasswordHasher()
 _ARGON2_PREFIX = "$argon2"
+
+# Each argon2 hash or check holds its memory cost (64 MiB) while it runs. Sign-in
+# is unauthenticated and the throttle records a failure only after the check, so
+# a burst of attempts with different usernames could otherwise run dozens at
+# once (the sync endpoints share a 40-thread pool) and take the single API
+# worker down. At most this many run together; the rest wait their turn.
+ARGON2_MAX_CONCURRENT = 4
+_ARGON2_SLOTS = threading.BoundedSemaphore(ARGON2_MAX_CONCURRENT)
 _BCRYPT_PREFIXES = ("$2a$", "$2b$", "$2y$")
 
 
@@ -55,7 +64,8 @@ def _is_legacy_bcrypt(hashed: str) -> bool:
 
 def _argon2_ok(plaintext: str, hashed: str) -> bool:
     try:
-        return _ARGON2.verify(hashed, plaintext)
+        with _ARGON2_SLOTS:
+            return _ARGON2.verify(hashed, plaintext)
     except (VerificationError, InvalidHashError):
         return False
 
@@ -68,7 +78,8 @@ def _bcrypt_ok(plaintext: str, hashed: str) -> bool:
 
 
 def hash_password(plaintext: str) -> str:
-    return _ARGON2.hash(plaintext)
+    with _ARGON2_SLOTS:
+        return _ARGON2.hash(plaintext)
 
 
 def verify_password(plaintext: str, hashed: str) -> bool:

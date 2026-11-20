@@ -6,10 +6,6 @@ or a throttled attempt never touches the stored hash.
 """
 from __future__ import annotations
 
-import base64
-import hashlib
-
-import bcrypt
 import pytest
 from fastapi.testclient import TestClient
 
@@ -19,11 +15,8 @@ from app.models.user import User, UserRole
 from app.services.security import verify_password
 
 PASSWORD = "hunter2password"
-
-
-def _old_hash(plaintext: str) -> str:
-    pre = base64.b64encode(hashlib.sha256(plaintext.encode("utf-8")).digest())
-    return bcrypt.hashpw(pre, bcrypt.gensalt(rounds=4)).decode("ascii")
+# Made by the pre-argon2 code: bcrypt (cost 4) over a base64 SHA-256 of PASSWORD.
+OLD_HASH = "$2b$04$0XvSBcB8HuRA8WLsC82Q5uPO.O/hSvRwNAUYyndB0VjV2TNzJpH8a"
 
 
 @pytest.fixture()
@@ -41,7 +34,7 @@ def api(db_session):
 
 
 def _legacy_user(db, username="legacy-user", active=True):
-    u = User(username=username, display_name="L", password_hash=_old_hash(PASSWORD),
+    u = User(username=username, display_name="L", password_hash=OLD_HASH,
              role=UserRole.member, is_active=active)
     db.add(u)
     db.commit()
