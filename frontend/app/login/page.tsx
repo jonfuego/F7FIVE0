@@ -77,12 +77,17 @@ function LoginPageInner() {
   // A silent install makes no account: ask the API whether this server still
   // needs its first admin (lib/first-run.ts). Any failure keeps sign-in.
   const [view, setView] = useState<LoginView>("signin");
+  const [serverWebPort, setServerWebPort] = useState<unknown>(null);
   useEffect(() => {
     let cancelled = false;
     fetch("/api/setup/state", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
       .then((state) => {
-        if (!cancelled) setView(loginView(state));
+        if (cancelled) return;
+        setView(loginView(state));
+        if (state && typeof state === "object") {
+          setServerWebPort((state as { web_port?: unknown }).web_port);
+        }
       })
       .catch(() => {});
     return () => {
@@ -201,7 +206,7 @@ function LoginPageInner() {
     return <FirstRunAdmin onAccountExists={() => setView("signin")} />;
   }
   if (view === "finish-on-server") {
-    return <FinishOnServer />;
+    return <FinishOnServer webPort={serverWebPort} />;
   }
 
   return (
@@ -406,9 +411,12 @@ function FirstRunAdmin({ onAccountExists }: { onAccountExists: () => void }) {
 
 // First visit after a silent install from a phone or another computer: the
 // admin can only be made on the server PC (the API refuses anyone else).
-function FinishOnServer() {
+function FinishOnServer({ webPort }: { webPort: unknown }) {
   // Rendered only after the client-side state fetch, so window is there.
-  const address = serverPcAddress(typeof window === "undefined" ? null : window.location.port);
+  const address = serverPcAddress(
+    webPort,
+    typeof window === "undefined" ? null : window.location.port,
+  );
   return (
     <main className="login-shell">
       <div className="login-card">

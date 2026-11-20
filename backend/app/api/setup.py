@@ -28,10 +28,12 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db
 from app.api.schemas import USERNAME_PATTERN
+from app.config import settings
 from app.models.user import User, UserRole
 from app.services import auth_events
 from app.services.security import hash_password
@@ -42,11 +44,20 @@ router = APIRouter()
 # which are hashes of a name (login_throttle.lock_key).
 _SETUP_LOCK_KEY = 7_550_001
 
+# Names an existing row already holds on every install: migration 0017 seeds
+# the synthetic system user as `__system__`. It passes USERNAME_PATTERN, so
+# without this check the insert hit the unique index and answered 500.
+RESERVED_USERNAMES = frozenset({"__system__"})
+
 
 class SetupState(BaseModel):
     needs_admin: bool
     # Whether this browser may create the admin (it is on the server PC).
     local: bool
+    # The web port on the server PC. A visitor through a tunnel or proxy sees
+    # another port (or none) in its own address bar, so the "open
+    # http://localhost:<port> on the server PC" hint must come from here.
+    web_port: int
 
 
 class FirstAdminRequest(BaseModel):
@@ -78,7 +89,9 @@ def _is_local(request: Request) -> bool:
 
 @router.get("/state", response_model=SetupState)
 def setup_state(request: Request, db: Annotated[Session, Depends(get_db)]) -> SetupState:
-    return SetupState(needs_admin=_needs_admin(db), local=_is_local(request))
+    return SetupState(
+        needs_admin=_needs_admin(db), local=_is_local(request), web_port=settings.web_port,
+    )
 
 
 @router.post("/admin", status_code=201)
@@ -99,6 +112,9 @@ def create_first_admin(
         raise HTTPException(status_code=409, detail="setup_done")
 
     username = body.username.lower()
+    if username in RESERVED_USERNAMES:
+        db.rollback()
+        raise HTTPException(status_code=422, detail="username_reserved")
     name = (body.display_name or "").strip() or username
     user = User(
         username=username,
@@ -109,7 +125,13 @@ def create_first_admin(
         created_at=datetime.now(timezone.utc),
     )
     db.add(user)
-    db.flush()
+    try:
+        db.flush()
+    except IntegrityError:
+        # Only a non-person row (the system user) can hold a name while setup
+        # is open, so any clash is a reserved name, never a 500.
+        db.rollback()
+        raise HTTPException(status_code=422, detail="username_reserved")
     auth_events.record_auth_event(
         db, user_id=user.id, event="first_admin_created", request=request,
     )

@@ -10,6 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
+from app.config import settings
 from app.db import get_db
 from app.main import app
 from app.models.user import AuthEvent, User, UserRole
@@ -42,11 +43,13 @@ def make_client(db_session):
 def test_state_says_an_admin_is_needed_on_a_fresh_server(make_client):
     r = make_client().get("/api/setup/state")
     assert r.status_code == 200
-    assert r.json() == {"needs_admin": True, "local": True}
+    assert r.json() == {"needs_admin": True, "local": True, "web_port": 3001}
 
 
 def test_state_from_the_lan_is_not_local(make_client):
-    assert make_client(LAN).get("/api/setup/state").json() == {"needs_admin": True, "local": False}
+    assert make_client(LAN).get("/api/setup/state").json() == {
+        "needs_admin": True, "local": False, "web_port": 3001,
+    }
 
 
 def test_the_seeded_system_user_does_not_count(make_client, db_session):
@@ -117,3 +120,39 @@ def test_a_lan_browser_cannot_forge_a_loopback_header(make_client, db_session):
 def test_bad_input_is_rejected(make_client, db_session, body):
     assert make_client().post("/api/setup/admin", json=body).status_code == 422
     assert db_session.scalar(select(User)) is None
+
+
+def test_state_reports_the_configured_web_port(make_client, monkeypatch):
+    # A tunnel visitor's own address bar has no useful port; the page reads this.
+    monkeypatch.setattr(settings, "web_port", 3101)
+    assert make_client(LAN).get("/api/setup/state").json()["web_port"] == 3101
+
+
+def _seed_system_user(db_session):
+    # Migration 0017 seeds this row on every real install.
+    db_session.add(User(username="__system__", display_name="F7FIVE0 System",
+                        password_hash="!", role=UserRole.system, is_active=False))
+    db_session.commit()
+
+
+@pytest.mark.parametrize("name", ["__system__", "__SYSTEM__"])
+def test_the_system_username_is_reserved(make_client, db_session, name):
+    _seed_system_user(db_session)
+    c = make_client()
+    r = c.post("/api/setup/admin", json={**GOOD, "username": name})
+    assert r.status_code == 422 and r.json()["detail"] == "username_reserved"
+    assert db_session.scalar(
+        select(User).where(User.role != UserRole.system)
+    ) is None
+    # Setup stays open and a real name still works afterwards.
+    assert c.get("/api/setup/state").json()["needs_admin"] is True
+    assert c.post("/api/setup/admin", json=GOOD).status_code == 201
+
+
+def test_a_name_clash_with_a_non_person_row_is_not_a_500(make_client, db_session, monkeypatch):
+    # Belt and braces: a seeded row under some other name still answers 422.
+    from app.api import setup as setup_api
+    monkeypatch.setattr(setup_api, "RESERVED_USERNAMES", frozenset())
+    _seed_system_user(db_session)
+    r = make_client().post("/api/setup/admin", json={**GOOD, "username": "__system__"})
+    assert r.status_code == 422 and r.json()["detail"] == "username_reserved"
