@@ -10,7 +10,8 @@ certificate by [SignPath Foundation](https://signpath.org).
 Status: F7FIVE0 is applying to SignPath Foundation. Until signing is
 switched on, releases ship an unsigned Setup.exe (see "How builds are produced"
 below). The release notes say whether that release's Setup.exe is signed; the
-workflow writes that sentence from whether the SignPath step ran.
+workflow says "signed" only after it has checked that the file SignPath returned
+carries a Valid Authenticode signature, and otherwise fails the release.
 
 ## Team roles
 
@@ -140,11 +141,17 @@ When SignPath Foundation approves the project, the maintainer:
    repository.
 2. Runs a manual (test) release build and reads the signer subject the
    "Sign Setup.exe" step prints.
-3. Sets that subject as the default `update_signer_subject` in
-   `backend/app/config.py` and as `UPDATE_SIGNER_SUBJECT` in `.env.example`, so
-   Admin > Updates also accepts an uploaded Setup.exe by its signature (until
-   then only the published checksum is accepted).
-4. Removes the "not code-signed yet" notes from `README.md` and `INSTALL.md`.
+3. Sets that subject as the `SIGNPATH_EXPECTED_SUBJECT` repository variable,
+   so the release fails if a file comes back signed by anyone else.
+4. Puts the subject where both update checks read it. The API reads
+   `update_signer_subject` (`backend/app/config.py`), but `installer/update.ps1`
+   reads only `UPDATE_SIGNER_SUBJECT` from the installed `.env`, and an existing
+   `.env` never picks up a new `.env.example` line. So set the config default
+   and `.env.example`, and in `install.ps1` add `UPDATE_SIGNER_SUBJECT` to
+   `$want` and to the fill-when-blank keys passed to `Merge-EnvFile`, so new
+   installs and upgrades get it in `.env` (a value an admin set is kept). Until then Admin > Updates accepts an uploaded Setup.exe only
+   by the published checksum.
+5. Removes the "not code-signed yet" notes from `README.md` and `INSTALL.md`.
 
 ## Reporting
 

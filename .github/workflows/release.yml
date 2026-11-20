@@ -109,6 +109,7 @@ jobs:
             Write-Host "::notice::SIGNPATH_API_TOKEN not configured; skipping Authenticode signing of Setup.exe."
           }
       - name: Sign Setup.exe (SignPath)
+        id: sign
         if: steps.signpath.outputs.available == 'true'
         shell: pwsh
         env:
@@ -146,7 +147,18 @@ jobs:
           if ($status.status -ne "Completed") { Write-Error "SignPath signing request $id timed out"; exit 1 }
           Invoke-RestMethod -Method Get -Uri "$base/SigningRequests/$id/SignedArtifact" -Headers $headers -OutFile $exe.FullName
           $sig = Get-AuthenticodeSignature $exe.FullName
-          Write-Host "Signed $($exe.Name): $($sig.Status) ($($sig.SignerCertificate.Subject))"
+          $subject = if ($sig.SignerCertificate) { $sig.SignerCertificate.Subject } else { "" }
+          Write-Host "Signed $($exe.Name): $($sig.Status) ($subject)"
+          # Never publish (or call "signed") a file whose signature does not check
+          # out. SIGNPATH_EXPECTED_SUBJECT, once set, also pins the signer.
+          if ($sig.Status -ne "Valid") {
+            Write-Error "The artifact SignPath returned is not validly signed (status '$($sig.Status)')"; exit 1
+          }
+          $want = "${{ vars.SIGNPATH_EXPECTED_SUBJECT }}"
+          if ($want -and $subject -ne $want) {
+            Write-Error "Signed by '$subject', expected '$want'"; exit 1
+          }
+          "signed=true" >> $env:GITHUB_OUTPUT
       - name: Zip
         shell: pwsh
         run: Compress-Archive -Path installer/dist/* -DestinationPath "installer/Output/F7FIVE0-${{ steps.v.outputs.version }}.zip"
@@ -189,7 +201,7 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          SIGNED: ${{ steps.signpath.outputs.available }}
+          SIGNED: ${{ steps.sign.outputs.signed }}
         run: |
           $tag = "${{ github.ref_name }}"
           gh release upload $tag (Get-ChildItem installer/Output -File).FullName --clobber
@@ -213,8 +225,9 @@ jobs:
 
           [Code signing policy](https://github.com/{REPO}/blob/vX.Y.Z/docs/code-signing-policy.md) | [Privacy](https://github.com/{REPO}/blob/vX.Y.Z/PRIVACY.md)
           '@
-          # The signing sentence follows what this run did, so the notes never
-          # say "not code-signed" over a signed Setup.exe (or the reverse).
+          # The signing sentence follows what this run did: "signed" only after the
+          # sign step checked a Valid signature, so the notes never call an
+          # unsigned Setup.exe signed (or the reverse).
           $signing = if ($env:SIGNED -eq "true") {
             'Setup is code-signed through SignPath Foundation; Windows shows the publisher when it starts.'
           } else {
