@@ -117,6 +117,7 @@ jobs:
           SIGNPATH_ORGANIZATION_ID: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
           SIGNPATH_PROJECT_SLUG: ${{ vars.SIGNPATH_PROJECT_SLUG }}
           SIGNPATH_SIGNING_POLICY_SLUG: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          SIGNPATH_EXPECTED_SUBJECT: ${{ vars.SIGNPATH_EXPECTED_SUBJECT }}
         run: |
           $exe = Get-ChildItem installer/Output -Filter "F7FIVE0-Setup-*.exe" -File | Select-Object -First 1
           if (-not $exe) { Write-Error "No Setup.exe found to sign in installer/Output"; exit 1 }
@@ -154,7 +155,7 @@ jobs:
           if ($sig.Status -ne "Valid") {
             Write-Error "The artifact SignPath returned is not validly signed (status '$($sig.Status)')"; exit 1
           }
-          $want = "${{ vars.SIGNPATH_EXPECTED_SUBJECT }}"
+          $want = $env:SIGNPATH_EXPECTED_SUBJECT
           if ($want -and $subject -ne $want) {
             Write-Error "Signed by '$subject', expected '$want'"; exit 1
           }
