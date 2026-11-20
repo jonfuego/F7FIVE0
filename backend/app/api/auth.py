@@ -8,7 +8,6 @@ Token model:
 """
 from __future__ import annotations
 
-import secrets
 import uuid
 from datetime import datetime, timezone
 from typing import Annotated, Optional
@@ -28,7 +27,8 @@ from app.config import settings
 from app.models.user import Session as UserSession, User, UserRole
 from app.services.security import (
     create_access_token, generate_refresh_token, hash_password,
-    hash_refresh_token, refresh_days_for, refresh_expires_at, verify_password,
+    hash_refresh_token, password_needs_rehash, refresh_days_for, refresh_expires_at,
+    verify_login_password, verify_password,
 )
 
 
@@ -75,12 +75,6 @@ def _reuse_detected(
     db.commit()
     evict_session_caches(revoked)
     raise HTTPException(status_code=401, detail="refresh_token_revoked")
-
-
-# Precomputed bcrypt hash of a random string. Used to run a constant-time
-# verify against unknown usernames so timing doesn't distinguish unknown
-# users from wrong passwords.
-_DUMMY_HASH = hash_password(secrets.token_urlsafe(32))
 
 
 # ---------------------------------------------------------------------------
@@ -178,9 +172,9 @@ def login(
         )
 
     user = db.scalar(select(User).where(User.username == username))
-    # Always run verify to keep timing consistent for unknown-vs-wrong-password.
-    # _DUMMY_HASH is a valid bcrypt hash of random bytes that nothing will match.
-    ok = verify_password(body.password, user.password_hash if user else _DUMMY_HASH)
+    # verify_login_password takes the same time for an unknown user, a wrong
+    # password, and either hash kind, so timing reveals nothing.
+    ok = verify_login_password(body.password, user.password_hash if user else None)
 
     if not user or not ok or not user.is_active:
         login_throttle.record_failure(db, username=username, client_ip=client_ip)
@@ -190,6 +184,10 @@ def login(
         raise HTTPException(status_code=401, detail="invalid_credentials")
 
     login_throttle.clear(db, username=username, client_ip=client_ip)
+    # A legacy bcrypt hash (or older argon2 parameters) is replaced now that we
+    # hold the right password; it is saved with the session below.
+    if password_needs_rehash(user.password_hash):
+        user.password_hash = hash_password(body.password)
     # Client type: the body wins (native 2.0 clients send it explicitly);
     # the legacy x-client-type header is the fallback for the web/PWA client.
     # Anything unrecognized collapses to "browser" so its 30-day behavior is
