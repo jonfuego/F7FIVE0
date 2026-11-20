@@ -8,6 +8,7 @@ import base64
 import hashlib
 import hmac
 import secrets
+import threading
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -15,6 +16,8 @@ from urllib.parse import urlencode
 
 import bcrypt
 import jwt
+from argon2 import PasswordHasher
+from argon2.exceptions import InvalidHashError, VerificationError
 
 from app.config import settings
 
@@ -22,23 +25,114 @@ from app.config import settings
 # ---------------------------------------------------------------------------
 # Passwords
 # ---------------------------------------------------------------------------
-# bcrypt rejects inputs longer than 72 bytes. We pre-hash with SHA-256 and
-# base64-encode (44 bytes, well within the limit) so any-length password is
-# safe. This is the same pattern Django uses for its bcrypt_sha256 hasher.
-def _prehash(plaintext: str) -> bytes:
+# New passwords are argon2id (argon2-cffi's defaults, the RFC 9106 low-memory
+# profile: 3 passes over 64 MiB, 4 lanes). Hashes made before that are bcrypt
+# (cost 12) over a base64 SHA-256 of the password, which kept any length under
+# bcrypt's 72-byte limit. The plain SHA-256 step has no salt, so a password
+# that leaked elsewhere as a bare SHA-256 could be tried straight against the
+# bcrypt hash ("shucking"). Those hashes are still accepted and are replaced
+# with argon2id the next time the person signs in (`password_needs_rehash`,
+# api/auth.py login). The bcrypt branch is verification only: nothing writes a
+# bcrypt hash any more. Drop it once installs have had a release or two to
+# migrate; an account that never signed in by then needs an admin reset.
+_ARGON2 = PasswordHasher()
+_ARGON2_PREFIX = "$argon2"
+
+# Each argon2 hash or check holds its memory cost (64 MiB) while it runs. Sign-in
+# is unauthenticated and the throttle records a failure only after the check, so
+# a burst of attempts with different usernames could otherwise run dozens at
+# once (the sync endpoints share a 40-thread pool) and take the single API
+# worker down. At most this many run together; the rest wait their turn.
+ARGON2_MAX_CONCURRENT = 4
+_ARGON2_SLOTS = threading.BoundedSemaphore(ARGON2_MAX_CONCURRENT)
+_BCRYPT_PREFIXES = ("$2a$", "$2b$", "$2y$")
+
+
+def _legacy_prehash(plaintext: str) -> bytes:
+    # Legacy verification only (see above). Never used to store anything new.
     digest = hashlib.sha256(plaintext.encode("utf-8")).digest()
     return base64.b64encode(digest)  # 44 bytes
 
 
+def _is_argon2(hashed: str) -> bool:
+    return hashed.startswith(_ARGON2_PREFIX)
+
+
+def _is_legacy_bcrypt(hashed: str) -> bool:
+    return hashed.startswith(_BCRYPT_PREFIXES)
+
+
+def _argon2_ok(plaintext: str, hashed: str) -> bool:
+    try:
+        with _ARGON2_SLOTS:
+            return _ARGON2.verify(hashed, plaintext)
+    except (VerificationError, InvalidHashError):
+        return False
+
+
+def _bcrypt_ok(plaintext: str, hashed: str) -> bool:
+    try:
+        return bcrypt.checkpw(_legacy_prehash(plaintext), hashed.encode("ascii"))
+    except (ValueError, TypeError):
+        return False
+
+
 def hash_password(plaintext: str) -> str:
-    return bcrypt.hashpw(_prehash(plaintext), bcrypt.gensalt(rounds=12)).decode("ascii")
+    with _ARGON2_SLOTS:
+        return _ARGON2.hash(plaintext)
 
 
 def verify_password(plaintext: str, hashed: str) -> bool:
-    try:
-        return bcrypt.checkpw(_prehash(plaintext), hashed.encode("ascii"))
-    except (ValueError, TypeError):
+    """True when `plaintext` matches a stored argon2id or legacy bcrypt hash.
+    Anything else (the system user's "!" sentinel, an empty value) is False."""
+    if not hashed:
         return False
+    if _is_argon2(hashed):
+        return _argon2_ok(plaintext, hashed)
+    if _is_legacy_bcrypt(hashed):
+        return _bcrypt_ok(plaintext, hashed)
+    return False
+
+
+def password_needs_rehash(hashed: str) -> bool:
+    """True for a legacy bcrypt hash, or an argon2 hash made with weaker
+    parameters than today's. Call only after the password verified."""
+    if not hashed:
+        return False
+    if _is_legacy_bcrypt(hashed):
+        return True
+    if _is_argon2(hashed):
+        try:
+            return _ARGON2.check_needs_rehash(hashed)
+        except InvalidHashError:
+            return False
+    return False
+
+
+# Hashes of random strings nothing matches, made once per process.
+_DUMMY_ARGON2 = _ARGON2.hash(secrets.token_urlsafe(32))
+_DUMMY_BCRYPT = bcrypt.hashpw(
+    _legacy_prehash(secrets.token_urlsafe(32)), bcrypt.gensalt(rounds=12),
+).decode("ascii")
+
+
+def verify_login_password(plaintext: str, hashed: Optional[str]) -> bool:
+    """Sign-in check whose time does not depend on the account.
+
+    `hashed` is None for an unknown username. Every call runs one argon2id and
+    one bcrypt check (the real hash where it is of that kind, else a dummy), so
+    an unknown user, a migrated user and a not-yet-migrated user all take the
+    same time and the response time does not reveal which usernames exist.
+    """
+    real_argon2 = bool(hashed) and _is_argon2(hashed)
+    real_bcrypt = bool(hashed) and _is_legacy_bcrypt(hashed)
+    ok_argon2 = _argon2_ok(plaintext, hashed if real_argon2 else _DUMMY_ARGON2)
+    ok_bcrypt = _bcrypt_ok(plaintext, hashed if real_bcrypt else _DUMMY_BCRYPT)
+    if real_argon2:
+        return ok_argon2
+    if real_bcrypt:
+        return ok_bcrypt
+    return False
 
 
 # ---------------------------------------------------------------------------
