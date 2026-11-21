@@ -1200,3 +1200,22 @@ is only proven by a real update on a VM: the tests use a stub Setup.
   green on both release commits, both Release runs published Setup, APK, zip,
   SBOMs and `SHA256SUMS.txt`. Not done: a real phone check (controls tap, LAN
   sign-in), a clean-VM Setup, and Jon's update of the live server from 1.0.18.
+- 2026-11-20 (Hermes, silent Setup fixes, PR #22 and PR #23): a fresh silent
+  install (`/VERYSILENT /SUPPRESSMSGBOXES`, the winget case) hung forever on the
+  FuegoTest VM. Inno runs `NextButtonClick` for every page even when silent, the
+  blank admin password failed the admin page check, and its plain `MsgBox`
+  ignores `/SUPPRESSMSGBOXES`. PR #22 (merged, `31f3ea5`) returns early from
+  `NextButtonClick` when `WizardSilent`; install.ps1 already handles a missing
+  admin (the first local browser visit makes it). PR #23 makes a silent Setup on
+  a PC that already has PostgreSQL say how to give the `postgres` password (rerun
+  without the silent switch, or the last line of `data\postgres-superuser.txt`)
+  and documents it in INSTALL.md. VM runs from the "No F7FIVE0" snapshot: a fresh
+  silent install exits 0 in 20 min, headless Edge in the VM creates the admin
+  (argon2id hash, a second create 409), a create from the host through NAT
+  answers 403 `setup_local_only`; with F7FIVE0 uninstalled and PostgreSQL kept, a
+  silent Setup exits 10 in 6 min with the new message, and after writing the
+  password file a silent Setup exits 0 and makes the database. Checks: installer
+  parse clean, `update-verify.ps1` (new checks for both) and `download-verify.ps1`
+  pass under Windows PowerShell 5.1, CI green on both PRs. Two Hermes sessions
+  running `build-dist.ps1` in the same checkout collide in `npm ci`
+  (EPERM/ENOTEMPTY in `frontend\node_modules`); run one build at a time.

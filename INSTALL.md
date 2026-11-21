@@ -264,6 +264,13 @@ behind; those do not count, and Setup installs a fresh PostgreSQL instead.
 If PostgreSQL has a different password than the one in that file, Setup stops with "Could not sign in to PostgreSQL"; correct or delete the file
 and run Setup again.
 
+A silent install (winget, `/SILENT`, `/VERYSILENT`) can't ask for the
+password, so on a PC that already has PostgreSQL it stops with a message that
+says so (Setup exits with code 10) and nothing is left running. Either run
+Setup again without the silent switch and type the password on the PostgreSQL
+page, or, from an elevated prompt, put the password on the last line of
+`C:\F7FIVE0\data\postgres-superuser.txt` and run the silent Setup again.
+
 ### After uninstalling PostgreSQL
 
 PostgreSQL's own uninstaller leaves things behind: the data folder, the
@@ -483,4 +490,5 @@ http://localhost:3001 on the server PC: the page asks you to create the admin
 account. That page works only from the server PC itself and only until the
 first account exists; a phone or another computer is told to finish on the
 server PC. `install.ps1 -NonInteractive` without an admin password does the
-same.
+same. On a PC that already has PostgreSQL, a silent install stops because it
+can't ask for the `postgres` password; see "Already have PostgreSQL?".
