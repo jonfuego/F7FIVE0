@@ -89,6 +89,15 @@ try {
         Check "[$key] Url is pinned (not a rolling URL)" (-not $isRolling)
         Check "[$key] has a 64-hex SHA-256" ($e.Sha256 -match '^[0-9A-Fa-f]{64}$')
     }
+
+    # 6. Setup never calls winget. Setup can itself run under `winget install`,
+    #    and winget runs one install at a time, so a nested winget waits forever
+    #    (FuegoTest VM, 1.0.22). PostgreSQL and NSSM are pinned downloads.
+    Check "manifest pins postgresql and nssm" ($manifest.ContainsKey("postgresql") -and $manifest.ContainsKey("nssm"))
+    Check "postgresql is checked for EnterpriseDB's signature" ("$($manifest.postgresql.Publisher)" -match "EnterpriseDB")
+    $installCode = @(Get-Content (Join-Path $here "..\install.ps1") | Where-Object { $_ -notmatch '^\s*#' }) -join "`n"
+    Check "install.ps1 runs no winget command" ($installCode -notmatch '(?i)Invoke-Winget|Start-Process\s+(-FilePath\s+)?"?winget|&\s*winget\b')
+    Check "install.ps1 downloads PostgreSQL and NSSM from the manifest" ($installCode -match 'Get-DownloadSpec "postgresql"' -and $installCode -match 'Get-DownloadSpec "nssm"' -and $installCode -match 'Download \$PostgresSpec\.Url' -and $installCode -match 'Download \$NssmSpec\.Url')
 } finally {
     Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
 }
