@@ -100,9 +100,6 @@ $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"   # Invoke-WebRequest is 10x faster without the bar
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-$PostgresWingetId = "PostgreSQL.PostgreSQL.16"
-$NssmWingetId  = "NSSM.NSSM"
-
 $ServiceNames = @("F7FIVE0-API", "F7FIVE0-Stream", "F7FIVE0-Web")
 $RemoteAccessTask = "F7FIVE0-RemoteAccess"
 $UpdateTask = "F7FIVE0-Update"
@@ -132,7 +129,7 @@ function Step([string]$msg) {
     Write-Host ""
     Write-Host ("[{0}] {1}  ({2})" -f $script:StepNo, $msg, $script:StepStart.ToString("HH:mm:ss")) -ForegroundColor Cyan
 }
-# Info / Ok / Warn / Fail, Download, Invoke-Winget, Set-PrivateAcl,
+# Info / Ok / Warn / Fail, Download, Set-PrivateAcl,
 # Set-EnvKey, Install-Svc, and friends live in common.ps1 (shared with
 # remote-access.ps1).
 . (Join-Path $PSScriptRoot "common.ps1")
@@ -152,6 +149,8 @@ $PythonSpec  = Get-DownloadSpec "python"
 $NodeSpec    = Get-DownloadSpec "node"
 $NodeVersion = $NodeSpec.Version
 $FfmpegSpec  = Get-DownloadSpec "ffmpeg"
+$PostgresSpec = Get-DownloadSpec "postgresql"
+$NssmSpec    = Get-DownloadSpec "nssm"
 
 function Ask([string]$prompt, [string]$default = "") {
     if ($NonInteractive) { return $default }
@@ -568,18 +567,25 @@ if ($HasNvidia) {
     else { Warn "NVENC test encode failed (often the NVIDIA driver is older than this ffmpeg needs): software transcoding. Details in the install log." }
 }
 
-# NSSM into bin\.
+# NSSM into bin\. The pinned zip, not winget: Setup itself may be running under
+# `winget install`, and winget runs one install at a time (a nested winget
+# waits forever). An nssm.exe already on PATH is reused.
 $Nssm = Join-Path $BinDir "nssm.exe"
 if (-not (Test-Path $Nssm)) {
     $found = Get-Command nssm -ErrorAction SilentlyContinue
-    if (-not $found) { Invoke-Winget $NssmWingetId; $found = Get-Command nssm -ErrorAction SilentlyContinue }
-    $src = if ($found) { $found.Source } else { $null }
-    if (-not $src) {
-        $src = Get-ChildItem -Path "$env:LOCALAPPDATA\Microsoft\WinGet\Packages", "$env:ProgramFiles\WinGet\Packages" -Recurse -Filter nssm.exe -ErrorAction SilentlyContinue |
-            Where-Object { $_.FullName -match "win64" } | Select-Object -First 1 -ExpandProperty FullName
+    if ($found) {
+        Copy-Item $found.Source $Nssm -Force
+    } else {
+        $zip = Join-Path $env:TEMP "f7five0-nssm.zip"
+        Download $NssmSpec.Url $zip $NssmSpec.Sha256 $NssmSpec.Publisher
+        $unz = Join-Path $env:TEMP "f7five0-nssm"
+        if (Test-Path $unz) { Remove-Item -Recurse -Force $unz }
+        Expand-Archive -Path $zip -DestinationPath $unz -Force
+        $src = Get-ChildItem -Path $unz -Recurse -Filter nssm.exe | Where-Object { $_.DirectoryName -match '\\win64$' } | Select-Object -First 1
+        if (-not $src) { Fail "the NSSM download has no win64\nssm.exe. Download nssm.exe (64-bit) from nssm.cc into $BinDir and run Setup again." }
+        Copy-Item $src.FullName $Nssm -Force
+        Remove-Item -Recurse -Force $unz, $zip
     }
-    if (-not $src) { Fail "NSSM did not install. Download nssm.exe (64-bit) from nssm.cc into $BinDir and run Setup again." }
-    Copy-Item $src $Nssm -Force
 }
 Ok "NSSM: $Nssm"
 
@@ -658,25 +664,28 @@ $Psql = Find-Psql
 $PgInstalledNow = $false
 if (-not $Psql -and -not $IsUpgrade) {
     if (-not $PgSuperPassword) { $PgSuperPassword = New-Secret 24 }
-    # Save the password BEFORE installing: winget can report failure for an
-    # install that worked, and a lost password means a manual reset.
+    # Save the password BEFORE installing: the installer can report failure for
+    # an install that worked, and a lost password means a manual reset.
     $pgNote = Join-Path $DataDir "postgres-superuser.txt"
     Set-Content -Path $pgNote -Value "PostgreSQL superuser 'postgres' password (created by F7FIVE0 setup):`r`n$PgSuperPassword" -Encoding ASCII
     Set-PrivateAcl $pgNote
+    # The pinned EnterpriseDB installer, not winget: Setup itself may be running
+    # under `winget install`, and winget runs one install at a time, so a nested
+    # `winget install PostgreSQL` waited forever (FuegoTest VM, 1.0.22).
+    $pgExe = Join-Path $env:TEMP ("f7five0-postgresql-{0}-windows-x64.exe" -f $PostgresSpec.Version)
+    Download $PostgresSpec.Url $pgExe $PostgresSpec.Sha256 $PostgresSpec.Publisher
     Info "installing PostgreSQL 16. This is the slow one: usually 5-10 minutes with nothing on screen."
-    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
-        Fail "winget is not available. Install 'App Installer' from the Microsoft Store, then run Setup again."
-    }
     # A PostgreSQL that was uninstalled can leave its service entry, the postgres
     # Windows account and its data behind; clear them so the new install works.
     $pgSvcPassword = @(Clear-PostgresLeftovers) | Select-Object -Last 1
-    $pgOverride = "--mode unattended --unattendedmodeui none --superpassword \`"$PgSuperPassword\`" --serverport 5432 --enable-components server,commandlinetools"
-    if ($pgSvcPassword) { $pgOverride += " --serviceaccount postgres --servicepassword \`"$pgSvcPassword\`"" }
-    $pgArgs = "install --id $PostgresWingetId -e --silent --accept-package-agreements --accept-source-agreements --disable-interactivity --override `"$pgOverride`""
+    $pgArgs = "--mode unattended --unattendedmodeui none --superpassword `"$PgSuperPassword`" --serverport 5432 --enable-components server,commandlinetools"
+    if ($pgSvcPassword) { $pgArgs += " --serviceaccount postgres --servicepassword `"$pgSvcPassword`"" }
     $pgStart = Get-Date
-    $pgProc = Start-Process -FilePath "winget" -ArgumentList $pgArgs -NoNewWindow -PassThru
+    $pgProc = Start-Process -FilePath $pgExe -ArgumentList $pgArgs -PassThru -WindowStyle Hidden
     $null = $pgProc.Handle
     $nextBeat = 30
+    $pgTimedOut = $false
+    $pgSlowWarned = $false
     while (-not $pgProc.WaitForExit(1000)) {
         $elapsed = [int]((Get-Date) - $pgStart).TotalSeconds
         if ($elapsed -ge $nextBeat) {
@@ -684,11 +693,24 @@ if (-not $Psql -and -not $IsUpgrade) {
             Info ("still installing PostgreSQL ({0}:{1:00} elapsed{2})" -f [int][math]::Floor($elapsed / 60), ($elapsed % 60), $svcNote)
             $nextBeat += 30
         }
+        # Never stop it early: on a slow or busy PC the same installer took over
+        # 30 minutes (15 on a quiet one), and stopping it in its last step leaves
+        # PostgreSQL without its uninstaller. 90 minutes means it is stuck.
+        if ($elapsed -ge 1800 -and -not $pgSlowWarned) {
+            $pgSlowWarned = $true
+            Info "PostgreSQL is taking longer than usual (a slow or busy PC). Still waiting."
+        }
+        if ($elapsed -ge 5400) {
+            $pgTimedOut = $true
+            Warn "the PostgreSQL installer did not finish in 90 minutes and was stopped."
+            try { $pgProc.Kill() } catch { }
+            break
+        }
     }
-    $pgRc = $pgProc.ExitCode
+    $pgRc = if ($pgTimedOut) { -1 } else { $pgProc.ExitCode }
+    Remove-Item -Force $pgExe -ErrorAction SilentlyContinue
     Refresh-Path
-    # Judge by the result on disk, not winget's exit code (it has reported
-    # 0x80004004 "abandoned" for an install that completed).
+    # Judge by the result on disk, not the installer's exit code.
     $pgSvc = $null
     for ($i = 0; $i -lt 30; $i++) {
         $Psql = Find-Psql
@@ -702,9 +724,9 @@ if (-not $Psql -and -not $IsUpgrade) {
             Warn "PostgreSQL installer log ($edbLog), last lines:"
             Get-Content $edbLog -Tail 25 | ForEach-Object { Info $_ }
         }
-        Fail "PostgreSQL did not install (winget exit $pgRc). Install PostgreSQL 16 from postgresql.org, then run Setup again. The superuser password Setup chose is in $pgNote."
+        Fail "PostgreSQL did not install (installer exit $pgRc). Install PostgreSQL 16 from postgresql.org, then run Setup again. The superuser password Setup chose is in $pgNote."
     }
-    if ($pgRc -ne 0 -and $pgRc -ne -1978335189) { Info "winget reported exit $pgRc, but PostgreSQL is installed and running; carrying on." }
+    if ($pgRc -ne 0) { Info "the PostgreSQL installer reported exit $pgRc, but PostgreSQL is installed and running; carrying on." }
     $PgInstalledNow = $true
     Ok "PostgreSQL installed. Superuser password saved to $pgNote (Administrators only)."
 } elseif ($Psql) {

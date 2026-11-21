@@ -9,10 +9,6 @@
   `TRANSCODE_CACHE_MAX_GB` in `.env`).
 - An internet connection during setup.
 - An administrator account on that PC (Setup asks to run as administrator).
-- winget (Microsoft's "App Installer"). It comes with Windows 10 and 11;
-  some editions (LTSC, Server, or a trimmed image) leave it out. If Setup
-  says "winget is not available", install **App Installer** from the
-  Microsoft Store and run Setup again.
 - Optional: an NVIDIA graphics card. Setup turns on hardware transcoding
   when it finds one. Without one, the CPU handles it, which is fine for a
   couple of streams at once.

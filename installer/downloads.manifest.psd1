@@ -66,4 +66,27 @@
         Sha256    = "80EB007E39DFEBE17299FA1A09C79A8E1D934F76E0246C0817EBE3AF675B7EF6"
         Publisher = "CN=Tailscale Inc."
     }
+    # PostgreSQL and NSSM used to come through winget. Under `winget install
+    # jonfuego.F7FIVE0` that deadlocked: winget runs one install at a time, so
+    # Setup's own `winget install PostgreSQL...` waited forever for the outer
+    # winget, which waited for Setup (FuegoTest VM, 1.0.22). Both are the same
+    # files the winget-pkgs manifests pin (PostgreSQL.PostgreSQL.16 16.16-2 and
+    # NSSM.NSSM 2.24-101-g897c7ad); the hashes were checked against the
+    # downloaded files on 2026-11-21.
+    postgresql = @{
+        Name      = "PostgreSQL 16 (EnterpriseDB Windows installer, x64)"
+        Version   = "16.16-2"
+        Url       = "https://get.enterprisedb.com/postgresql/postgresql-16.16-2-windows-x64.exe"
+        Sha256    = "DD526F2D32C9ACC1CB54DEE8D7265E7B8E12519934731201DF13EB0C2C58E128"
+        Publisher = "CN=EnterpriseDB Corporation"
+    }
+    nssm = @{
+        # Unsigned zip; the SHA-256 is the guarantee. install.ps1 copies only
+        # win64\nssm.exe out of it.
+        Name      = "NSSM (service wrapper, zip)"
+        Version   = "2.24-101-g897c7ad"
+        Url       = "https://nssm.cc/ci/nssm-2.24-101-g897c7ad.zip"
+        Sha256    = "99F5045FFFBFFB745D67FE3A065A953C4A3D9C253B868892D9B685B0EE7D07B8"
+        Publisher = ""
+    }
 }
