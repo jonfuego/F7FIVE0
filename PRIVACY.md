@@ -43,9 +43,21 @@ F7FIVE0 release is out. Nothing is sent except the request itself. Clear
 settings file (.env), to stop it; Admin > Updates > Check now still works when
 you click it. Updating is always your choice: nothing installs itself.
 
-Remote access. Only if you set it up in Admin > Remote access: Tailscale,
-Cloudflare, or DuckDNS (which learns your home internet address so it can
-point your name at it). Each is covered by that company's own privacy policy.
+Remote access. Only if you set it up in Admin > Remote access, and only the
+method you pick:
+
+  - Tailscale or Cloudflare: the tunnel runs through that company's network.
+  - Your own domain with HTTPS (Caddy): Caddy gets the HTTPS certificate from
+    a free certificate authority (Let's Encrypt, or ZeroSSL as a backup),
+    which learns your web address and, if you gave a contact email in Setup,
+    that email. Setup also asks ipify (api.ipify.org) once for your home
+    internet address, to check that your name points at it.
+  - DuckDNS: learns your home internet address so it can point your name at
+    it, and the server refreshes it every 5 minutes.
+
+Setting up a method downloads its program (Tailscale from tailscale.com,
+cloudflared and Caddy from GitHub), each checked against a fixed checksum.
+Each service is covered by that company's own privacy policy.
 
 Downloads during Setup. Setup downloads Python, Node.js, FFmpeg, PostgreSQL
 and NSSM from their publishers (python.org, nodejs.org, GitHub, and Microsoft's
@@ -72,7 +84,7 @@ THIRD-PARTY POLICIES
 
 Each service above has its own privacy policy: TMDB, MusicBrainz (MetaBrainz
 Foundation), Wikimedia, TheAudioDB, Deezer, Apple, Podcast Index, GitHub,
-Google, Tailscale, Cloudflare and DuckDNS.
+Google, Tailscale, Cloudflare, DuckDNS, Let's Encrypt, ZeroSSL and ipify.
 
 
 QUESTIONS

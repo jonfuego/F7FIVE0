@@ -9,7 +9,9 @@ certificate by [SignPath Foundation](https://signpath.org).
 
 Status: F7FIVE0 is applying to SignPath Foundation. Until signing is
 switched on, releases ship an unsigned Setup.exe (see "How builds are produced"
-below), and the release notes say so.
+below). The release notes say whether that release's Setup.exe is signed; the
+workflow says "signed" only after it has checked that the file SignPath returned
+carries a Valid Authenticode signature, and otherwise fails the release.
 
 ## Team roles
 
@@ -120,10 +122,36 @@ pwsh .\installer\build-dist.ps1 -Version <version> -Compile
 
 This writes `installer\Output\F7FIVE0-Setup-<version>.exe` and a
 `SHA256SUMS.txt` next to it, plus a `SHA256SUMS.txt` over the assembled payload
-in `installer\dist\`. The SHA-256 of a locally built Setup.exe will match the
-published one when the same tag, toolchain versions, and pinned downloads are
-used; the published Setup.exe additionally carries the SignPath Authenticode
-signature.
+in `installer\dist\`.
+
+The build is not bit-for-bit reproducible, so do not expect the SHA-256 of a
+local Setup.exe to equal the published one. The published Setup.exe carries the
+Authenticode signature, which changes the file and its hash, and the
+installer records the time each payload file was built. What you can compare is
+the source: the release tag, the pinned toolchain in the workflow, the
+hash-pinned backend lock and the pinned downloads manifest. The payload sums in
+`installer\dist\SHA256SUMS.txt` show which files went into a build.
+
+## Switching signing on
+
+When SignPath Foundation approves the project, the maintainer:
+
+1. Adds the `SIGNPATH_API_TOKEN` secret and the `SIGNPATH_ORGANIZATION_ID`,
+   `SIGNPATH_PROJECT_SLUG` and `SIGNPATH_SIGNING_POLICY_SLUG` variables to the
+   repository.
+2. Runs a manual (test) release build and reads the signer subject the
+   "Sign Setup.exe" step prints.
+3. Sets that subject as the `SIGNPATH_EXPECTED_SUBJECT` repository variable,
+   so the release fails if a file comes back signed by anyone else.
+4. Puts the subject where both update checks read it. The API reads
+   `update_signer_subject` (`backend/app/config.py`), but `installer/update.ps1`
+   reads only `UPDATE_SIGNER_SUBJECT` from the installed `.env`, and an existing
+   `.env` never picks up a new `.env.example` line. So set the config default
+   and `.env.example`, and in `install.ps1` add `UPDATE_SIGNER_SUBJECT` to
+   `$want` and to the fill-when-blank keys passed to `Merge-EnvFile`, so new
+   installs and upgrades get it in `.env` (a value an admin set is kept). Until then Admin > Updates accepts an uploaded Setup.exe only
+   by the published checksum.
+5. Removes the "not code-signed yet" notes from `README.md` and `INSTALL.md`.
 
 ## Reporting
 

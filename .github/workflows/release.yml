@@ -109,6 +109,7 @@ jobs:
             Write-Host "::notice::SIGNPATH_API_TOKEN not configured; skipping Authenticode signing of Setup.exe."
           }
       - name: Sign Setup.exe (SignPath)
+        id: sign
         if: steps.signpath.outputs.available == 'true'
         shell: pwsh
         env:
@@ -116,6 +117,7 @@ jobs:
           SIGNPATH_ORGANIZATION_ID: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
           SIGNPATH_PROJECT_SLUG: ${{ vars.SIGNPATH_PROJECT_SLUG }}
           SIGNPATH_SIGNING_POLICY_SLUG: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          SIGNPATH_EXPECTED_SUBJECT: ${{ vars.SIGNPATH_EXPECTED_SUBJECT }}
         run: |
           $exe = Get-ChildItem installer/Output -Filter "F7FIVE0-Setup-*.exe" -File | Select-Object -First 1
           if (-not $exe) { Write-Error "No Setup.exe found to sign in installer/Output"; exit 1 }
@@ -146,7 +148,18 @@ jobs:
           if ($status.status -ne "Completed") { Write-Error "SignPath signing request $id timed out"; exit 1 }
           Invoke-RestMethod -Method Get -Uri "$base/SigningRequests/$id/SignedArtifact" -Headers $headers -OutFile $exe.FullName
           $sig = Get-AuthenticodeSignature $exe.FullName
-          Write-Host "Signed $($exe.Name): $($sig.Status) ($($sig.SignerCertificate.Subject))"
+          $subject = if ($sig.SignerCertificate) { $sig.SignerCertificate.Subject } else { "" }
+          Write-Host "Signed $($exe.Name): $($sig.Status) ($subject)"
+          # Never publish (or call "signed") a file whose signature does not check
+          # out. SIGNPATH_EXPECTED_SUBJECT, once set, also pins the signer.
+          if ($sig.Status -ne "Valid") {
+            Write-Error "The artifact SignPath returned is not validly signed (status '$($sig.Status)')"; exit 1
+          }
+          $want = $env:SIGNPATH_EXPECTED_SUBJECT
+          if ($want -and $subject -ne $want) {
+            Write-Error "Signed by '$subject', expected '$want'"; exit 1
+          }
+          "signed=true" >> $env:GITHUB_OUTPUT
       - name: Zip
         shell: pwsh
         run: Compress-Archive -Path installer/dist/* -DestinationPath "installer/Output/F7FIVE0-${{ steps.v.outputs.version }}.zip"
@@ -189,6 +202,7 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          SIGNED: ${{ steps.sign.outputs.signed }}
         run: |
           $tag = "${{ github.ref_name }}"
           gh release upload $tag (Get-ChildItem installer/Output -File).FullName --clobber
@@ -208,11 +222,19 @@ jobs:
           | `SHA256SUMS.txt` | Checksums for the installer and the zip. |
           | `sbom-*.cdx.json` | Software bill of materials. |
 
-          Setup needs a 64-bit Windows 10 (1809 or newer) or Windows 11 PC, an administrator account, and an internet connection. Setup is not code-signed yet, so Windows may show "Windows protected your PC": choose **More info**, then **Run anyway**. Full guide: [INSTALL.md](https://github.com/{REPO}/blob/vX.Y.Z/INSTALL.md).
+          Setup needs a 64-bit Windows 10 (1809 or newer) or Windows 11 PC, an administrator account, and an internet connection. {SIGNING} Full guide: [INSTALL.md](https://github.com/{REPO}/blob/vX.Y.Z/INSTALL.md).
 
           [Code signing policy](https://github.com/{REPO}/blob/vX.Y.Z/docs/code-signing-policy.md) | [Privacy](https://github.com/{REPO}/blob/vX.Y.Z/PRIVACY.md)
           '@
-          $header = $header.Replace("X.Y.Z", "${{ steps.v.outputs.version }}").Replace("{REPO}", "${{ github.repository }}")
+          # The signing sentence follows what this run did: "signed" only after the
+          # sign step checked a Valid signature, so the notes never call an
+          # unsigned Setup.exe signed (or the reverse).
+          $signing = if ($env:SIGNED -eq "true") {
+            'Setup is code-signed through SignPath Foundation; Windows shows the publisher when it starts.'
+          } else {
+            'Setup is not code-signed yet, so Windows may show "Windows protected your PC": choose **More info**, then **Run anyway**.'
+          }
+          $header = $header.Replace("X.Y.Z", "${{ steps.v.outputs.version }}").Replace("{REPO}", "${{ github.repository }}").Replace("{SIGNING}", $signing)
           Set-Content -Path notes.md -Value ($header + "`n`n" + (($generated | Out-String).Trim())) -Encoding utf8
           gh release edit $tag --draft=false --notes-file notes.md
           if ($LASTEXITCODE -ne 0) { exit 1 }
