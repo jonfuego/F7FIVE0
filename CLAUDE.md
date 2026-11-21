@@ -1219,3 +1219,23 @@ is only proven by a real update on a VM: the tests use a stub Setup.
   pass under Windows PowerShell 5.1, CI green on both PRs. Two Hermes sessions
   running `build-dist.ps1` in the same checkout collide in `npm ci`
   (EPERM/ENOTEMPTY in `frontend\node_modules`); run one build at a time.
+- 2026-11-20 (Hermes, v1.0.22): released from `main` `835371a`. Merged `--no-ff`
+  since 1.0.21: PR #16 signing prep (PRIVACY.md, the opt-out update check
+  `UPDATE_CHECK_ENABLED`, self-hosted Archivo with `font-src 'self'`), PR #17
+  first-run admin (loopback-only `POST /api/setup/admin`, so a silent install
+  needs no password), `fix/next-16.4.6` (Next's own build gate stopped on two
+  moderate advisories), PR #19 first-run review fixes, PR #21 argon2id passwords,
+  PR #22 and PR #23 (entry above), PR #20 signing policy (the release notes say
+  "signed" only after the sign step checks a Valid signature), and
+  `chore/app-1.0.22` (versionCode 23; the stale picomatch exception in
+  `mobile/npm-audit-exceptions.json` removed). Mobile code is unchanged since
+  1.0.21, so no emulator run. Checks on the merged tree: pytest 1494 passed (9
+  skipped), web tsc + 422 tests + build, lint 0 errors, mobile tsc + jest 490 +
+  lint 0 errors, installer parse clean, `download-verify`, `winget-line`,
+  `duckdns-migrate` and `update-verify` pass under Windows PowerShell 5.1, Pester
+  93 of 93, pip and npm audit gates OK. CI, CodeQL and the Release run green; the
+  release has Setup, APK, zip, SBOMs and `SHA256SUMS.txt`, and the downloaded
+  Setup matches its checksum. Not done: a phone check of the 1.0.22 app (and how it
+  answers a server with no account yet), Jon's update of the live server from
+  Admin > Updates, and SignPath (application and `SIGNPATH_API_TOKEN`), so Setup
+  is still unsigned.
