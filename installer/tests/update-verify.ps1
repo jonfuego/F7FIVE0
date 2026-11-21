@@ -649,6 +649,7 @@ public static class Stub {
     Check "install.ps1 removes a dead service entry with sc.exe delete, resets the account with Set-LocalUser, and moves old data aside" ($install -match 'sc\.exe delete' -and $install -match 'Set-LocalUser' -and $install -match 'Move-PgDataAside')
     Check "install.ps1 never deletes the account or the old data (no Remove-LocalUser, no Remove-Item on the data folder)" ($install -notmatch 'Remove-LocalUser' -and $install -notmatch 'net user postgres /delete' -and $install -notmatch 'Remove-Item[^\r\n]*PgDataDir')
     Check "install.ps1 saves the service account password under data\ before it resets the account" ($install -match '(?s)postgres-service-account\.txt.*?Set-LocalUser')
+    Check "install.ps1 tells a silent install with an existing PostgreSQL how to give the password (no prompt, no hang)" ($install -match '(?s)if \(\$NonInteractive\) \{\s+#[^\r\n]*\s+Fail "PostgreSQL is already installed[^"]*can''t ask for it[^"]*\$saved')
     Check "install.ps1 reads appVersion and writes version.json" ($install -match 'Answer "appVersion"' -and $install -match 'version\.json' -and $install -match 'installed_at')
     Check "install.ps1 names the task F7FIVE0-Update" ($install -match '\$UpdateTask = "F7FIVE0-Update"')
     Check "install.ps1 registers it as SYSTEM" ($install -match '(?s)New-ScheduledTaskPrincipal -UserId "SYSTEM".{0,1200}Register-ScheduledTask -TaskName \$UpdateTask')

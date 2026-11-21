@@ -830,7 +830,13 @@ if (-not $IsUpgrade) {
         Info "PostgreSQL is already installed on this PC. F7FIVE0 needs its 'postgres' password once to create its own database."
         $PgSuperPassword = AskSecret "PostgreSQL 'postgres' password"
     }
-    if (-not $PgSuperPassword) { Fail "The PostgreSQL 'postgres' password is required on first install." }
+    if (-not $PgSuperPassword) {
+        if ($NonInteractive) {
+            # A silent Setup (winget) has no page to ask on: say how to supply it.
+            Fail "PostgreSQL is already installed on this PC, and F7FIVE0 needs its 'postgres' password once to create its own database. A silent install can't ask for it. Run Setup again without /SILENT or /VERYSILENT and type it on the PostgreSQL page, or put it on the last line of $saved (Administrators only) and run Setup again. See INSTALL.md, 'Already have PostgreSQL?'."
+        }
+        Fail "The PostgreSQL 'postgres' password is required on first install. See INSTALL.md, 'Already have PostgreSQL?'."
+    }
     $env:PGPASSWORD = $PgSuperPassword
     # Windows PowerShell turns native stderr into terminating errors under
     # "Stop", so psql runs with Continue and we check its exit code instead.
