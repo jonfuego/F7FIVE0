@@ -685,6 +685,7 @@ if (-not $Psql -and -not $IsUpgrade) {
     $null = $pgProc.Handle
     $nextBeat = 30
     $pgTimedOut = $false
+    $pgSlowWarned = $false
     while (-not $pgProc.WaitForExit(1000)) {
         $elapsed = [int]((Get-Date) - $pgStart).TotalSeconds
         if ($elapsed -ge $nextBeat) {
@@ -692,9 +693,16 @@ if (-not $Psql -and -not $IsUpgrade) {
             Info ("still installing PostgreSQL ({0}:{1:00} elapsed{2})" -f [int][math]::Floor($elapsed / 60), ($elapsed % 60), $svcNote)
             $nextBeat += 30
         }
-        if ($elapsed -ge 1800) {
+        # Never stop it early: on a slow or busy PC the same installer took over
+        # 30 minutes (15 on a quiet one), and stopping it in its last step leaves
+        # PostgreSQL without its uninstaller. 90 minutes means it is stuck.
+        if ($elapsed -ge 1800 -and -not $pgSlowWarned) {
+            $pgSlowWarned = $true
+            Info "PostgreSQL is taking longer than usual (a slow or busy PC). Still waiting."
+        }
+        if ($elapsed -ge 5400) {
             $pgTimedOut = $true
-            Warn "the PostgreSQL installer did not finish in 30 minutes and was stopped."
+            Warn "the PostgreSQL installer did not finish in 90 minutes and was stopped."
             try { $pgProc.Kill() } catch { }
             break
         }
