@@ -7,6 +7,7 @@ import React, {
   useRef,
   useState,
 } from "react";
+import { Platform } from "react-native";
 import TrackPlayer, {
   Event,
   RepeatMode,
@@ -54,6 +55,17 @@ import { setPlayerMode, setupPlayer } from "./setup";
 import { metaFromTrack, nowPlayingFromTrack, type NowPlaying, type QueueMeta } from "./nowPlayingFromTrack";
 import { createPlayTokenSource } from "./playToken";
 import { loadQueueInStages } from "./queueLoad";
+import {
+  adoptNativeQueue,
+  chooseSession,
+  LAST_SESSION_KEY,
+  parseLastSession,
+  resumePositionFor,
+  songFromMeta,
+  type LastSession,
+  type SessionEpisode,
+} from "./lastSession";
+import { SessionResumer, sessionResumeBridge } from "./sessionResume";
 
 /** A signed stream (or a local file) for one song. */
 interface SignedStream {
@@ -132,7 +144,7 @@ interface PlayerContextValue {
   /** Play a podcast episode: a signed /stream/podcast URL (or the local file when
    * it is downloaded), resumed where the person left off, in podcast mode (jump
    * back 15 s / forward 30 s in the app and the media notification). */
-  playEpisode: (ep: PlayableEpisode) => Promise<boolean>;
+  playEpisode: (ep: PlayableEpisode, opts?: { play?: boolean }) => Promise<boolean>;
   podcastMode: boolean;
   podcastSpeed: number;
   setPodcastSpeed: (v: number) => void;
@@ -171,6 +183,10 @@ interface PlayerContextValue {
    * per track, load it as a cast queue at the current track + position, and
    * pause local playback. Returns false when there's no queue or no session. */
   castCurrentQueue: () => Promise<boolean>;
+  /** Play from the car with nothing loaded: rebuild the last session (the
+   * episode at its place, or the music queue at its track and position). True
+   * when it did; false when the player already holds something to play. */
+  resumeIfEmpty: () => Promise<boolean>;
   queueVersion: number;
   nowPlaying: NowPlaying | null;
   isPlaying: boolean;
@@ -205,6 +221,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const [podcastSpeed, setPodcastSpeedPref] = useViewPref<number>("podcast_speed", 1, isSpeed);
   const podcastSpeedRef = useRef(podcastSpeed);
   podcastSpeedRef.current = podcastSpeed;
+  /** The episode playEpisode loaded, for the phone's record of the last place. */
+  const episodeRef = useRef<SessionEpisode | null>(null);
   const rateRef = useRef(1);
   rateRef.current = playbackRate;
   // Meta for the Queue panel list and the server queue sync, parallel to the
@@ -272,6 +290,35 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   // taken, and the server ignores a save older than the one it has.
   const syncer = useRef<ProgressSyncer | null>(null);
   const activeIndexRef = useRef<number>(-1);
+  /** Song loads under way (rememberMusic waits for them to finish). */
+  const loadingSongs = useRef(0);
+
+  /** Keep the music queue, its track and the native position on the phone, so
+   * a Play with nothing loaded (or a cold start) puts back the same track at
+   * the same place (lastSession.ts). */
+  const rememberMusic = useCallback(async () => {
+    // While a queue is being loaded it holds only part of the list, at 0.
+    if (podcastModeRef.current || loadingSongs.current > 0) return;
+    const items = queueMeta.current;
+    if (items.length === 0 || items.some((m) => m.kind === "podcast")) return;
+    try {
+      const idx = (await TrackPlayer.getActiveTrackIndex()) ?? -1;
+      if (idx < 0 || idx >= items.length) return;
+      const p = await TrackPlayer.getProgress();
+      const session: LastSession = {
+        kind: "music",
+        items: [...items],
+        index: idx,
+        positionSec: Math.max(0, Math.floor(p.position || 0)),
+        recordedAtMs: Date.now(),
+      };
+      await setSetting(LAST_SESSION_KEY, session);
+    } catch {
+      /* player not ready */
+    }
+  }, []);
+  const rememberMusicRef = useRef(rememberMusic);
+  rememberMusicRef.current = rememberMusic;
 
   useEffect(() => {
     const s = new ProgressSyncer({
@@ -287,6 +334,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         };
       },
       report: async (snap) => {
+        void rememberMusicRef.current();
         if (!downloadsRef.current.online) {
           downloadsRef.current.bufferOffline({
             kind: "progress",
@@ -339,6 +387,19 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         });
       },
       clearBuffered: (episodeId, atMs) => downloadsRef.current.clearBufferedPodcast(episodeId, atMs),
+      // Keep the place on the phone too, so a Play with nothing loaded can
+      // rebuild the episode (lastSession.ts).
+      remember: (save) => {
+        const episode = episodeRef.current;
+        if (!episode || episode.id !== save.episodeId) return;
+        const session: LastSession = {
+          kind: "podcast",
+          episode,
+          positionSec: save.positionSec,
+          recordedAtMs: save.recordedAtMs,
+        };
+        void setSetting(LAST_SESSION_KEY, session);
+      },
     });
     podcastSaver.current = saver;
     podcastSaverBridge.set(saver);
@@ -606,6 +667,17 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
   // An episode's place on pause, stop and end is saved by the playback service
   // (service.ts) through the podcast saver; see the note at the syncer.
+  //
+  // Music: a pause from anywhere (the car switched off, the headset, the
+  // notification) reports the place to the server and keeps it on the phone.
+  useEffect(() => {
+    const sub = TrackPlayer.addEventListener(Event.PlaybackState, (e) => {
+      if (e.state !== State.Paused || podcastModeRef.current) return;
+      syncer.current?.flush();
+      void rememberMusic();
+    });
+    return () => sub.remove();
+  }, [rememberMusic]);
 
   // Expired-URL recovery: on a playback error, re-sign the active track's URL
   // and reload it once.
@@ -649,11 +721,13 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     await TrackPlayer.setRate(rateRef.current).catch(() => {});
   }, []);
 
-  const playSongs = useCallback(
-    async (songs: SongRow[], startIndex: number) => {
+  /** playSongs, with a place to start the tapped track at and whether to
+   * play (a rebuilt session loads paused on a cold start). */
+  const loadSongs = useCallback(
+    async (songs: SongRow[], startIndex: number, opts: { startAtSec?: number; play?: boolean } = {}): Promise<boolean> => {
       const tapped = songs[startIndex];
       const playable = songs.filter((s) => s.media_files.length > 0);
-      if (playable.length === 0) return;
+      if (playable.length === 0) return false;
       // Queue a window around the tapped track instead of the whole list: the
       // Songs screen can hold the entire library, and every entry needs its own
       // signed URL (Option A: fresh just before play).
@@ -662,7 +736,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       // A second tap on the same Play while it is still starting is the same
       // request: do not load the list twice.
       const key = `${playable.length}:${playable[0].id}:${playable[tappedIdx].id}`;
-      if (startingKey.current === key) return;
+      if (startingKey.current === key) return false;
       startingKey.current = key;
       // Latest tap wins: a request that is no longer current stops before its
       // next queue change.
@@ -687,6 +761,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         const sig = await startStream(api, s.media_files[0].id).catch(() => null);
         return sig ? songEntry(s, sig) : null;
       };
+      loadingSongs.current += 1;
+      let loaded = false;
       try {
         const result = await loadQueueInStages<SongRow, QueueEntry>({
           items: windowed,
@@ -723,29 +799,45 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             setQueueVersion((v) => v + 1);
           },
           skip: (index) => TrackPlayer.skip(index),
-          play: () => TrackPlayer.play(),
+          play: async () => {
+            const at = opts.startAtSec ?? 0;
+            if (at > 0) await TrackPlayer.seekTo(at).catch(() => {});
+            if (opts.play !== false) await TrackPlayer.play();
+          },
           onStarted: () => {
             finish();
             void applyLoudness();
             syncer.current?.flush();
           },
         });
-        if (result === "loaded") {
-          void cacheMusicAround();
-          void pushQueue();
-        }
+        loaded = result === "loaded";
+        return loaded;
       } finally {
+        loadingSongs.current -= 1;
         // Covers a failed or empty start; a no-op once onStarted ran.
         finish();
+        if (loaded) {
+          void cacheMusicAround();
+          void pushQueue();
+          void rememberMusic();
+        }
       }
     },
-    [api, pushQueue, applyLoudness, leavePodcastMode, cacheMusicAround],
+    [api, pushQueue, applyLoudness, leavePodcastMode, cacheMusicAround, rememberMusic],
+  );
+
+  const playSongs = useCallback(
+    async (songs: SongRow[], startIndex: number) => {
+      await loadSongs(songs, startIndex);
+    },
+    [loadSongs],
   );
 
   const playEpisode = useCallback(
-    async (ep: PlayableEpisode): Promise<boolean> => {
-      // An episode replaces whatever a music load was filling in.
-      playTokens.current.take();
+    async (ep: PlayableEpisode, opts: { play?: boolean } = {}): Promise<boolean> => {
+      // An episode replaces whatever a music load was filling in; a newer play
+      // request replaces this one while it waits on the network.
+      const token = playTokens.current.take();
       startingKey.current = null;
       setStarting(false);
       let url: string;
@@ -783,6 +875,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
           return false;
         }
       }
+      if (!token.isCurrent()) return false;
       const startAt = resume != null && resume >= 5 ? Math.floor(resume) : 0;
       // Save the episode that was playing (if any), then hold saves until the
       // new one is loaded and at its place: a reset reads as a stop at 0.
@@ -831,7 +924,15 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         if (startAt > 0) await TrackPlayer.seekTo(startAt).catch(() => {});
         setHasQueue(true);
         lastPlayReported.current = null;
-        await TrackPlayer.play();
+        episodeRef.current = {
+          id: ep.id,
+          podcastId: ep.podcastId ?? null,
+          title: ep.title,
+          showTitle: ep.showTitle,
+          coverPath: coverPath ?? null,
+          durationSec: ep.durationSec ?? null,
+        };
+        if (opts.play !== false) await TrackPlayer.play();
       } finally {
         saver?.resume(startAt);
       }
@@ -839,7 +940,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       // once saved), and keep it while it is loaded. Asking again for one
       // already saved keeps it another 7 days.
       downloadsRef.current.setAudioInUse([ep.id]);
-      downloadsRef.current.cacheAudio([{
+      // Loaded paused (a rebuilt session at launch): no download until it plays.
+      if (opts.play !== false) downloadsRef.current.cacheAudio([{
         id: ep.id,
         kind: "podcast",
         title: ep.title,
@@ -869,6 +971,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   );
 
   const skipBy = useCallback(async (dir: -1 | 1) => {
+    podcastSaver.current?.noteSeek();
     const p = await TrackPlayer.getProgress().catch(() => null);
     if (!p) return;
     await TrackPlayer.seekTo(dir < 0 ? skipBack(p.position) : skipForward(p.position, p.duration)).catch(() => {});
@@ -989,6 +1092,9 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     activeIndexRef.current = -1;
     setHasQueue(false);
     setQueueVersion((v) => v + 1);
+    // Cleared on purpose: a later Play from the car must not bring it back.
+    episodeRef.current = null;
+    void setSetting(LAST_SESSION_KEY, null);
     await clearServerQueue(api).catch(() => {});
   }, [api]);
 
@@ -1091,6 +1197,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const previous = useCallback(async () => {
+    podcastSaver.current?.noteSeek();
     if (progressRef.current.position > 3) {
       await TrackPlayer.seekTo(0);
       return;
@@ -1103,8 +1210,94 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const seekTo = useCallback(async (sec: number) => {
+    podcastSaver.current?.noteSeek();
     await TrackPlayer.seekTo(sec);
   }, []);
+
+  // ---- Rebuild the last session (lastSession.ts, sessionResume.ts) ----------
+  /** Load a saved session: the episode at its place (the phone's copy is sent
+   * first, so the server answers with whichever place is newer), or the music
+   * queue at its track and position. */
+  const restoreSession = useCallback(
+    async (session: LastSession, opts: { play: boolean }): Promise<boolean> => {
+      if (session.kind === "podcast") {
+        const saver = podcastSaver.current;
+        await saver?.redeliver({
+          episodeId: session.episode.id,
+          positionSec: session.positionSec,
+          durationSec: session.episode.durationSec ?? undefined,
+          recordedAtMs: session.recordedAtMs,
+          client: "phone-resume",
+        });
+        return playEpisode({ ...session.episode, resumeSec: undefined }, { play: opts.play });
+      }
+      const songs = session.items.map(songFromMeta);
+      const at = resumePositionFor(session.positionSec, session.items[session.index]?.durationSec);
+      return loadSongs(songs, session.index, { startAtSec: at, play: opts.play });
+    },
+    [playEpisode, loadSongs],
+  );
+
+  const resumer = useMemo(
+    () =>
+      new SessionResumer({
+        queueLength: async () => (await TrackPlayer.getQueue()).length,
+        loadSession: async () => {
+          const local = parseLastSession(await getSetting<unknown>(LAST_SESSION_KEY, null));
+          // The server queue only matters when it is newer; never wait long for it.
+          const server = await Promise.race([
+            fetchServerQueue(api).catch(() => null),
+            new Promise<null>((r) => setTimeout(() => r(null), 4000)),
+          ]);
+          return chooseSession(local, server);
+        },
+        restore: (session, o) => restoreSession(session, o),
+        play: () => TrackPlayer.play(),
+      }),
+    [api, restoreSession],
+  );
+  useEffect(() => {
+    sessionResumeBridge.set(resumer);
+    return () => {
+      if (sessionResumeBridge.get() === resumer) sessionResumeBridge.set(null);
+    };
+  }, [resumer]);
+
+  // On open: when the native player still holds a queue (Android closed the
+  // screen but not the player), take it over so the mini player, the queue
+  // panel and the podcast saves follow what is loaded. When it holds nothing
+  // (a cold start), put the last session back, paused, so the mini player and
+  // the audio agree and Play (app, car, headset) carries on from the same place.
+  const restoredOnLaunch = useRef(false);
+  useEffect(() => {
+    if (!ready || restoredOnLaunch.current) return;
+    restoredOnLaunch.current = true;
+    void (async () => {
+      try {
+        const queue = await TrackPlayer.getQueue();
+        if (queue.length > 0) {
+          const adopted = adoptNativeQueue(queue, await TrackPlayer.getActiveTrackIndex());
+          if (!adopted || queueMeta.current.length > 0) return;
+          queueMeta.current = adopted.metas;
+          activeIndexRef.current = adopted.index;
+          if (adopted.episode) {
+            episodeRef.current = adopted.episode;
+            podcastModeRef.current = true;
+            setPodcastModeState(true);
+            await setPlayerMode("podcast").catch(() => {});
+          }
+          setHasQueue(true);
+          setQueueVersion((v) => v + 1);
+          return;
+        }
+      } catch {
+        return;
+      }
+      if (!Platform.isTV) void resumer.resumeIfEmpty({ play: false });
+    })();
+  }, [ready, resumer]);
+
+  const resumeIfEmpty = useCallback(() => resumer.resumeIfEmpty({ play: true }), [resumer]);
 
   const nowPlaying = useMemo<NowPlaying | null>(() => nowPlayingFromTrack(activeTrack), [activeTrack]);
 
@@ -1203,6 +1396,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       shuffleOn,
       getQueueItems,
       castCurrentQueue,
+      resumeIfEmpty,
       queueVersion,
       nowPlaying,
       isPlaying,
@@ -1248,6 +1442,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       shuffleOn,
       getQueueItems,
       castCurrentQueue,
+      resumeIfEmpty,
       queueVersion,
       nowPlaying,
       isPlaying,

@@ -16,7 +16,7 @@
  * buffer; a save that succeeds removes any older buffered save for that episode.
  */
 
-export type PodcastSaveReason = "tick" | "pause" | "switch" | "end";
+export type PodcastSaveReason = "tick" | "pause" | "switch" | "end" | "stop";
 
 export interface PodcastSave {
   episodeId: string;
@@ -43,6 +43,9 @@ export interface PodcastSaverDeps {
   buffer: (save: PodcastSave) => void;
   /** Drop buffered saves for this episode taken at or before `atMs`. */
   clearBuffered: (episodeId: string, atMs: number) => void;
+  /** Every save made (sent or buffered), so the phone can keep its own copy of
+   * the last place (lastSession.ts). */
+  remember?: (save: PodcastSave) => void;
   now?: () => number;
 }
 
@@ -55,11 +58,24 @@ export const START_GUARD_MS = 60_000;
 /** For this long after an episode starts, a pause that reads well short of it
  * is not saved either: a late Paused event from loading, not the listener. */
 export const START_PAUSE_GUARD_MS = 10_000;
+/** A read this far behind the last save, with no seek asked for since, is a
+ * glitch (the native player reloading the stream, or restarting the track),
+ * not the listener's place. */
+export const JUMP_BACK_SEC = 30;
+/** Such reads are held back for this long; if playback really carries on from
+ * there, the place is saved after that. */
+export const JUMP_GUARD_MS = 60_000;
 
 export class PodcastProgressSaver {
   private lastSaveAt = 0;
   private suspended = false;
   private startGuard: { atSec: number; sinceMs: number } | null = null;
+  /** The last save made, for the jump guard and for `lastSave()`. */
+  private last: PodcastSave | null = null;
+  /** When a seek (skip, scrub, chapter, car seek) was last asked for. */
+  private seekAt = 0;
+  /** Since when reads have been well behind the last save with no seek. */
+  private jumpSince: number | null = null;
   private readonly now: () => number;
 
   constructor(private readonly deps: PodcastSaverDeps) {
@@ -80,6 +96,20 @@ export class PodcastProgressSaver {
   resume(startedAtSec = 0): void {
     this.suspended = false;
     this.startGuard = startedAtSec > 30 ? { atSec: startedAtSec, sinceMs: this.now() } : null;
+    // Starting an episode is asked for: its place is the new reference.
+    this.noteSeek();
+  }
+
+  /** A seek was asked for (skip back or forward, scrub, chapter, car seek): a
+   * read behind the last save is the listener's choice from here on. */
+  noteSeek(): void {
+    this.seekAt = this.now();
+    this.jumpSince = null;
+  }
+
+  /** The last save made for this episode (sent or buffered), or null. */
+  lastSave(episodeId: string): PodcastSave | null {
+    return this.last && this.last.episodeId === episodeId ? this.last : null;
   }
 
   /** Save the loaded episode's place. Returns the save made, or null when
@@ -105,6 +135,21 @@ export class PodcastProgressSaver {
         if (reason === "tick") return null;
         if (reason === "pause" && sinceStart < START_PAUSE_GUARD_MS) return null;
       }
+      // A read well behind the last save that nobody asked for (no seek since
+      // it) is held back for a minute: the native player reloading the stream
+      // or restarting the track reads 0 or an old place for a moment, and that
+      // must not replace the saved place. A stop that reads nothing is skipped.
+      const last = this.last && this.last.episodeId === ep.episodeId ? this.last : null;
+      if (reason !== "end") {
+        const jumpedBack = !!last && p.position < last.positionSec - JUMP_BACK_SEC && this.seekAt < last.recordedAtMs;
+        if (jumpedBack) {
+          if (this.jumpSince === null) this.jumpSince = this.now();
+          if (this.now() - this.jumpSince < JUMP_GUARD_MS) return null;
+        } else {
+          this.jumpSince = null;
+        }
+        if (reason === "stop" && p.position < 1) return null;
+      }
       const duration = p.duration > 0 ? p.duration : ep.durationSec ?? 0;
       const position = reason === "end" && duration > 0 ? duration : p.position;
       const save: PodcastSave = {
@@ -115,10 +160,24 @@ export class PodcastProgressSaver {
         client: `phone-${reason}`,
       };
       this.lastSaveAt = save.recordedAtMs;
+      this.last = save;
+      this.jumpSince = null;
+      this.deps.remember?.(save);
       await this.deliver(save);
       return save;
     } catch {
       return null;
+    }
+  }
+
+  /** Send a save made earlier again (the phone's copy of the last place, at
+   * resume). It keeps its own time, so the server only takes it when it is
+   * newer than what the server has. Never throws. */
+  async redeliver(save: PodcastSave): Promise<void> {
+    try {
+      await this.deliver(save);
+    } catch {
+      /* buffered or dropped; the server keeps what it has */
     }
   }
 
@@ -151,5 +210,8 @@ export const podcastSaverBridge = {
   },
   save(reason: PodcastSaveReason): Promise<PodcastSave | null> {
     return current ? current.save(reason) : Promise.resolve(null);
+  },
+  noteSeek(): void {
+    current?.noteSeek();
   },
 };
