@@ -304,13 +304,86 @@ def test_check_stores_the_latest_release(db_session):
     seen: list = []
     c = mock_client(github_handler(release_payload("v1.1.0"), seen))
     result = updates.check_for_update(db_session, client=c)
-    assert set(result) == {"checked_at", "latest", "notes", "setup_url", "sums_url", "error"}
+    assert set(result) == {"checked_at", "latest", "notes", "history", "setup_url", "sums_url", "error"}
     assert result["latest"] == "1.1.0" and result["error"] is None
     assert result["sums_url"].endswith("SHA256SUMS.txt")
     assert app_settings.get(db_session, "update_check") == result
     req = seen[0]
     assert "F7FIVE0" in req.headers["user-agent"]
     assert "authorization" not in req.headers  # public repo, no token
+
+
+def _with_body(payload: dict, body: str) -> dict:
+    return {**payload, "body": body}
+
+
+def _list_handler(latest: dict, listing, seen: Optional[list] = None):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if seen is not None:
+            seen.append(str(request.url))
+        url = str(request.url)
+        if url == updates.RELEASES_LATEST_URL:
+            return httpx.Response(200, json=latest)
+        if url == updates.RELEASES_LIST_URL:
+            return listing if isinstance(listing, httpx.Response) else httpx.Response(200, json=listing)
+        return httpx.Response(404)
+
+    return handler
+
+
+def test_check_collects_notes_for_every_skipped_version(db_session, upd_dir):
+    # Installed 1.0.0; 1.0.1, 1.1.0 and 1.2.0 are out. Drafts, prereleases,
+    # the installed version and older ones are left out; newest first.
+    latest = _with_body(release_payload("v1.2.0"), "notes 1.2.0")
+    listing = [
+        latest,
+        _with_body(release_payload("v1.3.0", draft=True), "draft"),
+        _with_body(release_payload("v1.2.0-rc.1", prerelease=True), "rc"),
+        _with_body(release_payload("v1.0.1"), "notes 1.0.1"),
+        _with_body(release_payload("v1.1.0"), "notes 1.1.0"),
+        _with_body(release_payload("v1.0.0"), "notes 1.0.0"),
+        _with_body(release_payload("v0.9.0"), "notes 0.9.0"),
+        {"tag_name": "nightly"},
+    ]
+    result = updates.check_for_update(db_session, client=mock_client(_list_handler(latest, listing)))
+    assert result["latest"] == "1.2.0"
+    assert result["history"] == [
+        {"version": "1.2.0", "notes": "notes 1.2.0"},
+        {"version": "1.1.0", "notes": "notes 1.1.0"},
+        {"version": "1.0.1", "notes": "notes 1.0.1"},
+    ]
+    assert updates.notes_since(result, "1.0.0") == result["history"]
+    # After updating to 1.1.0 the stored answer shows only what is still ahead.
+    assert updates.notes_since(result, "1.1.0") == [{"version": "1.2.0", "notes": "notes 1.2.0"}]
+    assert updates.notes_since(result, "1.2.0") == []
+
+
+@pytest.mark.parametrize("listing", [
+    httpx.Response(500),
+    httpx.Response(403, json={"message": "rate limit"}),
+    {"not": "a list"},
+])
+def test_check_release_list_trouble_falls_back_to_the_latest(db_session, upd_dir, listing):
+    latest = _with_body(release_payload("v1.2.0"), "notes 1.2.0")
+    result = updates.check_for_update(db_session, client=mock_client(_list_handler(latest, listing)))
+    assert result["error"] is None and result["latest"] == "1.2.0"
+    assert result["history"] == [{"version": "1.2.0", "notes": "notes 1.2.0"}]
+
+
+def test_check_skips_the_release_list_when_up_to_date(db_session, upd_dir):
+    seen: list = []
+    latest = release_payload("v1.0.0")  # the installed version
+    result = updates.check_for_update(db_session, client=mock_client(_list_handler(latest, [], seen)))
+    assert result["history"] == []
+    assert seen == [updates.RELEASES_LATEST_URL]
+
+
+def test_notes_since_handles_a_check_stored_before_history():
+    old = {"latest": "1.1.0", "notes": "What changed", "checked_at": "x"}
+    assert updates.notes_since(old, "1.0.0") == [{"version": "1.1.0", "notes": "What changed"}]
+    junk = {"latest": "1.1.0", "notes": None, "history": [5, {"version": 1}, {"version": "2.0.0", "notes": "too new"}]}
+    assert updates.notes_since(junk, "1.0.0") == [{"version": "1.1.0", "notes": ""}]
+    assert updates.notes_since({"latest": None}, "1.0.0") == []
 
 
 def test_check_network_error_is_stored_never_raised(db_session):
@@ -593,6 +666,7 @@ def test_updates_overview_shape(client, db_session, upd_dir, helper, monkeypatch
     assert body["latest_version"] == "1.1.0" and body["update_available"] is True
     assert body["can_install"] is True and body["install_blocked"] is None
     assert body["notes"].startswith("What changed")
+    assert body["release_notes"] == [{"version": "1.1.0", "notes": body["notes"]}]
     assert body["checked_at"] and body["check_error"] is None
     assert body["helper_available"] is True
     assert body["signer_configured"] is False

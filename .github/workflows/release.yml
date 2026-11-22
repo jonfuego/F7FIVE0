@@ -209,32 +209,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit 1 }
           $generated = gh api "repos/${{ github.repository }}/releases/generate-notes" -f tag_name=$tag --jq .body
           if ($LASTEXITCODE -ne 0) { exit 1 }
-          # A "which file" guide goes above GitHub's change list, so people who
-          # land on the release page download Setup.exe, not the zip or the APK.
-          $header = @'
-          ## Which file do I need?
-
-          | File | What it is |
-          |---|---|
-          | `F7FIVE0-Setup-X.Y.Z.exe` | **The Windows installer. Most people need only this file.** Run it on the PC that will be your media server. |
-          | `F7FIVE0-X.Y.Z.apk` | The Android phone app. It installs on a phone, not on Windows. Easier: once your server is running, sign in from your phone's browser and use **Account > Download for Android**. |
-          | `F7FIVE0-X.Y.Z.zip` | The same server files without the wizard, for installing from PowerShell. See "Installing without the wizard" in INSTALL.md. |
-          | `SHA256SUMS.txt` | Checksums for the installer and the zip. |
-          | `sbom-*.cdx.json` | Software bill of materials. |
-
-          Setup needs a 64-bit Windows 10 (1809 or newer) or Windows 11 PC, an administrator account, and an internet connection. {SIGNING} Full guide: [INSTALL.md](https://github.com/{REPO}/blob/vX.Y.Z/INSTALL.md).
-
-          [Code signing policy](https://github.com/{REPO}/blob/vX.Y.Z/docs/code-signing-policy.md) | [Privacy](https://github.com/{REPO}/blob/vX.Y.Z/PRIVACY.md)
-          '@
-          # The signing sentence follows what this run did: "signed" only after the
-          # sign step checked a Valid signature, so the notes never call an
-          # unsigned Setup.exe signed (or the reverse).
-          $signing = if ($env:SIGNED -eq "true") {
-            'Setup is code-signed through SignPath Foundation; Windows shows the publisher when it starts.'
-          } else {
-            'Setup is not code-signed yet, so Windows may show "Windows protected your PC": choose **More info**, then **Run anyway**.'
-          }
-          $header = $header.Replace("X.Y.Z", "${{ steps.v.outputs.version }}").Replace("{REPO}", "${{ github.repository }}").Replace("{SIGNING}", $signing)
-          Set-Content -Path notes.md -Value ($header + "`n`n" + (($generated | Out-String).Trim())) -Encoding utf8
+          # The page text: release-notes/<ver>.md first (Admin > Updates shows
+          # only that part), a marker line, then the "Which file do I need?"
+          # guide and GitHub's change list. A missing notes file gets a fallback
+          # line, never a failed release. See scripts/release-body.ps1.
+          ./scripts/release-body.ps1 -Version "${{ steps.v.outputs.version }}" -Repo "${{ github.repository }}" -Signed "$env:SIGNED" -Generated (($generated | Out-String).Trim()) -OutFile notes.md
+          if (-not $?) { exit 1 }
           gh release edit $tag --draft=false --notes-file notes.md
           if ($LASTEXITCODE -ne 0) { exit 1 }

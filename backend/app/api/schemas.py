@@ -1161,6 +1161,11 @@ class UpdateDismissIn(BaseModel):
     run_id: Optional[str] = None
 
 
+class ReleaseNotesOut(BaseModel):
+    version: str
+    notes: str
+
+
 class UpdatesOut(BaseModel):
     """Admin > Updates. No download URLs: the browser never fetches anything
     itself, the server downloads and verifies."""
@@ -1172,7 +1177,12 @@ class UpdatesOut(BaseModel):
     # Why "Update" is unavailable when a newer version exists: no_checksums |
     # no_setup | helper_unavailable | running.
     install_blocked: Optional[str] = None
+    # The latest release's whole page text (kept for older web pages).
     notes: Optional[str] = None
+    # Page text of every version newer than the installed one, newest first
+    # (just the latest when GitHub's release list couldn't be read). The web
+    # page shows only the plain-language part of each.
+    release_notes: list[ReleaseNotesOut] = []
     checked_at: Optional[str] = None
     check_error: Optional[str] = None
     helper_available: bool
