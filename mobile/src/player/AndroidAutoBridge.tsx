@@ -145,13 +145,20 @@ export function AndroidAutoBridge(): null {
       const p = playerRef.current;
       switch (e.command) {
         case "play":
-          void TrackPlayer.play();
+          // With nothing loaded (Android ended the app while the car was off),
+          // rebuild the last session at its place instead of playing nothing.
+          void p
+            .resumeIfEmpty()
+            .then((rebuilt) => (rebuilt ? undefined : TrackPlayer.play()))
+            .catch(() => undefined);
           break;
         case "pause":
           void TrackPlayer.pause();
           break;
         case "stop":
-          void TrackPlayer.stop();
+          // A pause, like the headset and notification Stop (service.ts): stop()
+          // lets go of the loaded audio, and the place is saved on a pause.
+          void TrackPlayer.pause();
           break;
         case "next":
           void p.next();
