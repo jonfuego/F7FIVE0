@@ -108,7 +108,6 @@ var
   // blank entries, and every media folder here is optional.
   MediaPage: TInputQueryWizardPage;
   AdminPage: TInputQueryWizardPage;
-  PgPage: TInputQueryWizardPage;
   NetPage: TInputOptionWizardPage;
   UpdatesPage: TInputOptionWizardPage;
   OptionsPage: TInputQueryWizardPage;
@@ -133,50 +132,6 @@ begin
   Result := FileExists(Dir + '.env') and
     (FileExists(Dir + 'data\install-complete.json') or
      RegKeyExists(HKEY_LOCAL_MACHINE, 'SYSTEM\CurrentControlSet\Services\F7FIVE0-API'));
-end;
-
-// Is there a <Root>\<version>\bin\psql.exe? (Root is Program Files\PostgreSQL.)
-function PsqlUnder(const Root: String): Boolean;
-var
-  FindRec: TFindRec;
-begin
-  Result := False;
-  if FindFirst(AddBackslash(Root) + '*', FindRec) then
-  begin
-    try
-      repeat
-        if ((FindRec.Attributes and FILE_ATTRIBUTE_DIRECTORY) <> 0)
-            and (FindRec.Name <> '.') and (FindRec.Name <> '..') then
-          if FileExists(AddBackslash(Root) + FindRec.Name + '\bin\psql.exe') then
-          begin
-            Result := True;
-            Break;
-          end;
-      until not FindNext(FindRec);
-    finally
-      FindClose(FindRec);
-    end;
-  end;
-end;
-
-// A PostgreSQL that install.ps1 can use. This is the test install.ps1 makes
-// (Find-Psql): a psql.exe under Program Files\PostgreSQL\<version>\bin, or on
-// PATH. The registry key and the folder are NOT enough: PostgreSQL's own
-// uninstaller leaves an empty Installations key and the data folder behind, so
-// testing for them asked for the password of a PostgreSQL that was gone while
-// install.ps1 went on to install a new one.
-function PostgresInstalled: Boolean;
-begin
-  Result := PsqlUnder(ExpandConstant('{commonpf64}\PostgreSQL'))
-    or (FileSearch('psql.exe', GetEnv('PATH')) <> '');
-end;
-
-// A first install that stopped partway leaves the postgres password Setup saved
-// itself (install.ps1 writes it before it installs PostgreSQL). A rerun reuses
-// that file, so the wizard must not ask for the password again.
-function SavedPostgresPassword: Boolean;
-begin
-  Result := FileExists(AddBackslash(WizardDirValue) + 'data\postgres-superuser.txt');
 end;
 
 function ReadEnvPort: String;
@@ -319,13 +274,9 @@ begin
   AdminPage.Add('Confirm password:', True);
   AdminPage.Values[0] := 'admin';
 
-  PgPage := CreateInputQueryPage(AdminPage.ID,
-    'PostgreSQL', 'PostgreSQL is already installed on this PC',
-    'F7FIVE0 stores its library in PostgreSQL. Enter the password of the "postgres" ' +
-    'account so Setup can create a separate F7FIVE0 database. The password is used once and not saved.');
-  PgPage.Add('postgres password:', True);
-
-  NetPage := CreateInputOptionPage(PgPage.ID,
+  // No PostgreSQL page: F7FIVE0 runs its own database (install.ps1), so it
+  // never needs the password of a PostgreSQL that is already on the PC.
+  NetPage := CreateInputOptionPage(AdminPage.ID,
     'Access', 'Who can reach F7FIVE0?',
     'F7FIVE0 always works on this PC. Choose whether other devices at home can use it too.' + #13#10#13#10 +
     'Away from home: once F7FIVE0 is running, sign in and go to Admin > Remote access. ' +
@@ -421,10 +372,8 @@ end;
 function ShouldSkipPage(PageID: Integer): Boolean;
 begin
   Result := False;
-  if IsUpgrade and ((PageID = MediaPage.ID) or (PageID = AdminPage.ID) or (PageID = PgPage.ID)
+  if IsUpgrade and ((PageID = MediaPage.ID) or (PageID = AdminPage.ID)
       or (PageID = NetPage.ID) or (PageID = UpdatesPage.ID) or (PageID = OptionsPage.ID) or (PageID = PortsPage.ID)) then
-    Result := True
-  else if (PageID = PgPage.ID) and (not PostgresInstalled or SavedPostgresPassword) then
     Result := True;
 end;
 
@@ -471,14 +420,6 @@ begin
     else if AdminPage.Values[1] <> AdminPage.Values[2] then
     begin
       MsgBox('The passwords do not match.', mbError, MB_OK);
-      Result := False;
-    end;
-  end
-  else if CurPageID = PgPage.ID then
-  begin
-    if PgPage.Values[0] = '' then
-    begin
-      MsgBox('Enter the "postgres" password. If you do not know it, see INSTALL.md (Existing PostgreSQL).', mbError, MB_OK);
       Result := False;
     end;
   end
@@ -536,10 +477,6 @@ begin
       JsonPair('apiPort', Trim(PortsPage.Values[1]), False) +
       JsonPair('streamPort', Trim(PortsPage.Values[2]), False) +
       JsonPair('tmdbKey', Trim(OptionsPage.Values[0]), False);
-    // Nothing typed (the page was skipped): send no postgresPassword and
-    // install.ps1 reads data\postgres-superuser.txt, or makes its own.
-    if PgPage.Values[0] <> '' then
-      Cfg := Cfg + JsonPair('postgresPassword', PgPage.Values[0], False);
   end;
   // appVersion goes with every run, new install or upgrade: install.ps1 records
   // it in version.json. The rest above is sent only on a new install, so an

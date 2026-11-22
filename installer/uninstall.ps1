@@ -17,9 +17,13 @@
   and F7FIVE0-Update tasks are removed; remove the
   port-forward rules on your router yourself.
 
-  PostgreSQL, Python, and Tailscale are left installed
-  because other software may use them. Remove them from Windows Settings >
-  Apps if you no longer need them.
+  F7FIVE0's own database service (F7FIVE0-Postgres) is removed too; its data
+  stays in data\pgdata unless you pass -RemoveData. The PostgreSQL and Python
+  under runtime\ go with the rest of the program files.
+
+  An install from 1.0.24 or older used a system PostgreSQL and Python; those,
+  and Tailscale, are left installed because other software may use them.
+  Remove them from Windows Settings > Apps if you no longer need them.
 #>
 [CmdletBinding()]
 param(
@@ -38,6 +42,13 @@ foreach ($svc in @("F7FIVE0-Proxy", "F7FIVE0-Tunnel", "F7FIVE0-Web", "F7FIVE0-St
         else { & sc.exe delete $svc | Out-Null }
     }
 }
+# F7FIVE0's own PostgreSQL (registered by pg_ctl, not NSSM). Stopped after the
+# services that use it.
+if (Get-Service -Name "F7FIVE0-Postgres" -ErrorAction SilentlyContinue) {
+    Write-Host "removing service F7FIVE0-Postgres"
+    Stop-Service -Name "F7FIVE0-Postgres" -Force -ErrorAction SilentlyContinue
+    & sc.exe delete "F7FIVE0-Postgres" | Out-Null
+}
 Get-NetFirewallRule -DisplayName "F7FIVE0 web" -ErrorAction SilentlyContinue | Remove-NetFirewallRule
 Get-NetFirewallRule -DisplayName "F7FIVE0 HTTPS" -ErrorAction SilentlyContinue | Remove-NetFirewallRule
 Unregister-ScheduledTask -TaskName "F7FIVE0-DuckDNS" -Confirm:$false -ErrorAction SilentlyContinue
@@ -51,7 +62,13 @@ if (Test-Path $ts) { & $ts funnel reset *> $null }
 if ($RemoveData) {
     $envFile = Join-Path $InstallDir ".env"
     $saved = Join-Path $InstallDir "data\postgres-superuser.txt"
-    $psql = Get-ChildItem "$env:ProgramFiles\PostgreSQL\*\bin\psql.exe" -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+    # F7FIVE0's own database lives in data\pgdata and goes with data\ below.
+    # Only an install that used a system PostgreSQL needs the database dropped.
+    $ownDb = Test-Path (Join-Path $InstallDir "data\pgdata\PG_VERSION")
+    $psql = $null
+    if (-not $ownDb) {
+        $psql = Get-ChildItem "$env:ProgramFiles\PostgreSQL\*\bin\psql.exe" -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+    }
     if ($psql -and (Test-Path $saved)) {
         $env:PGPASSWORD = (Get-Content $saved | Select-Object -Last 1).Trim()
         & $psql -h 127.0.0.1 -U postgres -d postgres -c "DROP DATABASE IF EXISTS f7five0;" | Out-Null

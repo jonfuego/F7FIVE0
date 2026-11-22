@@ -93,11 +93,14 @@ try {
     # 6. Setup never calls winget. Setup can itself run under `winget install`,
     #    and winget runs one install at a time, so a nested winget waits forever
     #    (FuegoTest VM, 1.0.22). PostgreSQL and NSSM are pinned downloads.
-    Check "manifest pins postgresql and nssm" ($manifest.ContainsKey("postgresql") -and $manifest.ContainsKey("nssm"))
-    Check "postgresql is checked for EnterpriseDB's signature" ("$($manifest.postgresql.Publisher)" -match "EnterpriseDB")
+    Check "manifest pins postgresql, vcredist and nssm" ($manifest.ContainsKey("postgresql") -and $manifest.ContainsKey("vcredist") -and $manifest.ContainsKey("nssm"))
+    Check "postgresql is the binaries zip (not the 15-30 minute installer)" ("$($manifest.postgresql.Url)" -match '-windows-x64-binaries\.zip$')
+    Check "vcredist is pinned and checked for Microsoft's signature" ($manifest.ContainsKey("vcredist") -and "$($manifest.vcredist.Publisher)" -match "Microsoft Corporation" -and "$($manifest.vcredist.MinVersion)" -match '^\d+\.\d+')
+    Check "python is the NuGet package, with python.exe's signer named" ("$($manifest.python.Url)" -match 'api\.nuget\.org/.*/python\.[\d.]+\.nupkg$' -and "$($manifest.python.InnerPublisher)" -match "Python Software Foundation")
     $installCode = @(Get-Content (Join-Path $here "..\install.ps1") | Where-Object { $_ -notmatch '^\s*#' }) -join "`n"
     Check "install.ps1 runs no winget command" ($installCode -notmatch '(?i)Invoke-Winget|Start-Process\s+(-FilePath\s+)?"?winget|&\s*winget\b')
     Check "install.ps1 downloads PostgreSQL and NSSM from the manifest" ($installCode -match 'Get-DownloadSpec "postgresql"' -and $installCode -match 'Get-DownloadSpec "nssm"' -and $installCode -match 'Download \$PostgresSpec\.Url' -and $installCode -match 'Download \$NssmSpec\.Url')
+    Check "install.ps1 unzips with Expand-Zip (tar.exe), not Expand-Archive" ($installCode -notmatch 'Expand-Archive' -and $installCode -match 'Expand-Zip')
 } finally {
     Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
 }

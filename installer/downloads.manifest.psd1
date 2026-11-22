@@ -14,18 +14,21 @@
 # To bump a pinned version, see "Refreshing a pinned download" in CLAUDE.md.
 # ASCII only. PowerShell 5.1 compatible.
 @{
-    # Python comes straight from python.org, not winget: a clean install on the
-    # FuegoTest VM (2026-10-21) sat on winget's "Cancelling operation" for 29
-    # minutes and failed with 0x80004004 after winget had verified the file.
-    # Sha256 is the value the winget-pkgs manifest for Python.Python.3.12
-    # 3.12.10 pins (the hash winget checked on the VM); confirm it against the
-    # downloaded file with Get-FileHash when refreshing.
+    # Python is the official NuGet "python" package: a plain zip of a full
+    # CPython (venv and pip included), unpacked into runtime\python like Node.
+    # No installer, nothing installed for the whole PC, about 1 s to unpack.
+    # The python.org installer it replaces took minutes and once sat on
+    # winget's "Cancelling operation" for 29 minutes. The .nupkg itself carries
+    # no Authenticode signature, so InnerPublisher is checked on InnerFile
+    # (python.exe) after it is unpacked.
     python = @{
-        Name      = "Python (python.org Windows installer, x64)"
-        Version   = "3.12.10"
-        Url       = "https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe"
-        Sha256    = "67B5635E80EA51072B87941312D00EC8927C4DB9BA18938F7AD2D27B328B95FB"
-        Publisher = "Python Software Foundation"
+        Name           = "Python (NuGet python package, x64)"
+        Version        = "3.12.10"
+        Url            = "https://api.nuget.org/v3-flatcontainer/python/3.12.10/python.3.12.10.nupkg"
+        Sha256         = "0EB85C2DFCCCCF1B17352DE4C397F69194035B7D37149EACC16F1147D93DE3B8"
+        Publisher      = ""
+        InnerFile      = "python.exe"
+        InnerPublisher = "Python Software Foundation"
     }
     node = @{
         Name      = "Node.js (win-x64 zip)"
@@ -69,16 +72,34 @@
     # PostgreSQL and NSSM used to come through winget. Under `winget install
     # jonfuego.F7FIVE0` that deadlocked: winget runs one install at a time, so
     # Setup's own `winget install PostgreSQL...` waited forever for the outer
-    # winget, which waited for Setup (FuegoTest VM, 1.0.22). Both are the same
-    # files the winget-pkgs manifests pin (PostgreSQL.PostgreSQL.16 16.16-2 and
-    # NSSM.NSSM 2.24-101-g897c7ad); the hashes were checked against the
-    # downloaded files on 2026-11-21.
+    # winget, which waited for Setup (FuegoTest VM, 1.0.22).
+    #
+    # PostgreSQL is EnterpriseDB's "binaries" zip of the same 16.16-2 build, not
+    # its installer: the installer spent about 14 minutes unpacking itself
+    # (pgAdmin, StackBuilder, docs) and 15 to 30 minutes in all. install.ps1
+    # unpacks only pgsql/bin, pgsql/lib and pgsql/share (1,636 of 21,979 files,
+    # about 2 s) into runtime\pgsql, runs initdb and registers F7FIVE0's own
+    # database service. The zip is not Authenticode-signed; the SHA-256 is the
+    # guarantee (checked against the downloaded file on 2026-11-22).
     postgresql = @{
-        Name      = "PostgreSQL 16 (EnterpriseDB Windows installer, x64)"
+        Name      = "PostgreSQL 16 (EnterpriseDB Windows binaries zip, x64)"
         Version   = "16.16-2"
-        Url       = "https://get.enterprisedb.com/postgresql/postgresql-16.16-2-windows-x64.exe"
-        Sha256    = "DD526F2D32C9ACC1CB54DEE8D7265E7B8E12519934731201DF13EB0C2C58E128"
-        Publisher = "CN=EnterpriseDB Corporation"
+        Url       = "https://get.enterprisedb.com/postgresql/postgresql-16.16-2-windows-x64-binaries.zip"
+        Sha256    = "ADD1DE261B150E6923266ABEE293F05050795E73F5356158AEE4221A2170C073"
+        Publisher = ""
+    }
+    # The Visual C++ runtime the PostgreSQL binaries need (msvcp140,
+    # vcruntime140, vcruntime140_1); the EnterpriseDB installer used to install
+    # it. The URL is the versioned download the winget-pkgs manifest for
+    # Microsoft.VCRedist.2015+.x64 14.52.37029.0 pins. install.ps1 runs it only
+    # when the runtime is missing or older than MinVersion.
+    vcredist = @{
+        Name       = "Microsoft Visual C++ 2015-2022 Redistributable (x64)"
+        Version    = "14.52.37029.0"
+        MinVersion = "14.40"
+        Url        = "https://download.visualstudio.microsoft.com/download/pr/78d061c5-9ef3-42ab-98ed-3309d1095dc4/9C02C9ED120F671B900E6B9471D890E3B2414117A7E53F4AE2E855466FA2B7C9/VC_redist.x64.exe"
+        Sha256     = "9C02C9ED120F671B900E6B9471D890E3B2414117A7E53F4AE2E855466FA2B7C9"
+        Publisher  = "CN=Microsoft Corporation"
     }
     nssm = @{
         # Unsigned zip; the SHA-256 is the guarantee. install.ps1 copies only

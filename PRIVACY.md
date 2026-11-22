@@ -60,9 +60,10 @@ cloudflared and Caddy from GitHub), each checked against a fixed checksum.
 Each service is covered by that company's own privacy policy.
 
 Downloads during Setup. Setup downloads Python, Node.js, FFmpeg, PostgreSQL
-and NSSM from their publishers (python.org, nodejs.org, GitHub,
-get.enterprisedb.com and nssm.cc). Each file is checked against a fixed
-checksum before it runs.
+and NSSM from their publishers (api.nuget.org for Python, nodejs.org, GitHub,
+get.enterprisedb.com and nssm.cc), and Microsoft's Visual C++ runtime from
+download.visualstudio.microsoft.com when the PC does not have it. Each file is
+checked against a fixed checksum before it is used.
 
 
 WHAT YOUR BROWSER OR PHONE CONTACTS
