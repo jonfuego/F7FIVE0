@@ -134,3 +134,10 @@ test("release page links", () => {
   assert.equal(releasePageUrl("1.0.23"), "https://github.com/jonfuego/F7FIVE0/releases/tag/v1.0.23");
   assert.equal(releasePageUrl("../x"), "https://github.com/jonfuego/F7FIVE0/releases");
 });
+
+test("no HTML comment opener survives, even nested or unclosed", () => {
+  assert.equal(whatsNew("- Fix\n<!-- note -->\n- More"), "- Fix\n\n- More");
+  for (const body of ["- Fix\n<!<!-- x -->-- y -->", "- Fix <!<!-- a -->-- b -->", "- Fix <!-- never closed", "<!--<!-- -->-->- Fix"]) {
+    assert.ok(!whatsNew(body).includes("<!--"), body);
+  }
+});
