@@ -68,13 +68,14 @@ export function whatsNew(body: string | null | undefined): string {
     text = kept.join("\n");
   }
   // Drop HTML comments, repeating until none are left so a nested or split
-  // "<!--" can't survive one pass; a stray opener with no close goes too.
+  // "<!--" can't survive one pass. Then drop any leftover opener the same way:
+  // removing one "<!--" can join the characters around it into a new one.
   let prev: string;
   do {
     prev = text;
-    text = text.replace(/<!--[\s\S]*?-->/g, "");
+    text = text.replace(/<!--[\s\S]*?-->/g, "").replace(/<!--/g, "");
   } while (text !== prev);
-  text = text.replace(/<!--/g, "").trim();
+  text = text.trim();
   // Headings with nothing under them (an empty "What's Changed") are no notes.
   const hasContent = text.split("\n").some((l) => l.trim() && !HEADING.test(l.trimEnd()));
   return hasContent ? text : "";

@@ -137,7 +137,7 @@ test("release page links", () => {
 
 test("no HTML comment opener survives, even nested or unclosed", () => {
   assert.equal(whatsNew("- Fix\n<!-- note -->\n- More"), "- Fix\n\n- More");
-  for (const body of ["- Fix\n<!<!-- x -->-- y -->", "- Fix <!<!-- a -->-- b -->", "- Fix <!-- never closed", "<!--<!-- -->-->- Fix"]) {
+  for (const body of ["<!<!---->--- Fix", "- Fix\n<!<!-- x -->-- y -->", "- Fix <!<!-- a -->-- b -->", "- Fix <!-- never closed", "<!--<!-- -->-->- Fix"]) {
     assert.ok(!whatsNew(body).includes("<!--"), body);
   }
 });
