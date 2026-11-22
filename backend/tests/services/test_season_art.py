@@ -313,10 +313,26 @@ def test_season_poster_is_served_with_size_copies(client, db_session, tv_root, s
     assert client.get(f"/api/art/season/{season.id}/backdrop").status_code == 400
 
 
-def test_redact_url_hides_the_arr_api_key():
-    from app.services.art import redact_url
 
-    url = "http://sonarr:8989/MediaCover/12/season-1.jpg?apikey=SECRET123"
-    assert "SECRET123" not in redact_url(url)
-    assert redact_url(url).startswith("http://sonarr:8989/MediaCover/12/season-1.jpg?")
-    assert redact_url("https://image.tmdb.org/t/p/w780/x.jpg") == "https://image.tmdb.org/t/p/w780/x.jpg"
+def test_skipped_art_download_never_logs_the_arr_api_key(db_session, caplog, monkeypatch):
+    import logging
+    import uuid as _uuid
+
+    from app.models.art import ENTITY_SEASON, ROLE_POSTER
+    from app.services import art
+
+    def boom(*a, **k):
+        raise art.ArtValidationError("not an image")
+
+    monkeypatch.setattr(art, "fetch_and_save_url", boom)
+    images = [{"coverType": "poster", "url": "/MediaCover/12/season-1.jpg"}]
+    with caplog.at_level(logging.WARNING):
+        row = art.download_art_on_sync(
+            db_session, entity_kind=ENTITY_SEASON, entity_id=_uuid.uuid4(), role=ROLE_POSTER,
+            images=images, cover_type="poster", source_kind="sonarr",
+            arr_base_url="http://sonarr:8989", arr_api_key="SECRET123",
+        )
+    assert row is None
+    assert "art download skipped" in caplog.text
+    assert "http://sonarr:8989/MediaCover/12/season-1.jpg" in caplog.text
+    assert "SECRET123" not in caplog.text

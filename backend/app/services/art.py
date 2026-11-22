@@ -395,13 +395,6 @@ def _pick_arr_image_url(
     return None
 
 
-def redact_url(url: str) -> str:
-    """`url` for a log line: the query string is replaced, since an *arr
-    image URL carries the API key there (`?apikey=...`)."""
-    head, sep, _ = str(url).partition("?")
-    return f"{head}?<redacted>" if sep else head
-
-
 def download_art_on_sync(
     db: Session,
     *,
@@ -431,6 +424,7 @@ def download_art_on_sync(
           the same URL, nothing to do.
     """
     validate_kind_role(entity_kind, role)
+    images = list(images or [])  # read twice (fetch URL, then the log URL)
     url = _pick_arr_image_url(images, cover_type, arr_base_url, arr_api_key)
     if url is None:
         return None
@@ -460,7 +454,10 @@ def download_art_on_sync(
         # was there (placeholder if nothing) and try again next pass.
         log.warning(
             "art download skipped: entity=%s/%s role=%s url=%s reason=%s",
-            entity_kind, entity_id, role, redact_url(url), exc,
+            # Built without the API key: an *arr image URL carries it in the
+            # query string, and it must never reach the log.
+            entity_kind, entity_id, role,
+            _pick_arr_image_url(images, cover_type, arr_base_url, ""), exc,
         )
         return None
 
