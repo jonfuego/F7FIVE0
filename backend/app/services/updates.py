@@ -31,6 +31,7 @@ The same or an older version is never installed.
 from __future__ import annotations
 
 import hashlib
+from functools import cmp_to_key
 import logging
 import os
 import re
@@ -56,6 +57,11 @@ log = logging.getLogger("f7five0.updates")
 SETTING_KEY = "update_check"
 RELEASES_LATEST_URL = "https://api.github.com/repos/jonfuego/F7FIVE0/releases/latest"
 RELEASE_BY_TAG_URL = "https://api.github.com/repos/jonfuego/F7FIVE0/releases/tags/{tag}"
+# One page of recent releases, read only when the server is behind, so Admin >
+# Updates can show the notes of every version it would skip, not just the
+# latest. A failure here never fails the check: it falls back to the latest.
+RELEASES_LIST_URL = "https://api.github.com/repos/jonfuego/F7FIVE0/releases?per_page=30"
+MAX_HISTORY = 15
 SETUP_PREFIX = "F7FIVE0-Setup-"
 SUMS_NAME = "SHA256SUMS.txt"
 
@@ -230,9 +236,59 @@ def _iso(now: Optional[datetime] = None) -> str:
     return (now or datetime.now(timezone.utc)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+CHECK_KEYS = ("checked_at", "latest", "notes", "history", "setup_url", "sums_url", "error")
+
+
 def stored_check(db) -> dict:
     row = app_settings.get(db, SETTING_KEY) or {}
-    return {k: row.get(k) for k in ("checked_at", "latest", "notes", "setup_url", "sums_url", "error")}
+    return {k: row.get(k) for k in CHECK_KEYS}
+
+
+def _release_history(c: httpx.Client, latest: dict, installed: str) -> list[dict]:
+    """Notes for every published version newer than `installed`, up to and
+    including `latest`, newest first, as [{version, notes}]. One request; any
+    trouble (network, odd payload) gives just the latest release's notes."""
+    fallback = [{"version": latest["version"], "notes": latest["notes"]}]
+    try:
+        r = c.get(RELEASES_LIST_URL, headers={"User-Agent": user_agent(), "Accept": "application/vnd.github+json"})
+        if r.status_code != 200:
+            return fallback
+        payload = r.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        log.info("release list failed: %s", exc)
+        return fallback
+    if not isinstance(payload, list):
+        return fallback
+    found: dict[str, str] = {}
+    for item in payload:
+        rel = parse_release(item)
+        if rel is None:
+            continue
+        v = rel["version"]
+        if is_newer(v, installed) and not is_newer(v, latest["version"]):
+            found.setdefault(v, rel["notes"])
+    found[latest["version"]] = latest["notes"]
+    ordered = sorted(found, key=cmp_to_key(compare_versions), reverse=True)[:MAX_HISTORY]
+    return [{"version": v, "notes": found[v]} for v in ordered]
+
+
+def notes_since(check: dict, installed: str) -> list[dict]:
+    """The stored notes for versions newer than `installed`, newest first.
+    A check stored before `history` existed (or one that couldn't list the
+    releases) gives the latest release's notes alone."""
+    latest = check.get("latest")
+    if not is_newer(latest, installed):
+        return []
+    out: list[dict] = []
+    for item in check.get("history") or []:
+        if not isinstance(item, dict):
+            continue
+        v, notes = item.get("version"), item.get("notes")
+        if isinstance(v, str) and isinstance(notes, str) and is_newer(v, installed) and not is_newer(v, latest):
+            out.append({"version": v, "notes": notes})
+    if not any(i["version"] == latest for i in out):
+        out.insert(0, {"version": latest, "notes": check.get("notes") or ""})
+    return out
 
 
 def check_for_update(db, client: Optional[httpx.Client] = None, now: Optional[datetime] = None) -> dict:
@@ -250,15 +306,17 @@ def check_for_update(db, client: Optional[httpx.Client] = None, now: Optional[da
             rel = parse_release(r.json())
             if rel is None:
                 result["error"] = MESSAGES["no_release"]
-                result.update(latest=None, notes=None, setup_url=None, sums_url=None)
+                result.update(latest=None, notes=None, history=None, setup_url=None, sums_url=None)
             else:
-                result.update(latest=rel["version"], notes=rel["notes"], setup_url=rel["setup_url"],
-                              sums_url=rel["sums_url"], error=None)
+                installed = server_version.installed()
+                history = _release_history(c, rel, installed) if is_newer(rel["version"], installed) else []
+                result.update(latest=rel["version"], notes=rel["notes"], history=history,
+                              setup_url=rel["setup_url"], sums_url=rel["sums_url"], error=None)
         elif r.status_code in (403, 429):
             result["error"] = MESSAGES["rate_limited"]
         elif r.status_code == 404:
             result["error"] = MESSAGES["no_release"]
-            result.update(latest=None, notes=None, setup_url=None, sums_url=None)
+            result.update(latest=None, notes=None, history=None, setup_url=None, sums_url=None)
         else:
             result["error"] = f"{MESSAGES['github_error']} (HTTP {r.status_code})"
     except (httpx.HTTPError, ValueError) as exc:

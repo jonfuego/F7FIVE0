@@ -395,7 +395,12 @@ export type UpdatesStatus = {
   update_available: boolean;
   can_install: boolean;
   install_blocked: "no_checksums" | "no_setup" | "helper_unavailable" | "running" | null;
+  // The latest release's whole page text.
   notes: string | null;
+  // Page text of every version newer than the installed one, newest first
+  // (just the latest when GitHub's release list couldn't be read). Missing
+  // from an older server.
+  release_notes?: { version: string; notes: string }[];
   checked_at: string | null;
   check_error: string | null;
   helper_available: boolean;

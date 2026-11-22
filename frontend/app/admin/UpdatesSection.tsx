@@ -13,6 +13,8 @@
 //
 // Release notes are Markdown from GitHub. lib/release-notes.ts reads the small
 // part the notes use into data rendered as React elements: never as HTML.
+// "What's new" shows only the plain-language notes at the top of each release
+// page (release-notes/<ver>.md), not the download guide under them.
 
 "use client";
 
@@ -24,7 +26,7 @@ import {
   UPDATE_STEPS, blockedText, checkedAgo, encodePasswordHeader, formatBytes, offlineView,
   phaseChipLabel, phaseLabel, runSummary, stepIndex, upToDateMessages, updateErrorText,
 } from "@/lib/updates";
-import { parseReleaseNotes, type Inline } from "@/lib/release-notes";
+import { parseReleaseNotes, releasePageUrl, whatsNew, type Inline } from "@/lib/release-notes";
 
 type DismissedOut = { run_id: string | null };
 
@@ -300,11 +302,8 @@ export function UpdatesSection() {
           ) : null}
           {upToDate?.notice ? <p className="text-sm text-ink-2">{upToDate.notice}</p> : null}
 
-          {status.update_available && status.notes ? (
-            <div>
-              <h3 className="text-sm font-medium text-ink">What&apos;s new in {status.latest_version}</h3>
-              <ReleaseNotes notes={status.notes} />
-            </div>
+          {status.update_available && status.latest_version ? (
+            <WhatsNew status={status} />
           ) : null}
 
           {actionError ? (
@@ -604,13 +603,46 @@ function InlineText({ parts }: { parts: Inline[] }) {
   );
 }
 
+// "What's new": only the plain-language part of each release page (whatsNew
+// drops the download guide and GitHub's change list), for every version
+// between the installed one and the latest, newest first.
+export function WhatsNew({ status }: { status: UpdatesStatus }) {
+  const latest = status.latest_version ?? "";
+  const entries =
+    status.release_notes && status.release_notes.length
+      ? status.release_notes
+      : [{ version: latest, notes: status.notes ?? "" }];
+  const several = entries.length > 1;
+  return (
+    <div>
+      <h3 className="text-sm font-medium text-ink">
+        {several ? <>What&apos;s new since {status.installed_version}</> : <>What&apos;s new in {entries[0].version}</>}
+      </h3>
+      <div
+        className="mt-2 max-h-56 space-y-3 overflow-auto rounded-md border border-line bg-surface-1 p-3 text-xs leading-relaxed text-ink-2"
+        data-testid="release-notes"
+      >
+        {entries.map((e) => (
+          <section key={e.version} className="space-y-2" data-testid="release-notes-version">
+            {several ? <p className="text-sm font-medium text-ink">Version {e.version}</p> : null}
+            <ReleaseNotes notes={whatsNew(e.notes)} />
+            <p>
+              <a href={releasePageUrl(e.version)} target="_blank" rel="noopener noreferrer" className="underline hover:text-ink">
+                Release page on GitHub
+              </a>
+            </p>
+          </section>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function ReleaseNotes({ notes }: { notes: string }) {
   const blocks = parseReleaseNotes(notes);
+  if (!blocks.length) return <p className="italic">No release notes for this version.</p>;
   return (
-    <div
-      className="mt-2 max-h-56 space-y-2 overflow-auto rounded-md border border-line bg-surface-1 p-3 text-xs leading-relaxed text-ink-2"
-      data-testid="release-notes"
-    >
+    <>
       {blocks.map((b, i) => {
         if (b.kind === "heading") {
           return (
@@ -631,12 +663,40 @@ function ReleaseNotes({ notes }: { notes: string }) {
             </Tag>
           );
         }
+        if (b.kind === "table") {
+          return (
+            <div key={i} className="overflow-x-auto">
+              <table className="w-full border-collapse text-left">
+                <thead>
+                  <tr>
+                    {b.header.map((cell, j) => (
+                      <th key={j} className="border-b border-line px-2 py-1 font-medium text-ink">
+                        <InlineText parts={cell} />
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {b.rows.map((row, r) => (
+                    <tr key={r}>
+                      {row.map((cell, j) => (
+                        <td key={j} className="border-b border-line px-2 py-1 align-top">
+                          <InlineText parts={cell} />
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          );
+        }
         return (
           <p key={i}>
             <InlineText parts={b.content} />
           </p>
         );
       })}
-    </div>
+    </>
   );
 }

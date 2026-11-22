@@ -1,7 +1,13 @@
 // Release notes from GitHub are Markdown. This turns the small part of Markdown
-// the notes use (headings, bullet and numbered lists, paragraphs, bold, inline
-// code and links) into plain data that the page renders as React elements.
-// Nothing is ever rendered as HTML, and a link is kept only when it is http(s).
+// the notes use (headings, bullet and numbered lists, simple tables, paragraphs,
+// bold, inline code and links) into plain data that the page renders as React
+// elements. Nothing is ever rendered as HTML, and a link is kept only when it
+// is http(s).
+//
+// A release page is more than its notes: since 1.0.24 it is the plain-language
+// notes (release-notes/<ver>.md), then RELEASE_NOTES_MARKER, then the "Which
+// file do I need?" download guide and GitHub's change list. `whatsNew` keeps
+// only the part a person deciding whether to update needs.
 
 export type Inline =
   | { kind: "text"; text: string }
@@ -12,7 +18,60 @@ export type Inline =
 export type Block =
   | { kind: "heading"; level: 1 | 2 | 3; content: Inline[] }
   | { kind: "paragraph"; content: Inline[] }
-  | { kind: "list"; ordered: boolean; items: Inline[][] };
+  | { kind: "list"; ordered: boolean; items: Inline[][] }
+  | { kind: "table"; header: Inline[][]; rows: Inline[][][] };
+
+/** The line scripts/release-body.ps1 puts between the notes and the download
+ *  guide. Keep the two identical. */
+export const RELEASE_NOTES_MARKER = "<!-- f7five0:download-guide -->";
+
+const RELEASES_URL = "https://github.com/jonfuego/F7FIVE0/releases";
+
+/** The GitHub release page of a version (only for a plain x.y.z version). */
+export function releasePageUrl(version: string): string {
+  return /^\d+\.\d+\.\d+$/.test(version) ? `${RELEASES_URL}/tag/v${version}` : RELEASES_URL;
+}
+
+const GUIDE_HEADING = /^(#{1,6})\s+which file do i need\??\s*#*\s*$/i;
+const FULL_CHANGELOG = /^\s*(\*\*)?full changelog(\*\*)?\s*:/i;
+// GitHub's generated list: "* <PR title> by @someone in https://.../pull/12".
+const PR_CREDIT = /\s+by @[\w-]+(\[bot\])? in https:\/\/\S+\s*$/;
+
+/**
+ * The "What's new" part of a release page. A page with the marker gives
+ * everything above it. An older page (no marker) loses the "Which file do I
+ * need?" section and the Full Changelog line, and its generated list keeps
+ * just the titles. HTML comments go. "" when nothing is left to show.
+ */
+export function whatsNew(body: string | null | undefined): string {
+  let text = (body ?? "").replace(/\r\n?/g, "\n");
+  const cut = text.indexOf(RELEASE_NOTES_MARKER);
+  if (cut >= 0) {
+    text = text.slice(0, cut);
+  } else {
+    const kept: string[] = [];
+    let guideLevel = 0;
+    for (const line of text.split("\n")) {
+      const g = GUIDE_HEADING.exec(line);
+      if (g) {
+        guideLevel = g[1].length;
+        continue;
+      }
+      if (guideLevel) {
+        const h = HEADING.exec(line);
+        if (!h || h[1].length > guideLevel) continue;
+        guideLevel = 0;
+      }
+      if (FULL_CHANGELOG.test(line)) continue;
+      kept.push(line.replace(PR_CREDIT, ""));
+    }
+    text = kept.join("\n");
+  }
+  text = text.replace(/<!--[\s\S]*?-->/g, "").trim();
+  // Headings with nothing under them (an empty "What's Changed") are no notes.
+  const hasContent = text.split("\n").some((l) => l.trim() && !HEADING.test(l.trimEnd()));
+  return hasContent ? text : "";
+}
 
 function safeHref(raw: string): string | null {
   try {
@@ -55,6 +114,16 @@ export function parseInline(text: string): Inline[] {
 const HEADING = /^(#{1,6})\s+(.*?)\s*#*\s*$/;
 const BULLET = /^\s*[-*+]\s+(.*)$/;
 const NUMBERED = /^\s*\d+[.)]\s+(.*)$/;
+const TABLE_ROW = /^\s*\|.*\|\s*$/;
+const TABLE_RULE = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
+
+/** The cells of a `| a | b |` row (a `\|` stays a pipe inside a cell). */
+function tableCells(line: string): string[] {
+  let t = line.trim();
+  if (t.startsWith("|")) t = t.slice(1);
+  if (t.endsWith("|") && !t.endsWith("\\|")) t = t.slice(0, -1);
+  return t.split(/(?<!\\)\|/).map((c) => c.replace(/\\\|/g, "|").trim());
+}
 
 export function parseReleaseNotes(md: string): Block[] {
   const blocks: Block[] = [];
@@ -70,11 +139,31 @@ export function parseReleaseNotes(md: string): Block[] {
     list = null;
   };
 
-  for (const rawLine of md.replace(/\r\n?/g, "\n").split("\n")) {
+  const lines = md.replace(/\r\n?/g, "\n").split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const rawLine = lines[i];
     const line = rawLine.trimEnd();
     if (!line.trim()) {
       flushPara();
       flushList();
+      continue;
+    }
+    // A table: a | row |, then a |---| rule, then rows until a line that isn't one.
+    if (TABLE_ROW.test(line) && i + 1 < lines.length && TABLE_RULE.test(lines[i + 1]) && lines[i + 1].includes("-")) {
+      flushPara();
+      flushList();
+      const header = tableCells(line);
+      const rows: Inline[][][] = [];
+      i += 2;
+      while (i < lines.length && TABLE_ROW.test(lines[i].trimEnd())) {
+        const cells = tableCells(lines[i]);
+        // Pad or trim to the header's width so every row lines up.
+        const fitted = header.map((_, c) => cells[c] ?? "");
+        rows.push(fitted.map(parseInline));
+        i++;
+      }
+      i--;
+      blocks.push({ kind: "table", header: header.map(parseInline), rows });
       continue;
     }
     const h = HEADING.exec(line);
