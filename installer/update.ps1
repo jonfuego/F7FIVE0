@@ -50,8 +50,9 @@
   Read data\updates\request.json (what the scheduled task passes).
 
 .PARAMETER PgBin
-  Folder holding pg_dump.exe and pg_restore.exe. Default: the newest
-  PostgreSQL under Program Files. (Used by installer\tests\update-verify.ps1.)
+  Folder holding pg_dump.exe and pg_restore.exe. Default: F7FIVE0's own
+  runtime\pgsql\bin, else the newest PostgreSQL under Program Files.
+  (Used by installer\tests\update-verify.ps1.)
 
 .PARAMETER HealthTimeoutSeconds
   How long to wait for the health checks. Default 300.
@@ -189,9 +190,11 @@ function Find-PgTool([string]$name) {
         if (Test-Path -LiteralPath $p) { return $p }
         return $null
     }
-    $roots = @(Get-ChildItem "$env:ProgramFiles\PostgreSQL" -Directory -ErrorAction SilentlyContinue | Sort-Object { [int]($_.Name -replace '\D', '0') } -Descending)
-    foreach ($r in $roots) {
-        $p = Join-Path $r.FullName "bin\$name.exe"
+    # F7FIVE0's own runtime\pgsql\bin first, else a system PostgreSQL (installs
+    # from 1.0.24 and older): Find-PgBinDir in common.ps1.
+    $dir = Find-PgBinDir $InstallDir
+    if ($dir) {
+        $p = Join-Path $dir "$name.exe"
         if (Test-Path -LiteralPath $p) { return $p }
     }
     $c = Get-Command $name -ErrorAction SilentlyContinue

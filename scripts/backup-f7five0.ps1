@@ -66,12 +66,17 @@ if ([string]::IsNullOrWhiteSpace($dest)) {
 }
 
 # --- locate pg_dump ---
-$pgDump = (Get-Command pg_dump -ErrorAction SilentlyContinue).Source
+# F7FIVE0's own PostgreSQL first (runtime\pgsql\bin), then PATH, then a system
+# PostgreSQL (installs from 1.0.24 and older).
+$pgDump = $null
+$ownDump = Join-Path $RepoRoot 'runtime\pgsql\bin\pg_dump.exe'
+if (Test-Path $ownDump) { $pgDump = $ownDump }
+if (-not $pgDump) { $pgDump = (Get-Command pg_dump -ErrorAction SilentlyContinue).Source }
 if (-not $pgDump) {
     $pgDump = Get-ChildItem 'C:\Program Files\PostgreSQL\*\bin\pg_dump.exe' -ErrorAction SilentlyContinue |
         Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
 }
-if (-not $pgDump) { throw 'pg_dump.exe not found (looked on PATH and C:\Program Files\PostgreSQL\*\bin)' }
+if (-not $pgDump) { throw 'pg_dump.exe not found (looked in runtime\pgsql\bin, on PATH and in C:\Program Files\PostgreSQL\*\bin)' }
 
 Log "backup start -> $dest"
 

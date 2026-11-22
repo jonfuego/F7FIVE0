@@ -149,6 +149,7 @@ $PythonSpec  = Get-DownloadSpec "python"
 $NodeSpec    = Get-DownloadSpec "node"
 $NodeVersion = $NodeSpec.Version
 $FfmpegSpec  = Get-DownloadSpec "ffmpeg"
+$VcRedistSpec = Get-DownloadSpec "vcredist"
 $PostgresSpec = Get-DownloadSpec "postgresql"
 $NssmSpec    = Get-DownloadSpec "nssm"
 
@@ -431,79 +432,45 @@ Ok "ports: web $WebPort, API $ApiPort, stream $StreamPort"
 # ---------------------------------------------------------------------------
 Step "Installing prerequisites"
 # ---------------------------------------------------------------------------
-# Python (machine-wide, so services running as any account can use it).
-function Find-Python {
-    $cands = @()
-    $reg = Get-ItemProperty "HKLM:\SOFTWARE\Python\PythonCore\3.1[2-4]\InstallPath" -ErrorAction SilentlyContinue
-    foreach ($r in @($reg)) { if ($r -and $r.ExecutablePath) { $cands += $r.ExecutablePath } }
-    $cands += "$env:ProgramFiles\Python312\python.exe", "$env:ProgramFiles\Python313\python.exe", "$env:ProgramFiles\Python314\python.exe"
-    foreach ($c in $cands) { if ($c -and (Test-Path $c)) { return $c } }
-    return $null
-}
-# Python comes from the pinned python.org installer, not winget. On a clean VM
-# winget sat on "Cancelling operation" for 29 minutes and gave up with
-# 0x80004004 after it had downloaded and verified the file. The installer runs
-# quietly for all users, with a progress line every 30 s, a 15-minute limit, and
-# a wait-and-retry while another install holds Windows Installer (exit 1618,
-# often Windows Update on a new PC). Success is judged by Find-Python, not the
-# exit code.
-function Install-PythonDirect {
-    $exe = Join-Path $env:TEMP ("f7five0-python-{0}-amd64.exe" -f $PythonSpec.Version)
-    Download $PythonSpec.Url $exe $PythonSpec.Sha256 $PythonSpec.Publisher
-    $pyLog = Join-Path $LogsDir ("python-install-{0}.log" -f (Get-Date -Format "yyyyMMdd-HHmmss"))
-    $pyArgs = "/quiet InstallAllUsers=1 PrependPath=0 Include_test=0 Include_launcher=0 Shortcuts=0 AssociateFiles=0 /log `"$pyLog`""
-    $rc = $null
-    for ($attempt = 1; $attempt -le 3; $attempt++) {
-        Info ("installing Python {0} for all users (attempt {1} of 3)" -f $PythonSpec.Version, $attempt)
-        $start = Get-Date
-        $proc = Start-Process -FilePath $exe -ArgumentList $pyArgs -PassThru -WindowStyle Hidden
-        $null = $proc.Handle
-        $nextBeat = 30
-        $timedOut = $false
-        while (-not $proc.WaitForExit(1000)) {
-            $elapsed = [int]((Get-Date) - $start).TotalSeconds
-            if ($elapsed -ge $nextBeat) {
-                Info ("still installing Python ({0}:{1:00} elapsed)" -f [int][math]::Floor($elapsed / 60), ($elapsed % 60))
-                $nextBeat += 30
-            }
-            if ($elapsed -ge 900) {
-                $timedOut = $true
-                try { $proc.Kill() } catch { }
-                break
-            }
+# Python: F7FIVE0's own copy in runtime\python, like Node. It is the official
+# NuGet "python" package, a plain zip of a full CPython with venv and pip, so
+# nothing is installed for the whole PC and it unpacks in about a second. The
+# python.org installer used before took minutes (and once hung for 29 minutes
+# under winget). An install from 1.0.24 or older built its venv on a system
+# Python; that venv is kept as it is.
+$PyHome = Join-Path $RuntimeDir "python"
+$PyPrivate = Join-Path $PyHome "python.exe"
+$PyVersionFile = Join-Path $PyHome "f7five0-python.version"
+$havePyVersion = ""
+if (Test-Path $PyVersionFile) { $havePyVersion = "$(Get-Content $PyVersionFile -Raw)".Trim() }
+$Py = $null
+if ((Test-Path $VenvPy) -and -not (Test-Path $PyPrivate)) {
+    Ok "Python: keeping the existing virtual environment"
+} else {
+    if (-not (Test-Path $PyPrivate) -or $havePyVersion -ne $PythonSpec.Version) {
+        $pkg = Join-Path $env:TEMP ("f7five0-python-{0}.nupkg" -f $PythonSpec.Version)
+        Download $PythonSpec.Url $pkg $PythonSpec.Sha256 $PythonSpec.Publisher
+        # Unpack inside the install folder so the files inherit its rights.
+        $stage = Join-Path $RuntimeDir "python.new"
+        if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
+        Expand-Zip $pkg $stage @("tools")
+        $inner = Join-Path $stage ("tools\" + $PythonSpec.InnerFile)
+        if (-not (Test-Path $inner)) { Fail "the Python package has no tools\$($PythonSpec.InnerFile)" }
+        $sig = Get-AuthenticodeSignature -FilePath $inner
+        $subject = if ($sig.SignerCertificate) { $sig.SignerCertificate.Subject } else { "" }
+        if ($sig.Status -ne "Valid" -or $subject -notlike "*$($PythonSpec.InnerPublisher)*") {
+            Remove-Item -Recurse -Force $stage -ErrorAction SilentlyContinue
+            Fail "python.exe in the Python package is not signed by $($PythonSpec.InnerPublisher) (status '$($sig.Status)', subject '$subject')."
         }
-        if ($timedOut) {
-            Warn "the Python installer did not finish in 15 minutes and was stopped. Its log: $pyLog"
-            $rc = -1
-            break
-        }
-        $rc = $proc.ExitCode
-        # 0 done, 3010 done (restart later), 1638 another 3.12 is already installed.
-        if ($rc -eq 0 -or $rc -eq 3010 -or $rc -eq 1638) { break }
-        if ($rc -eq 1618 -and $attempt -lt 3) {
-            Warn "another installation is running (often Windows Update on a new PC). Waiting 60 s, then trying again."
-            Start-Sleep -Seconds 60
-            continue
-        }
-        Warn "the Python installer exited $rc. Its log: $pyLog"
-        break
+        if (Test-Path $PyHome) { Remove-Item -Recurse -Force $PyHome }
+        Move-Item (Join-Path $stage "tools") $PyHome
+        Remove-Item -Recurse -Force $stage, $pkg -ErrorAction SilentlyContinue
+        & icacls $PyHome /reset /T /C /Q | Out-Null
+        Set-Content -Path $PyVersionFile -Value $PythonSpec.Version -Encoding ASCII
     }
-    Remove-Item -Force $exe -ErrorAction SilentlyContinue
-    Refresh-Path
-    return $rc
+    $Py = $PyPrivate
+    Ok "Python $($PythonSpec.Version): $Py"
 }
-
-$Py = Find-Python
-if (-not $Py) {
-    $pyRc = @(Install-PythonDirect) | Select-Object -Last 1
-    for ($i = 0; $i -lt 10 -and -not $Py; $i++) {
-        $Py = Find-Python
-        if (-not $Py) { Start-Sleep -Seconds 2 }
-    }
-    if ($Py -and $pyRc -ne 0) { Info "the Python installer reported $pyRc, but Python is installed; carrying on." }
-}
-if (-not $Py) { Fail "Python $($PythonSpec.Version) did not install. Install Python 3.12 from python.org (choose Install for all users), then run Setup again. The installer log is in $LogsDir." }
-Ok "Python: $Py"
 
 # Node.js: private copy under runtime\ so it never clashes with a system Node.
 $NodeDir = Join-Path $RuntimeDir "node"
@@ -514,7 +481,7 @@ if (-not $nodeOk) {
     Download $NodeSpec.Url $zip $NodeSpec.Sha256 $NodeSpec.Publisher
     $unz = Join-Path $env:TEMP "f7five0-node"
     if (Test-Path $unz) { Remove-Item -Recurse -Force $unz }
-    Expand-Archive -Path $zip -DestinationPath $unz -Force
+    Expand-Zip $zip $unz
     if (Test-Path $NodeDir) { Remove-Item -Recurse -Force $NodeDir }
     Move-Item (Get-ChildItem $unz | Select-Object -First 1).FullName $NodeDir
     # Move-Item keeps the ACL the folder had in %TEMP% (the admin's profile:
@@ -545,7 +512,7 @@ if (-not ((Test-Path $Ffmpeg) -and (Test-Path $Ffprobe)) -or $haveFfmpegVersion 
     Download $FfmpegSpec.Url $zip $FfmpegSpec.Sha256 $FfmpegSpec.Publisher
     $unz = Join-Path $env:TEMP "f7five0-ffmpeg"
     if (Test-Path $unz) { Remove-Item -Recurse -Force $unz }
-    Expand-Archive -Path $zip -DestinationPath $unz -Force
+    Expand-Zip $zip $unz
     $bin = Get-ChildItem -Path $unz -Recurse -Filter ffmpeg.exe | Select-Object -First 1
     Copy-Item $bin.FullName $Ffmpeg -Force
     Copy-Item (Join-Path $bin.DirectoryName "ffprobe.exe") $Ffprobe -Force
@@ -580,7 +547,7 @@ if (-not (Test-Path $Nssm)) {
         Download $NssmSpec.Url $zip $NssmSpec.Sha256 $NssmSpec.Publisher
         $unz = Join-Path $env:TEMP "f7five0-nssm"
         if (Test-Path $unz) { Remove-Item -Recurse -Force $unz }
-        Expand-Archive -Path $zip -DestinationPath $unz -Force
+        Expand-Zip $zip $unz
         $src = Get-ChildItem -Path $unz -Recurse -Filter nssm.exe | Where-Object { $_.DirectoryName -match '\\win64$' } | Select-Object -First 1
         if (-not $src) { Fail "the NSSM download has no win64\nssm.exe. Download nssm.exe (64-bit) from nssm.cc into $BinDir and run Setup again." }
         Copy-Item $src.FullName $Nssm -Force
@@ -589,148 +556,158 @@ if (-not (Test-Path $Nssm)) {
 }
 Ok "NSSM: $Nssm"
 
-# PostgreSQL.
-function Find-Psql {
-    $roots = @(Get-ChildItem "$env:ProgramFiles\PostgreSQL" -Directory -ErrorAction SilentlyContinue | Sort-Object { [int]($_.Name -replace '\D', '0') } -Descending)
-    foreach ($r in $roots) { $p = Join-Path $r.FullName "bin\psql.exe"; if (Test-Path $p) { return $p } }
-    $c = Get-Command psql -ErrorAction SilentlyContinue
-    if ($c) { return $c.Source }
-    return $null
-}
-
-# After an uninstall, PostgreSQL can leave its service entry, the "postgres"
-# Windows account and its data folder behind (see the PostgreSQL leftovers
-# section of common.ps1). Called only when no usable PostgreSQL exists. Returns
-# the password to hand the PostgreSQL installer for the postgres account when a
-# leftover account had to be reset, else "". Nothing that holds data is deleted:
-# a service entry whose program is gone is removed, the account's password is
-# reset, an old data folder is renamed aside. Never fatal.
-function Clear-PostgresLeftovers {
-    $svcPassword = ""
+# PostgreSQL: F7FIVE0's own. Binaries in runtime\pgsql (from the pinned
+# EnterpriseDB binaries zip, only bin, lib and share), the cluster in
+# data\pgdata, the Windows service F7FIVE0-Postgres listening on 127.0.0.1.
+# This replaced running the EnterpriseDB installer, which took 15 to 30 minutes
+# and asked for the password of any PostgreSQL already on the PC. An upgrade of
+# an install that uses a system PostgreSQL (1.0.24 and older) keeps it. The
+# decisions are Get-PgPlan in common.ps1 (tests\fast-install.Tests.ps1).
+$PgService = "F7FIVE0-Postgres"
+$PgHome = Join-Path $RuntimeDir "pgsql"
+$PgBinDir = Join-Path $PgHome "bin"
+$PgData = Join-Path $DataDir "pgdata"
+$PgVersionFile = Join-Path $PgHome "f7five0-pgsql.version"
+$pgNote = Join-Path $DataDir "postgres-superuser.txt"
+$havePgVersion = ""
+if (Test-Path $PgVersionFile) { $havePgVersion = "$(Get-Content $PgVersionFile -Raw)".Trim() }
+$pgPlan = Get-PgPlan $IsUpgrade (Test-Path (Join-Path $PgData "PG_VERSION")) (Test-Path (Join-Path $PgBinDir "postgres.exe")) $havePgVersion $PostgresSpec.Version ([bool](Get-Service -Name $PgService -ErrorAction SilentlyContinue))
+$Psql = $null
+$PgPort = 5432
+$PgPrivate = ($pgPlan.Mode -eq "private")
+# Native tools (initdb, pg_ctl, the VC++ installer) write to stderr; run them
+# with "Continue" and judge them by exit code (see Invoke-VenvPy below).
+function Invoke-Native([string]$exe, [string[]]$argv) {
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
     try {
-        $all = @(Get-CimInstance Win32_Service -ErrorAction Stop)
-    } catch {
-        Warn "could not list the Windows services to look for PostgreSQL leftovers: $($_.Exception.Message)"
-        return ""
-    }
-    # 1. A service entry whose program is gone would stop the installer from
-    #    creating a service of the same name.
-    foreach ($svc in @(Find-OrphanPgServices $all)) {
-        Info "found a leftover service entry '$($svc.Name)' from a PostgreSQL that was uninstalled; removing the entry"
-        $prev = $ErrorActionPreference
-        $ErrorActionPreference = "Continue"
-        try {
-            Stop-Service -Name $svc.Name -Force -ErrorAction SilentlyContinue
-            & sc.exe delete $svc.Name | Out-Null
-            if ($LASTEXITCODE -ne 0) { Warn "sc.exe delete $($svc.Name) returned $LASTEXITCODE" }
-        } finally { $ErrorActionPreference = $prev }
-    }
-    # 2. An old data folder: a new PostgreSQL must not meet a cluster it did not make.
-    foreach ($oldData in @(Find-PgLeftoverDataDirs (Join-Path $env:ProgramFiles "PostgreSQL"))) {
-        try {
-            $to = Move-PgDataAside $oldData (Get-Date -Format "yyyyMMdd-HHmmss")
-            Warn "an old PostgreSQL data folder was left behind. Moved it to $to (nothing was deleted); copy it back if you still need it."
-        } catch {
-            Warn "could not move the old PostgreSQL data folder $oldData aside ($($_.Exception.Message)). The PostgreSQL install may fail; rename that folder and run Setup again."
-        }
-    }
-    # 3. The "postgres" Windows account. The installer wants its password, and
-    #    by default offers the new superuser password, which will not match.
-    try {
-        $acct = Get-LocalUser -Name "postgres" -ErrorAction SilentlyContinue
-        if ($acct) {
-            if (Test-PgAccountOrphan $all "postgres") {
-                $newPassword = New-Secret 24
-                $note = Join-Path $DataDir "postgres-service-account.txt"
-                # Save the password BEFORE resetting the account, like the superuser one.
-                Set-Content -Path $note -Value "Windows account 'postgres' (runs the PostgreSQL service). F7FIVE0 setup reset its password because an old one was left behind:`r`n$newPassword" -Encoding ASCII
-                Set-PrivateAcl $note
-                Set-LocalUser -Name "postgres" -Password (ConvertTo-SecureString $newPassword -AsPlainText -Force)
-                if (-not $acct.Enabled) { Enable-LocalUser -Name "postgres" }
-                $svcPassword = $newPassword
-                Info "found the 'postgres' Windows account from an earlier PostgreSQL; reset its password so the new PostgreSQL can use it (saved in $note)"
-            } else {
-                Info "the 'postgres' Windows account is still used by a PostgreSQL service that exists; leaving it alone"
-            }
-        }
-    } catch {
-        $svcPassword = ""
-        Warn "could not reset the leftover 'postgres' Windows account ($($_.Exception.Message)). The PostgreSQL install may fail; see INSTALL.md, 'Already have PostgreSQL?'."
-    }
-    return $svcPassword
+        $out = & $exe @argv 2>&1 | ForEach-Object { "$_" }
+        $script:NativeExit = $LASTEXITCODE
+        return $out
+    } finally { $ErrorActionPreference = $prev }
 }
+if (-not $PgPrivate) {
+    Ok "PostgreSQL: keeping the one this install already uses"
+} else {
+    # The wizard no longer asks for a PostgreSQL password: this cluster is
+    # F7FIVE0's own, and its password is the one saved in postgres-superuser.txt.
+    $PgSuperPassword = ""
 
-$Psql = Find-Psql
-$PgInstalledNow = $false
-if (-not $Psql -and -not $IsUpgrade) {
-    if (-not $PgSuperPassword) { $PgSuperPassword = New-Secret 24 }
-    # Save the password BEFORE installing: the installer can report failure for
-    # an install that worked, and a lost password means a manual reset.
-    $pgNote = Join-Path $DataDir "postgres-superuser.txt"
-    Set-Content -Path $pgNote -Value "PostgreSQL superuser 'postgres' password (created by F7FIVE0 setup):`r`n$PgSuperPassword" -Encoding ASCII
-    Set-PrivateAcl $pgNote
-    # The pinned EnterpriseDB installer, not winget: Setup itself may be running
-    # under `winget install`, and winget runs one install at a time, so a nested
-    # `winget install PostgreSQL` waited forever (FuegoTest VM, 1.0.22).
-    $pgExe = Join-Path $env:TEMP ("f7five0-postgresql-{0}-windows-x64.exe" -f $PostgresSpec.Version)
-    Download $PostgresSpec.Url $pgExe $PostgresSpec.Sha256 $PostgresSpec.Publisher
-    Info "installing PostgreSQL 16. This is the slow one: usually 5-10 minutes with nothing on screen."
-    # A PostgreSQL that was uninstalled can leave its service entry, the postgres
-    # Windows account and its data behind; clear them so the new install works.
-    $pgSvcPassword = @(Clear-PostgresLeftovers) | Select-Object -Last 1
-    $pgArgs = "--mode unattended --unattendedmodeui none --superpassword `"$PgSuperPassword`" --serverport 5432 --enable-components server,commandlinetools"
-    if ($pgSvcPassword) { $pgArgs += " --serviceaccount postgres --servicepassword `"$pgSvcPassword`"" }
-    $pgStart = Get-Date
-    $pgProc = Start-Process -FilePath $pgExe -ArgumentList $pgArgs -PassThru -WindowStyle Hidden
-    $null = $pgProc.Handle
-    $nextBeat = 30
-    $pgTimedOut = $false
-    $pgSlowWarned = $false
-    while (-not $pgProc.WaitForExit(1000)) {
-        $elapsed = [int]((Get-Date) - $pgStart).TotalSeconds
-        if ($elapsed -ge $nextBeat) {
-            $svcNote = if (Get-Service -Name "postgresql-x64-16" -ErrorAction SilentlyContinue) { ", database service registered" } else { "" }
-            Info ("still installing PostgreSQL ({0}:{1:00} elapsed{2})" -f [int][math]::Floor($elapsed / 60), ($elapsed % 60), $svcNote)
-            $nextBeat += 30
+    # 1. The Visual C++ runtime the PostgreSQL binaries load.
+    $vc = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\X64" -ErrorAction SilentlyContinue
+    if (Test-VcRuntimeNeeded "$($vc.Installed)" "$($vc.Version)" $VcRedistSpec.MinVersion) {
+        $vcExe = Join-Path $env:TEMP ("f7five0-vc_redist-{0}.x64.exe" -f $VcRedistSpec.Version)
+        Download $VcRedistSpec.Url $vcExe $VcRedistSpec.Sha256 $VcRedistSpec.Publisher
+        Info "installing the Microsoft Visual C++ runtime that PostgreSQL needs"
+        $vcProc = Start-Process -FilePath $vcExe -ArgumentList "/install /quiet /norestart" -Wait -PassThru -WindowStyle Hidden
+        $vcRc = $vcProc.ExitCode
+        Remove-Item -Force $vcExe -ErrorAction SilentlyContinue
+        $vc = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\X64" -ErrorAction SilentlyContinue
+        if (Test-VcRuntimeNeeded "$($vc.Installed)" "$($vc.Version)" $VcRedistSpec.MinVersion) {
+            Fail "The Microsoft Visual C++ runtime did not install (exit $vcRc). Install the latest 'Visual C++ Redistributable for Visual Studio 2015-2022 (x64)' from microsoft.com, then run Setup again."
         }
-        # Never stop it early: on a slow or busy PC the same installer took over
-        # 30 minutes (15 on a quiet one), and stopping it in its last step leaves
-        # PostgreSQL without its uninstaller. 90 minutes means it is stuck.
-        if ($elapsed -ge 1800 -and -not $pgSlowWarned) {
-            $pgSlowWarned = $true
-            Info "PostgreSQL is taking longer than usual (a slow or busy PC). Still waiting."
-        }
-        if ($elapsed -ge 5400) {
-            $pgTimedOut = $true
-            Warn "the PostgreSQL installer did not finish in 90 minutes and was stopped."
-            try { $pgProc.Kill() } catch { }
-            break
-        }
+        # 3010: installed, Windows wants a restart at some point. PostgreSQL runs without it.
+        Ok ("Visual C++ runtime {0}" -f "$($vc.Version)".TrimStart("v"))
     }
-    $pgRc = if ($pgTimedOut) { -1 } else { $pgProc.ExitCode }
-    Remove-Item -Force $pgExe -ErrorAction SilentlyContinue
-    Refresh-Path
-    # Judge by the result on disk, not the installer's exit code.
-    $pgSvc = $null
-    for ($i = 0; $i -lt 30; $i++) {
-        $Psql = Find-Psql
-        $pgSvc = Get-Service -Name "postgresql-x64-16" -ErrorAction SilentlyContinue
-        if ($Psql -and $pgSvc -and $pgSvc.Status -eq "Running") { break }
-        Start-Sleep -Seconds 2
+
+    # 2. The binaries. An upgrade that pins a new PostgreSQL 16 build replaces
+    #    them with the service stopped; the cluster in data\pgdata is untouched.
+    if ($pgPlan.Extract) {
+        $pgSvc = Get-Service -Name $PgService -ErrorAction SilentlyContinue
+        if ($pgSvc -and $pgSvc.Status -ne "Stopped") { Info "stop $PgService"; Stop-Service -Name $PgService -Force }
+        $zip = Join-Path $env:TEMP ("f7five0-postgresql-{0}.zip" -f $PostgresSpec.Version)
+        Download $PostgresSpec.Url $zip $PostgresSpec.Sha256 $PostgresSpec.Publisher
+        $stage = Join-Path $RuntimeDir "pgsql.new"
+        if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
+        Expand-Zip $zip $stage @("pgsql/bin", "pgsql/lib", "pgsql/share")
+        if (-not (Test-Path (Join-Path $stage "pgsql\bin\postgres.exe"))) { Fail "the PostgreSQL download has no pgsql\bin\postgres.exe" }
+        if (Test-Path $PgHome) { Remove-Item -Recurse -Force $PgHome }
+        Move-Item (Join-Path $stage "pgsql") $PgHome
+        Remove-Item -Recurse -Force $stage, $zip -ErrorAction SilentlyContinue
+        & icacls $PgHome /reset /T /C /Q | Out-Null
+        Set-Content -Path $PgVersionFile -Value $PostgresSpec.Version -Encoding ASCII
+        Info "PostgreSQL $($PostgresSpec.Version) unpacked into $PgHome"
     }
-    if (-not ($Psql -and $pgSvc -and $pgSvc.Status -eq "Running")) {
-        $edbLog = Join-Path $env:TEMP "install-postgresql.log"
-        if (Test-Path $edbLog) {
-            Warn "PostgreSQL installer log ($edbLog), last lines:"
-            Get-Content $edbLog -Tail 25 | ForEach-Object { Info $_ }
+    $Psql = Join-Path $PgBinDir "psql.exe"
+
+    # 3. The cluster. A new one takes port 5432, or the next free one when
+    #    another PostgreSQL (or anything else) already listens there. An
+    #    existing one keeps the port in its postgresql.conf.
+    if ($pgPlan.Init) {
+        $PgPort = Find-FreePort 5432 @($WebPort, $ApiPort, $StreamPort)
+        # Reuse the password a first install that stopped partway saved; save a
+        # new one BEFORE initdb, so it is never lost.
+        if (Test-Path $pgNote) { $PgSuperPassword = (Get-Content $pgNote | Select-Object -Last 1).Trim() }
+        if (-not $PgSuperPassword) { $PgSuperPassword = New-Secret 24 }
+        Set-Content -Path $pgNote -Value "PostgreSQL superuser 'postgres' password (F7FIVE0's own database, created by F7FIVE0 setup):`r`n$PgSuperPassword" -Encoding ASCII
+        Set-PrivateAcl $pgNote
+        if (Test-Path $PgData) {
+            # A folder with no PG_VERSION is what a failed initdb leaves. Keep it aside.
+            $aside = Move-PgDataAside $PgData (Get-Date -Format "yyyyMMdd-HHmmss")
+            Warn "an unfinished database folder was left by an earlier Setup; moved it to $aside"
         }
-        Fail "PostgreSQL did not install (installer exit $pgRc). Install PostgreSQL 16 from postgresql.org, then run Setup again. The superuser password Setup chose is in $pgNote."
+        New-Item -ItemType Directory -Path $PgData | Out-Null
+        # The service runs as NETWORK SERVICE, so it gets Modify. initdb runs as
+        # this admin but drops the Administrators group from its own token, so
+        # this account gets Full Control for the run and loses it after.
+        $me = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+        $pgGrants = @("*S-1-5-32-544:(OI)(CI)F", "*S-1-5-18:(OI)(CI)F", "*S-1-5-20:(OI)(CI)M")
+        if ($me -ne "S-1-5-18") { $pgGrants += "*${me}:(OI)(CI)F" }
+        & icacls $PgData /inheritance:r /grant:r @pgGrants /C /Q | Out-Null
+        if ($LASTEXITCODE -ne 0) { Fail "could not set permissions on $PgData (icacls $LASTEXITCODE)" }
+        $pwFile = Join-Path $env:TEMP ("f7five0-pgpw-{0}.txt" -f [guid]::NewGuid().ToString("N"))
+        try {
+            [IO.File]::WriteAllText($pwFile, $PgSuperPassword, (New-Object Text.ASCIIEncoding))
+            Info "creating the database cluster in $PgData"
+            $initOut = Invoke-Native (Join-Path $PgBinDir "initdb.exe") @("-D", $PgData, "-U", "postgres", "-E", "UTF8", "-A", "scram-sha-256", "--pwfile=$pwFile")
+            $initRc = $script:NativeExit
+        } finally { Remove-Item -Force $pwFile -ErrorAction SilentlyContinue }
+        if ($initRc -ne 0) {
+            $initOut | Select-Object -Last 20 | ForEach-Object { Info $_ }
+            Fail "initdb failed ($initRc). Its output is above and in the install log."
+        }
+        if ($me -ne "S-1-5-18") { & icacls $PgData /remove:g "*$me" /C /Q | Out-Null }
+        $conf = @(
+            "",
+            "# F7FIVE0 (written by Setup)",
+            "listen_addresses = '127.0.0.1'",
+            "port = $PgPort",
+            "logging_collector = on",
+            "log_directory = 'log'",
+            "log_filename = 'postgresql-%a.log'",
+            "log_truncate_on_rotation = on",
+            "log_rotation_age = 1d",
+            "log_rotation_size = 0"
+        )
+        Add-Content -Path (Join-Path $PgData "postgresql.conf") -Value $conf -Encoding ASCII
+        Ok "database cluster created (port $PgPort)"
+    } else {
+        $portLine = Select-String -Path (Join-Path $PgData "postgresql.conf") -Pattern '^\s*port\s*=\s*(\d+)' -ErrorAction SilentlyContinue | Select-Object -Last 1
+        if ($portLine) { $PgPort = [int]$portLine.Matches[0].Groups[1].Value }
     }
-    if ($pgRc -ne 0) { Info "the PostgreSQL installer reported exit $pgRc, but PostgreSQL is installed and running; carrying on." }
-    $PgInstalledNow = $true
-    Ok "PostgreSQL installed. Superuser password saved to $pgNote (Administrators only)."
-} elseif ($Psql) {
-    Ok "PostgreSQL: $Psql"
+
+    # 4. The service.
+    if ($pgPlan.Register) {
+        $regOut = Invoke-Native (Join-Path $PgBinDir "pg_ctl.exe") @("register", "-N", $PgService, "-U", "NT AUTHORITY\NetworkService", "-D", $PgData, "-S", "auto")
+        if ($script:NativeExit -ne 0) {
+            $regOut | ForEach-Object { Info $_ }
+            Fail "could not register the $PgService service (pg_ctl register $($script:NativeExit))"
+        }
+        & sc.exe description $PgService "F7FIVE0 database (PostgreSQL $($PostgresSpec.Version), 127.0.0.1:$PgPort)" | Out-Null
+        Info "service $PgService registered"
+    }
+    $pgSvc = Get-Service -Name $PgService
+    if ($pgSvc.Status -ne "Running") {
+        Start-Service -Name $PgService -ErrorAction SilentlyContinue
+        $pgSvc.WaitForStatus("Running", (New-TimeSpan -Seconds 60))
+    }
+    $pgSvc.Refresh()
+    if ($pgSvc.Status -ne "Running") {
+        $pgLog = Get-ChildItem (Join-Path $PgData "log") -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime | Select-Object -Last 1
+        if ($pgLog) { Get-Content $pgLog.FullName -Tail 20 | ForEach-Object { Info $_ } }
+        Fail "the $PgService service did not start. The PostgreSQL log is in $(Join-Path $PgData 'log')."
+    }
+    Ok "PostgreSQL $($PostgresSpec.Version): F7FIVE0's own, on 127.0.0.1:$PgPort"
 }
 
 # ---------------------------------------------------------------------------
@@ -842,22 +819,13 @@ Step "Database"
 # ---------------------------------------------------------------------------
 $DbPassword = $null
 if (-not $IsUpgrade) {
-    # A rerun after a failed first install reuses the password Setup saved
-    # itself (the wizard skips its password page when this file exists).
-    $saved = Join-Path $DataDir "postgres-superuser.txt"
+    # Every new install runs F7FIVE0's own PostgreSQL (see Installing
+    # prerequisites), whose superuser password Setup saved in
+    # postgres-superuser.txt before it ran initdb.
+    $saved = $pgNote
+    if (-not $PgSuperPassword -and (Test-Path $saved)) { $PgSuperPassword = (Get-Content $saved | Select-Object -Last 1).Trim() }
     if (-not $PgSuperPassword) {
-        if (Test-Path $saved) { $PgSuperPassword = (Get-Content $saved | Select-Object -Last 1).Trim() }
-    }
-    if (-not $PgSuperPassword) {
-        Info "PostgreSQL is already installed on this PC. F7FIVE0 needs its 'postgres' password once to create its own database."
-        $PgSuperPassword = AskSecret "PostgreSQL 'postgres' password"
-    }
-    if (-not $PgSuperPassword) {
-        if ($NonInteractive) {
-            # A silent Setup (winget) has no page to ask on: say how to supply it.
-            Fail "PostgreSQL is already installed on this PC, and F7FIVE0 needs its 'postgres' password once to create its own database. A silent install can't ask for it. Run Setup again without /SILENT or /VERYSILENT and type it on the PostgreSQL page, or put it on the last line of $saved (Administrators only) and run Setup again. See INSTALL.md, 'Already have PostgreSQL?'."
-        }
-        Fail "The PostgreSQL 'postgres' password is required on first install. See INSTALL.md, 'Already have PostgreSQL?'."
+        Fail "The password of F7FIVE0's database ('postgres') is missing: $saved is gone. Delete $PgData (it holds nothing yet on a first install) and run Setup again."
     }
     $env:PGPASSWORD = $PgSuperPassword
     # Windows PowerShell turns native stderr into terminating errors under
@@ -866,7 +834,7 @@ if (-not $IsUpgrade) {
         $prev = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
         try {
-            $out = & $Psql -h 127.0.0.1 -U postgres -d postgres -tA -v ON_ERROR_STOP=1 -c $sql 2>&1
+            $out = & $Psql -h 127.0.0.1 -p $PgPort -U postgres -d postgres -tA -v ON_ERROR_STOP=1 -c $sql 2>&1
             $script:PsqlExit = $LASTEXITCODE
             return ("$out").Trim()
         } finally { $ErrorActionPreference = $prev }
@@ -884,7 +852,7 @@ if (-not $IsUpgrade) {
         if ($script:PsqlExit -eq 0) { $ready = $true; break }
         Start-Sleep -Seconds 2
     }
-    if (-not $ready) { Fail "Could not sign in to PostgreSQL as 'postgres' on 127.0.0.1:5432 ($lastErr). Check the password and that the PostgreSQL service is running. If Setup reused the password saved in postgres-superuser.txt ($saved) and PostgreSQL has a different one, correct or delete that file and run Setup again; see INSTALL.md, 'Already have PostgreSQL?'." }
+    if (-not $ready) { Fail "Could not sign in to F7FIVE0's database as 'postgres' on 127.0.0.1:$PgPort ($lastErr). Check that the $PgService service is running. The password Setup uses is the last line of $saved." }
     $verb = if ((Psql "SELECT 1 FROM pg_roles WHERE rolname='$DbUser'") -eq "1") { "ALTER" } else { "CREATE" }
     $r = Psql ("$verb ROLE $DbUser WITH LOGIN PASSWORD '" + $DbPassword.Replace("'", "''") + "';")
     if ($script:PsqlExit -ne 0) { Fail "Could not create the database role: $r" }
@@ -906,7 +874,7 @@ Step "Writing configuration (.env)"
 $want = [ordered]@{
     "ENVIRONMENT"             = "production"
     "LOG_LEVEL"               = "INFO"
-    "DATABASE_URL"            = if ($DbPassword) { "postgresql+psycopg://${DbUser}:$DbPassword@127.0.0.1:5432/$DbName" } else { "" }
+    "DATABASE_URL"            = if ($DbPassword) { "postgresql+psycopg://${DbUser}:$DbPassword@127.0.0.1:${PgPort}/$DbName" } else { "" }
     "JWT_SECRET"              = New-Secret 64
     "STREAM_HMAC_SECRET"      = New-Secret 64
     "FFMPEG_BIN"              = $Ffmpeg
@@ -946,6 +914,10 @@ $want = [ordered]@{
 # Ports are the exception: the services are registered with the ports chosen
 # above, so .env must match them even when they changed on this run.
 $portKeys = @{ "API_PORT" = "$ApiPort"; "STREAM_PORT" = "$StreamPort"; "WEB_PORT" = "$WebPort" }
+# A new install always points DATABASE_URL at the database it just set up: a
+# rerun after a first install that stopped partway may hold one for a
+# PostgreSQL an older Setup was installing. An upgrade keeps its own.
+if (-not $IsUpgrade -and $want["DATABASE_URL"]) { $portKeys["DATABASE_URL"] = $want["DATABASE_URL"] }
 # A blank or CHANGE_ME secret (a .env copied from .env.example before Setup) is
 # replaced; a real one is never changed, so sessions and signed links survive.
 $added = Merge-EnvFile $EnvFile $want $portKeys @("ARR_WEBHOOK_SECRET", "JWT_SECRET", "STREAM_HMAC_SECRET")
@@ -1064,7 +1036,8 @@ if (-not (Test-Path $VenvPy)) {
     & $Py -m venv (Join-Path $BackendDir ".venv")
     if ($LASTEXITCODE -ne 0) { Fail "could not create the Python virtual environment" }
 }
-Invoke-VenvPy -m pip install --disable-pip-version-check -q --upgrade pip
+# No `pip install --upgrade pip`: the venv's own pip installs the hashed lock
+# fine, and the upgrade was one more download on every install.
 # Install the hash-pinned lock (SEC-P0-1): --require-hashes refuses any dist
 # whose SHA-256 is not pinned, so a swapped or tampered wheel fails the
 # install rather than running with SYSTEM/service authority.
@@ -1141,6 +1114,16 @@ $pyEnv = @("PYTHONPATH=$BackendDir", "PYTHONUNBUFFERED=1", "PYTHONIOENCODING=utf
 Install-Svc "F7FIVE0-API" $VenvPy "-m uvicorn app.main:app --host 127.0.0.1 --port $ApiPort --proxy-headers" $BackendDir $pyEnv "F7FIVE0 API"
 # Single worker on purpose: the transcoder session registry is in-process.
 Install-Svc "F7FIVE0-Stream" $VenvPy "-m uvicorn app.stream:app --host 127.0.0.1 --port $StreamPort --workers 1 --proxy-headers" $BackendDir $pyEnv "F7FIVE0 stream gateway"
+# With F7FIVE0's own PostgreSQL, the API and the stream gateway start after it
+# at boot (NSSM would also retry every 5 s, but this keeps the first start clean).
+if ($PgPrivate) {
+    foreach ($svc in @("F7FIVE0-API", "F7FIVE0-Stream")) {
+        $prev = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        & $Nssm set $svc DependOnService $PgService *> $null
+        $ErrorActionPreference = $prev
+    }
+}
 # Listen on the network only when LAN access was chosen (or chosen on an
 # earlier install). Tunnel-only installs stay on loopback.
 $lanRule = Get-NetFirewallRule -DisplayName "F7FIVE0 web" -ErrorAction SilentlyContinue

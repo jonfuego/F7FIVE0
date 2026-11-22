@@ -32,10 +32,11 @@
 7. Ports: keep the defaults unless another program already uses port 3001.
 
 When you click Install, a console window shows progress while Setup
-installs Python 3.12, PostgreSQL 16, Node.js, ffmpeg, and NSSM, creates the
-database, and starts the three F7FIVE0 services. PostgreSQL is the slow
-part (often 5-10 minutes); the window prints the elapsed time while it
-works. The last page shows your addresses, whether home network access is
+downloads Python 3.12, PostgreSQL 16, Node.js, ffmpeg, and NSSM, creates the
+database, and starts the three F7FIVE0 services. Every step prints how long
+it took. Python and PostgreSQL are F7FIVE0's own copies, unpacked into
+`C:\F7FIVE0\runtime`; nothing is installed for the whole PC except the
+Microsoft Visual C++ runtime, and only when it is missing. The last page shows your addresses, whether home network access is
 on, and anything that still needs doing. Then open **http://localhost:3001**.
 
 Setup installs F7FIVE0 for use at home. To use it away from home, sign in
@@ -244,45 +245,19 @@ needs an elevated prompt too.
 
 ## Already have PostgreSQL?
 
-Setup reuses it. It asks for the `postgres` account's password once, creates
-a separate `f7five0` database and user, and never stores the `postgres`
-password. If you've lost that password, reset it by following PostgreSQL's
-documentation for `pg_hba.conf` "trust" mode, then run Setup again.
+That's fine. F7FIVE0 runs its own PostgreSQL and never touches yours, so
+Setup does not ask for any password. Its database lives in
+`C:\F7FIVE0\data\pgdata` and runs as the `F7FIVE0-Postgres` service,
+listening on 127.0.0.1 only. It uses port 5432, or the next free port when
+another PostgreSQL already has 5432; `DATABASE_URL` in `.env` says which.
 
-When Setup installs PostgreSQL itself, it saves the `postgres` password in
-`C:\F7FIVE0\data\postgres-superuser.txt` (readable by Administrators only)
-before the install starts, so it survives a failed or interrupted run. Run
-Setup again after a failed install and it reuses that saved password without
-asking. Setup asks for the password only when it finds a working PostgreSQL
-(a `psql.exe` under `C:\Program Files\PostgreSQL\<version>\bin`, or on your
-PATH). An uninstalled PostgreSQL leaves its folder and some registry keys
-behind; those do not count, and Setup installs a fresh PostgreSQL instead.
-If PostgreSQL has a different password than the one in that file, Setup stops with "Could not sign in to PostgreSQL"; correct or delete the file
-and run Setup again.
+Setup saves the `postgres` password of F7FIVE0's database in
+`C:\F7FIVE0\data\postgres-superuser.txt` (Administrators only) before it
+creates the database, so a rerun after a failed install reuses it.
 
-A silent install (winget, `/SILENT`, `/VERYSILENT`) can't ask for the
-password, so on a PC that already has PostgreSQL it stops with a message that
-says so (Setup exits with code 10) and nothing is left running. Either run
-Setup again without the silent switch and type the password on the PostgreSQL
-page, or, from an elevated prompt, put the password on the last line of
-`C:\F7FIVE0\data\postgres-superuser.txt` and run the silent Setup again.
-
-### After uninstalling PostgreSQL
-
-PostgreSQL's own uninstaller leaves things behind: the data folder, the
-`postgres` Windows account, and sometimes the `postgresql-x64-16` service entry.
-When Setup finds no working PostgreSQL, it checks for these before it installs a
-new one, and never deletes data:
-
-- A service entry whose program is gone is removed.
-- An old data folder under `C:\Program Files\PostgreSQL\<version>\data` is
-  renamed to `data.f7five0-old-<date-time>`, so the new PostgreSQL does not meet
-  a database it did not make. Copy it back if you need it.
-- The leftover `postgres` Windows account gets a new password, so the new
-  PostgreSQL can use it. The password is saved in
-  `C:\F7FIVE0\data\postgres-service-account.txt` (Administrators only). Setup
-  does this only when no PostgreSQL service that still exists runs as that
-  account.
+Installs from version 1.0.24 or older used a separate PostgreSQL from
+EnterpriseDB's installer, under `C:\Program Files\PostgreSQL`. Updating one of
+those keeps that database where it is.
 
 ## Optional integrations
 
@@ -434,8 +409,10 @@ those and the database too:
 C:\F7FIVE0\installer\uninstall.ps1 -RemoveData
 ```
 
-PostgreSQL and Python stay installed (other software may use them). Remove
-them from Settings > Apps if you don't need them.
+F7FIVE0's own PostgreSQL and Python go with the program files (its database
+stays in `data\` unless you use `-RemoveData`). On an install from 1.0.24 or
+older, the separate PostgreSQL and Python stay installed (other software may use
+them); remove them from Settings > Apps if you don't need them.
 
 ## Troubleshooting
 
@@ -448,7 +425,7 @@ them from Settings > Apps if you don't need them.
 | The `.apk` won't install on Windows | It is the Android phone app. Put it on a phone, or sign in from the phone's browser and use **Account > Download for Android**. |
 | Browser can't reach localhost:3001 | `Get-Service F7FIVE0-*` should show three Running services. Check `C:\F7FIVE0\logs\F7FIVE0-Web.err.log`. |
 | Opening the server by its address sends the browser to `127.0.0.1` | The web app only redirects to an address it trusts. Your `PUBLIC_URL` (set by Admin > Remote access) and `HOME_URL`, any private IP, a LAN machine name (like `mediabox` or `mediabox.local`) all work on their own. For another dotted name you use (an internal domain), add it to `APP_ALLOWED_HOSTS` in `.env` (comma-separated), then `Restart-Service F7FIVE0-Web`. |
-| Sign-in page loads but sign-in fails | Check `F7FIVE0-API.err.log`. The API needs PostgreSQL running (`Get-Service postgresql*`). |
+| Sign-in page loads but sign-in fails | Check `F7FIVE0-API.err.log`. The API needs its database running (`Get-Service F7FIVE0-Postgres`, or `postgresql*` on installs from 1.0.24 or older). |
 | Library stays empty | Open **Admin > Library folders**. Each folder shows whether the server can open it. Under the folders, the **Folder scan** block shows whether a scan is running, which library it is on, how many files it has seen and added, when the last one finished, and the last error. Click **Scan folders now** to start one. Movies, TV and music appear as the scan finds them (it saves every 25 items), and an empty library page says your library is being scanned while it runs. Scans also run 30 seconds after start and every 30 minutes. If the block shows an error, or `F7FIVE0-API.err.log` has "folder scan" lines, that is where to look. |
 | Network share shows nothing | See "Media on a NAS" above. SYSTEM can't read shares. |
 | Admin > Updates says the updater isn't installed | Run the newer Setup.exe by hand once (it registers the `F7FIVE0-Update` task and keeps a copy of itself). |
@@ -486,5 +463,5 @@ http://localhost:3001 on the server PC: the page asks you to create the admin
 account. That page works only from the server PC itself and only until the
 first account exists; a phone or another computer is told to finish on the
 server PC. `install.ps1 -NonInteractive` without an admin password does the
-same. On a PC that already has PostgreSQL, a silent install stops because it
-can't ask for the `postgres` password; see "Already have PostgreSQL?".
+same. A PostgreSQL already on the PC does not get in the way: F7FIVE0 runs
+its own (see "Already have PostgreSQL?").

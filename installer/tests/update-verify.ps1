@@ -570,20 +570,9 @@ public static class Stub {
     Check "iss: an upgrade sends only appVersion and contactEmail (answers are inside 'if not IsUpgrade')" ($leaked.Count -eq 0 -and $afterUpgradeBlock -match "JsonPair\('appVersion'" -and $afterUpgradeBlock -match "JsonPair\('contactEmail'")
     Check "iss: a silent install skips the page checks (a blank admin password hung Setup on a MsgBox)" ($iss -match "(?s)function NextButtonClick.*?Result := True;.*?if WizardSilent then\s+Exit;.*?CurPageID = AdminPage\.ID")
     Check "iss: every answer page is skipped on upgrade" ($iss -match "(?s)function ShouldSkipPage.*?IsUpgrade and \(\(PageID = MediaPage\.ID\).*?PortsPage\.ID\)\)")
-    # A rerun after a failed first install: Setup saved the postgres password
-    # itself, so the wizard must not ask for it again.
-    Check "iss: the saved password is looked for as data\postgres-superuser.txt under the wizard directory" ($iss -match "(?s)function SavedPostgresPassword: Boolean;.*?FileExists\(AddBackslash\(WizardDirValue\) \+ 'data\\postgres-superuser\.txt'\)")
-    Check "iss: the PostgreSQL password page is skipped when that file exists" ($iss -match "(?s)function ShouldSkipPage.*?\(PageID = PgPage\.ID\) and \(not PostgresInstalled or SavedPostgresPassword\)")
-    Check "iss: the PostgreSQL password page is still required when it shows (installed, no saved file)" ($iss -match "(?s)CurPageID = PgPage\.ID.*?PgPage\.Values\[0\] = ''.*?Result := False")
-    Check "iss: a skipped password page sends no postgresPassword" ($iss -match "(?s)if PgPage\.Values\[0\] <> '' then\s+Cfg := Cfg \+ JsonPair\('postgresPassword'")
-    # PostgreSQL's own uninstaller leaves an empty HKLM\SOFTWARE\PostgreSQL\Installations key and the
-    # Program Files\PostgreSQL folder (the data directory) behind. Neither means PostgreSQL is installed:
-    # install.ps1 looks for psql.exe, finds none, and installs a new PostgreSQL. The wizard must make the
-    # same test, or it asks for the password of a PostgreSQL that is gone.
-    $pgFn = [regex]::Match($iss, "(?s)function PostgresInstalled: Boolean;.*?\nend;").Value
-    Check "iss: PostgresInstalled finds a real PostgreSQL by bin\psql.exe under Program Files\PostgreSQL" ($pgFn.Length -gt 0 -and $pgFn -match "PsqlUnder\(ExpandConstant\('\{commonpf64\}\\PostgreSQL'\)\)" -and $iss -match "(?s)function PsqlUnder.*?'\\bin\\psql\.exe'")
-    Check "iss: PostgresInstalled does not count the registry key or folder an uninstalled PostgreSQL leaves behind" ($pgFn.Length -gt 0 -and $pgFn -notmatch "RegKeyExists" -and $pgFn -notmatch "DirExists")
-    Check "iss: PostgresInstalled also accepts psql.exe on PATH, like install.ps1" ($pgFn -match "FileSearch\('psql\.exe', GetEnv\('PATH'\)\)")
+    # F7FIVE0 runs its own PostgreSQL, so the wizard never asks for the password
+    # of one that is already on the PC.
+    Check "iss: no PostgreSQL password page and no postgresPassword answer" ($iss -notmatch "PgPage" -and $iss -notmatch "postgresPassword" -and $iss -notmatch "PostgresInstalled")
 
     # -----------------------------------------------------------------------
     # 12b. Leftovers of an uninstalled PostgreSQL (common.ps1)
@@ -640,16 +629,22 @@ public static class Stub {
     Check "iss passes appVersion to install.ps1" ($iss -match "JsonPair\('appVersion', '\{#AppVersion\}'")
     Check "iss copies Setup itself into the updates Setup cache" ($iss -match '(?i)Source: "\{srcexe\}".*data\\updates\\setup.*F7FIVE0-Setup-\{#AppVersion\}\.exe')
     Check "iss skips that copy when Setup runs from the cache itself (a rollback)" ($iss -match 'Check: NotRunningFromSetupCache' -and $iss -match '(?s)function NotRunningFromSetupCache: Boolean;.*CompareText\(ExpandConstant\(''\{srcexe\}''\)')
-    Check "install.ps1 reads the saved postgres password when none was typed" ($install -match '(?s)\$saved = Join-Path \$DataDir "postgres-superuser\.txt".*?if \(-not \$PgSuperPassword\).*?Test-Path \$saved')
-    Check "install.ps1's PostgreSQL sign-in failure names postgres-superuser.txt and the INSTALL.md section" ($install -match "Could not sign in to PostgreSQL as 'postgres'[^`r`n]*postgres-superuser\.txt[^`r`n]*INSTALL\.md")
-    Check "install.ps1 Find-Psql makes the same test: bin\psql.exe under Program Files\PostgreSQL, then psql on PATH" ($install -match '(?s)function Find-Psql.*?ProgramFiles\\PostgreSQL.*?bin\\psql\.exe.*?Get-Command psql')
-    $pgBranch = [regex]::Match($install, "(?s)if \(-not \`$Psql -and -not \`$IsUpgrade\) \{.*?\`$pgProc = Start-Process").Value
-    Check "install.ps1 clears leftovers of an uninstalled PostgreSQL before it installs a new one (only when no psql.exe exists)" ($pgBranch.Length -gt 0 -and $pgBranch -match "Clear-PostgresLeftovers")
-    Check "install.ps1 passes --serviceaccount and --servicepassword only when it reset a leftover postgres account" ($install -match '(?s)\$pgSvcPassword = @\(Clear-PostgresLeftovers\).*?if \(\$pgSvcPassword\).*?--serviceaccount postgres --servicepassword')
-    Check "install.ps1 removes a dead service entry with sc.exe delete, resets the account with Set-LocalUser, and moves old data aside" ($install -match 'sc\.exe delete' -and $install -match 'Set-LocalUser' -and $install -match 'Move-PgDataAside')
-    Check "install.ps1 never deletes the account or the old data (no Remove-LocalUser, no Remove-Item on the data folder)" ($install -notmatch 'Remove-LocalUser' -and $install -notmatch 'net user postgres /delete' -and $install -notmatch 'Remove-Item[^\r\n]*PgDataDir')
-    Check "install.ps1 saves the service account password under data\ before it resets the account" ($install -match '(?s)postgres-service-account\.txt.*?Set-LocalUser')
-    Check "install.ps1 tells a silent install with an existing PostgreSQL how to give the password (no prompt, no hang)" ($install -match '(?s)if \(\$NonInteractive\) \{\s+#[^\r\n]*\s+Fail "PostgreSQL is already installed[^"]*can''t ask for it[^"]*\$saved')
+    # F7FIVE0's own PostgreSQL (runtime\pgsql, data\pgdata, F7FIVE0-Postgres)
+    # replaced the EnterpriseDB installer (15 to 30 minutes), and Python is
+    # unpacked from the NuGet package instead of the python.org installer.
+    Check "install.ps1 decides PostgreSQL with Get-PgPlan (own cluster for new installs, an existing system one kept on upgrade)" ($install -match 'Get-PgPlan \$IsUpgrade' -and $install -match 'Ok "PostgreSQL: keeping the one this install already uses"')
+    Check "install.ps1 unpacks only pgsql/bin, lib and share from the pinned zip" ($install -match 'Expand-Zip \$zip \$stage @\("pgsql/bin", "pgsql/lib", "pgsql/share"\)' -and $install -match 'Download \$PostgresSpec\.Url')
+    Check "install.ps1 saves the superuser password before initdb and hands it over in a temp file" ($install -match '(?s)Set-Content -Path \$pgNote.*?initdb\.exe.*?--pwfile=\$pwFile' -and $install -match '(?s)finally \{ Remove-Item -Force \$pwFile')
+    Check "install.ps1 makes a scram-sha-256, UTF8 cluster that listens on 127.0.0.1 only" ($install -match '"-E", "UTF8", "-A", "scram-sha-256"' -and $install -match "listen_addresses = '127\.0\.0\.1'")
+    Check "install.ps1 registers F7FIVE0-Postgres to run as NETWORK SERVICE, with Modify on data\pgdata" ($install -match '\$PgService = "F7FIVE0-Postgres"' -and $install -match '"register", "-N", \$PgService, "-U", "NT AUTHORITY\\NetworkService"' -and $install -match '\*S-1-5-20:\(OI\)\(CI\)M')
+    Check "install.ps1 never runs initdb over an existing cluster (PG_VERSION) and moves an unfinished folder aside" ($install -match 'Test-Path \(Join-Path \$PgData "PG_VERSION"\)' -and $install -match 'Move-PgDataAside \$PgData')
+    Check "install.ps1 installs the VC++ runtime only when Test-VcRuntimeNeeded says so" ($install -match '(?s)if \(Test-VcRuntimeNeeded .*?Download \$VcRedistSpec\.Url')
+    Check "install.ps1 runs neither the EnterpriseDB nor the python.org installer" ($install -notmatch '--mode unattended' -and $install -notmatch 'InstallAllUsers' -and $install -notmatch 'Install-PythonDirect')
+    Check "install.ps1 checks python.exe's signature after unpacking the NuGet package" ($install -match 'Get-AuthenticodeSignature -FilePath \$inner' -and $install -match 'InnerPublisher')
+    Check "install.ps1 points DATABASE_URL at the chosen port and always rewrites it on a new install" ($install -match '127\.0\.0\.1:\$\{PgPort\}/\$DbName' -and $install -match 'if \(-not \$IsUpgrade -and \$want\["DATABASE_URL"\]\) \{ \$portKeys\["DATABASE_URL"\]')
+    Check "install.ps1's database sign-in failure names the service and postgres-superuser.txt" ($install -match "Could not sign in to F7FIVE0's database as 'postgres' on 127\.0\.0\.1:\`$PgPort[^`r`n]*\`$PgService[^`r`n]*\`$saved")
+    Check "uninstall.ps1 removes the F7FIVE0-Postgres service" ($uninstall -match '(?s)Get-Service -Name "F7FIVE0-Postgres".*?sc\.exe delete "F7FIVE0-Postgres"')
+    Check "update.ps1 finds pg_dump in F7FIVE0's own runtime\pgsql\bin first" ($upd -match '(?s)function Find-PgTool.*?Find-PgBinDir \$InstallDir')
     Check "install.ps1 reads appVersion and writes version.json" ($install -match 'Answer "appVersion"' -and $install -match 'version\.json' -and $install -match 'installed_at')
     Check "install.ps1 names the task F7FIVE0-Update" ($install -match '\$UpdateTask = "F7FIVE0-Update"')
     Check "install.ps1 registers it as SYSTEM" ($install -match '(?s)New-ScheduledTaskPrincipal -UserId "SYSTEM".{0,1200}Register-ScheduledTask -TaskName \$UpdateTask')

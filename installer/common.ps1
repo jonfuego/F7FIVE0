@@ -481,7 +481,9 @@ function Merge-EnvFile([string]$Path, $Want, [hashtable]$PortKeys, [string[]]$Fi
         $lines.Add("")
     }
     for ($i = 0; $i -lt $lines.Count; $i++) {
-        if ($lines[$i] -match '^\s*(API_PORT|STREAM_PORT|WEB_PORT)\s*=') {
+        # $PortKeys: keys this run always writes (the ports, and DATABASE_URL on
+        # a new install), whatever .env already holds.
+        if ($lines[$i] -match '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=') {
             $key = $matches[1]
             if ($PortKeys.ContainsKey($key)) { $lines[$i] = "$key=$($PortKeys[$key])" }
         }
@@ -603,12 +605,11 @@ function Prune-SetupCache([string]$CacheDir, [string]$InstalledVersion) {
 # behind. A fresh install then trips over them: the installer asks for the old
 # account's password (its default is the NEW superuser password, which does not
 # match), cannot create a service whose name is taken, or meets a cluster it did
-# not make (so the new superuser password does not work). install.ps1 calls
-# Clear-PostgresLeftovers only when no usable psql.exe exists. It never deletes
-# anything that holds data: a dead service entry is removed, the account's
-# password is reset (the services that used it are gone), and an old data
-# folder is renamed aside. installer\tests\update-verify.ps1 covers the
-# decisions below.
+# not make (so the new superuser password does not work). Setup no longer runs
+# that installer (F7FIVE0 unpacks its own PostgreSQL, see Get-PgPlan), so only
+# Move-PgDataAside is still used (for an unfinished data\pgdata). The rest is
+# kept, with its tests in installer\tests\update-verify.ps1, for diagnosing an
+# install from 1.0.24 or older.
 # ---------------------------------------------------------------------------
 function Get-ServiceExePath([string]$PathName) {
     if (-not $PathName) { return "" }
@@ -660,4 +661,87 @@ function Move-PgDataAside([string]$DataDir, [string]$Stamp) {
     $to = "$DataDir.f7five0-old-$Stamp"
     Move-Item -LiteralPath $DataDir -Destination $to -ErrorAction Stop
     return $to
+}
+# ---------------------------------------------------------------------------
+# Fast first install: zips, the VC++ runtime, F7FIVE0's own PostgreSQL
+# ---------------------------------------------------------------------------
+# Unpacks a zip (or a .nupkg, which is a zip) into $dest with Windows' own
+# tar.exe (bsdtar, in every Windows 10 1803 and later; Setup needs 1809). It is
+# about 3x faster than Expand-Archive under Windows PowerShell 5.1, and it can
+# unpack only some folders ($members, paths inside the zip such as
+# "pgsql/bin"): the PostgreSQL zip holds 21,979 files and the server needs 1,636.
+# Falls back to Expand-Archive (everything) when tar.exe is missing or fails.
+function Expand-Zip([string]$zip, [string]$dest, [string[]]$members = @()) {
+    if (-not (Test-Path -LiteralPath $dest)) { New-Item -ItemType Directory -Path $dest | Out-Null }
+    $tar = Join-Path $env:SystemRoot "System32\tar.exe"
+    if (Test-Path -LiteralPath $tar) {
+        $prev = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        try {
+            $out = & $tar -xf $zip -C $dest @members 2>&1
+            $rc = $LASTEXITCODE
+        } finally { $ErrorActionPreference = $prev }
+        if ($rc -eq 0) { return }
+        Warn ("tar.exe could not unpack {0} (exit {1}: {2}); unpacking it with Expand-Archive instead" -f (Split-Path $zip -Leaf), $rc, ("$out".Trim()))
+    }
+    # Expand-Archive only takes a .zip name.
+    $src = $zip
+    if ([IO.Path]::GetExtension($zip) -ne ".zip") {
+        $src = Join-Path $env:TEMP ("f7five0-unzip-{0}.zip" -f [guid]::NewGuid().ToString("N"))
+        Copy-Item -LiteralPath $zip $src -Force
+    }
+    try { Expand-Archive -Path $src -DestinationPath $dest -Force }
+    finally { if ($src -ne $zip) { Remove-Item -Force $src -ErrorAction SilentlyContinue } }
+}
+
+# True when the Visual C++ 2015-2022 x64 runtime must be installed: it is not
+# installed, or its version is older than $minVersion. $installedFlag and
+# $version are the Installed and Version values of
+# HKLM:\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\X64 (Version looks
+# like "v14.51.36247.00"). Pure; tested by tests\fast-install.Tests.ps1.
+function Test-VcRuntimeNeeded([string]$installedFlag, [string]$version, [string]$minVersion) {
+    if ("$installedFlag" -ne "1") { return $true }
+    $v = "$version".Trim().TrimStart("v", "V")
+    $have = $null
+    $want = $null
+    if (-not [version]::TryParse($v, [ref]$have)) { return $true }
+    if (-not [version]::TryParse("$minVersion", [ref]$want)) { return $false }
+    return ($have -lt $want)
+}
+
+# What Setup does about PostgreSQL. F7FIVE0 runs its own PostgreSQL: binaries
+# in runtime\pgsql, the cluster in data\pgdata, the service F7FIVE0-Postgres on
+# 127.0.0.1. Every new install uses it, even on a PC that already has another
+# PostgreSQL (so Setup never needs that one's password). An install from before
+# this (1.0.24 and older) used a system PostgreSQL from the EnterpriseDB
+# installer; an upgrade of one of those keeps it ("legacy") and touches nothing.
+# A data\pgdata folder means F7FIVE0's own cluster exists (also after an
+# uninstall that kept data\, followed by a reinstall), so the binaries and the
+# service are put back around it and initdb never runs over it.
+# Returns @{ Mode = "private"|"legacy"; Extract; Init; Register } (booleans).
+# Pure; tested by tests\fast-install.Tests.ps1.
+function Get-PgPlan([bool]$isUpgrade, [bool]$hasPgData, [bool]$hasBinaries, [string]$binVersion, [string]$wantVersion, [bool]$hasService) {
+    $private = (-not $isUpgrade) -or $hasPgData
+    if (-not $private) { return @{ Mode = "legacy"; Extract = $false; Init = $false; Register = $false } }
+    return @{
+        Mode     = "private"
+        Extract  = (-not $hasBinaries) -or ("$binVersion" -ne "$wantVersion")
+        Init     = (-not $hasPgData)
+        Register = (-not $hasService)
+    }
+}
+
+# The folder that holds pg_dump.exe, pg_restore.exe and psql.exe for this
+# install: F7FIVE0's own runtime\pgsql\bin first, else the newest
+# Program Files\PostgreSQL\<version>\bin (installs from 1.0.24 and older), else
+# "" (look on PATH).
+function Find-PgBinDir([string]$installDir) {
+    $own = Join-Path $installDir "runtime\pgsql\bin"
+    if (Test-Path -LiteralPath (Join-Path $own "pg_dump.exe")) { return $own }
+    $roots = @(Get-ChildItem "$env:ProgramFiles\PostgreSQL" -Directory -ErrorAction SilentlyContinue | Sort-Object { [int]($_.Name -replace '\D', '0') } -Descending)
+    foreach ($r in $roots) {
+        $b = Join-Path $r.FullName "bin"
+        if (Test-Path -LiteralPath (Join-Path $b "pg_dump.exe")) { return $b }
+    }
+    return ""
 }
