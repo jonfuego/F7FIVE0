@@ -1,17 +1,22 @@
 """A short artist bio excerpt for the Home hero.
 
-`bio_excerpt(text)` keeps the first one or two sentences of a bio, at most
-`limit` characters, cut at a sentence end. When even the first sentence is
-longer than the limit it is cut at a word and ends with an ellipsis. Pure:
-no database, no network.
+`bio_excerpt(text)` keeps the first few whole sentences of a bio (at most
+`MAX_SENTENCES`), at most `limit` characters, always cut at a sentence end.
+Only when even the first sentence is longer than the limit is it cut at a
+word and ended with an ellipsis. Pure: no database, no network.
+
+The hero shows the excerpt in its own column beside the title, with room for
+about eight lines, so the limit is sized to fit there without a CSS clamp
+cutting it (review item 21: the old 220-character cut ended in "..." after
+three lines).
 """
 from __future__ import annotations
 
 import re
 from typing import Optional
 
-DEFAULT_LIMIT = 220
-MAX_SENTENCES = 2
+DEFAULT_LIMIT = 480
+MAX_SENTENCES = 4
 
 # Words that end in a period without ending the sentence.
 _ABBREVIATIONS = frozenset({
@@ -62,8 +67,8 @@ def _sentence_ends(text: str) -> list[int]:
 
 
 def bio_excerpt(text: Optional[str], limit: int = DEFAULT_LIMIT) -> Optional[str]:
-    """The first one or two sentences of `text` within `limit` characters, or
-    None when there is no text."""
+    """The first whole sentences (up to `MAX_SENTENCES`) of `text` within
+    `limit` characters, or None when there is no text."""
     if not text:
         return None
     # First paragraph only, whitespace collapsed.

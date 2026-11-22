@@ -84,7 +84,7 @@ export type HeroFactsSource = {
   tmdb_rating?: number | null;
   episodes?: ReadonlyArray<{ season_number: number }> | null;
   tracks?: ReadonlyArray<{ duration_sec?: number | null }> | null;
-  // Albums only: one or two sentences of the artist's bio, cut on the server
+  // Albums only: the first few whole sentences of the artist's bio, cut on the server
   // (backend/app/services/bio_excerpt.py). Null when the artist has none.
   artist_bio_excerpt?: string | null;
 };
