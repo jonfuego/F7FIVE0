@@ -49,6 +49,7 @@ from app.services.credits import resolve_artist
 from app.services.arr import LidarrClient, RadarrClient, SonarrClient
 from app.services.arr._base import ArrClientError
 from app.services.art import download_art_on_sync
+from app.services.season_art import apply_sonarr_season_posters
 from app.services import media_paths
 from app.services.path_map import translate as translate_path
 
@@ -482,6 +483,12 @@ def _sync_sonarr(db: Session, sc: SonarrClient, stats: SyncStats) -> None:
                 db.flush()
             _upsert_episode(db, series, ep_payload, files_by_id, stats)
         db.flush()
+        # Season thumbs on the show page: Sonarr's own season images, once
+        # the season rows exist. Admin and folder art are kept.
+        apply_sonarr_season_posters(
+            db, series, s_payload.get("seasons"),
+            arr_base_url=arr_settings.url("sonarr"), arr_api_key=arr_settings.api_key("sonarr"),
+        )
         _tick(stats)
 
 

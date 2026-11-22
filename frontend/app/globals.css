@@ -426,16 +426,51 @@ button { border: 0; background: transparent; color: inherit; font: inherit; curs
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-/* Album pick: a short artist bio (at most about 220 characters) from the
-   detail call, a notch smaller than the synopsis. */
+/* Album pick: the band gets a second column for the artist bio (the first
+   few whole sentences, at most about 480 characters, from the detail call),
+   beside the title, subtitle and facts in what was empty space. The bio
+   spans the band's height; the buttons stay at the bottom left. */
+.hero .content .band.has-bio {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 520px);
+  grid-template-rows: auto 1fr;
+  grid-template-areas: "head bio" "foot bio";
+  column-gap: 40px;
+}
+.hero .content .band .band-head { grid-area: head; min-width: 0; }
+.hero .content .band .band-foot { grid-area: foot; min-width: 0; align-self: end; }
+.hero .content .band .band-bio {
+  grid-area: bio;
+  align-self: center;
+  padding-left: 28px;
+  border-left: 1px solid var(--line);
+}
+/* No line clamp: the server already stops at a whole sentence that fits. */
 .hero .content .band .blurb.bio-excerpt {
   font-size: 15px;
-  -webkit-line-clamp: 4;
-  line-clamp: 4;
+  line-height: 1.55;
+  margin: 0;
+  max-width: none;
+  display: block;
+  -webkit-line-clamp: unset;
+  line-clamp: none;
+  overflow: visible;
 }
 @media (max-width: 720px) {
   .hero .content { padding: 24px 16px 32px; }
   .hero .content .band { padding: 18px 16px; }
+  /* Phone: one column, the bio below the title and facts, above the buttons. */
+  .hero .content .band.has-bio {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto auto;
+    grid-template-areas: "head" "bio" "foot";
+  }
+  .hero .content .band .band-bio {
+    padding-left: 0;
+    border-left: 0;
+    margin-bottom: 16px;
+  }
+  .hero .content .band .blurb.bio-excerpt { font-size: 14px; line-height: 1.5; }
 }
 
 /* ============ Buttons ============ */
@@ -1591,26 +1626,22 @@ button { border: 0; background: transparent; color: inherit; font: inherit; curs
 }
 /* Movie detail puts the File info 3-dot menu in the kicker, pushed to the right. */
 .detail .info .kicker .ep-menu { margin-left: auto; }
-/* Season heading on the show page: links to the season page, chevron toggles. */
-.detail .episodes h3.season-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+/* Show name above the season title on the season page links back. */
+.detail .info .kicker a { color: inherit; text-decoration: none; }
+.detail .info .kicker a:hover,
+.detail .info .kicker a:focus-visible { text-decoration: underline; }
+
+/* Season thumbs on the show page: poster, "Season N" and the episode count;
+   each opens the season page. */
+.detail .season-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 28px 24px;
 }
-.detail .episodes h3.season-head a { color: inherit; text-decoration: none; }
-.detail .episodes h3.season-head a:hover,
-.detail .episodes h3.season-head a:focus-visible { text-decoration: underline; }
-.detail .season-toggle {
-  width: 44px; height: 44px;
-  display: grid; place-items: center;
-  background: transparent;
-  border: none;
-  border-radius: var(--radius-2);
-  color: var(--ink-3);
-  cursor: pointer;
+.detail .season-grid .poster { width: auto; }
+@media (max-width: 720px) {
+  .detail .season-grid { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 20px 16px; }
 }
-.detail .season-toggle:hover { background: var(--surface-3); color: var(--ink); }
 .detail .card.synopsis p {
   margin: 0;
   font-size: 14px;

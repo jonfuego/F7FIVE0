@@ -411,43 +411,54 @@ function Hero({
         />
       ) : null}
       <div className="content">
-        <div className="band">
-          <h1 className={item.title.length > 22 ? "long" : undefined}>
-            {item.title}
-          </h1>
-          <div className="meta">
-            {heroSubtitleParts(item, artistId).map((part, i) => (
-              <span key={i}>
-                {i > 0 ? <span className="dot" aria-hidden>•</span> : null}
-                {part.href ? <Link href={part.href}>{part.text}</Link> : part.text}
-              </span>
-            ))}
-          </div>
-          {facts.length > 0 ? (
-            <div className="facts">
-              {facts.map((fact, i) => (
+        {/* With an artist bio (album picks) the band is two columns: title,
+            subtitle, facts and buttons on the left, the bio beside them on
+            the right. At phone width the bio drops below the title. */}
+        <div className={bioExcerpt ? "band has-bio" : "band"}>
+          <div className="band-head">
+            <h1 className={item.title.length > 22 ? "long" : undefined}>
+              {item.title}
+            </h1>
+            <div className="meta">
+              {heroSubtitleParts(item, artistId).map((part, i) => (
                 <span key={i}>
                   {i > 0 ? <span className="dot" aria-hidden>•</span> : null}
-                  {fact}
+                  {part.href ? <Link href={part.href}>{part.text}</Link> : part.text}
                 </span>
               ))}
             </div>
+            {facts.length > 0 ? (
+              <div className="facts">
+                {facts.map((fact, i) => (
+                  <span key={i}>
+                    {i > 0 ? <span className="dot" aria-hidden>•</span> : null}
+                    {fact}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+          </div>
+          {bioExcerpt ? (
+            <div className="band-bio">
+              <p className="blurb bio-excerpt">{bioExcerpt}</p>
+            </div>
           ) : null}
-          {overview ? <p className="blurb">{overview}</p> : null}
-          {bioExcerpt ? <p className="blurb bio-excerpt">{bioExcerpt}</p> : null}
-          <div className="ctas">
-            <button
-              type="button"
-              className="btn play"
-              onClick={onPlay}
-              disabled={playBusy}
-              aria-label={`Play ${item.title}`}
-            >
-              <span className="tri" /> Play
-            </button>
-            <Link className="btn ghost" href={detailHref(item.kind, item.id)}>
-              + Details
-            </Link>
+          <div className="band-foot">
+            {overview ? <p className="blurb">{overview}</p> : null}
+            <div className="ctas">
+              <button
+                type="button"
+                className="btn play"
+                onClick={onPlay}
+                disabled={playBusy}
+                aria-label={`Play ${item.title}`}
+              >
+                <span className="tri" /> Play
+              </button>
+              <Link className="btn ghost" href={detailHref(item.kind, item.id)}>
+                + Details
+              </Link>
+            </div>
           </div>
         </div>
       </div>

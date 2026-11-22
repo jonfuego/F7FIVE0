@@ -1,6 +1,7 @@
-// Series detail. Marquee hero + episode list table grouped by season.
-// Existing AdminRescanButton, mark-watched, and Edit-poster / Edit-
-// backdrop affordances preserved.
+// Series detail. Marquee hero + a grid of season thumbs (poster, "Season N",
+// episode count); each thumb opens the season page /series/<id>/season/<n>,
+// which lists that season's episodes. Existing AdminRescanButton and
+// Edit-poster / Edit-backdrop affordances preserved.
 
 "use client";
 
@@ -8,15 +9,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
 import Link from "next/link";
 import { notFound, useParams } from "next/navigation";
-import { ChevronDown, ChevronUp } from "lucide-react";
 import EditOverridesModal, {
   algorithmicSortHint,
 } from "@/components/EditOverridesModal";
 import { AuthShell } from "@/components/AuthShell";
 import { BackButton } from "@/components/BackButton";
 import { Backdrop } from "@/components/Backdrop";
-import { EpisodeRow } from "@/components/EpisodeRow";
-import { Icon } from "@/components/Icon";
+import { MediaCard } from "@/components/MediaCard";
 import { apiGet, apiPost, ApiError } from "@/lib/client-api";
 import { loadOverride } from "@/lib/overrides";
 import {
@@ -24,7 +23,7 @@ import {
   hueFromString,
   joinMeta,
 } from "@/lib/format";
-import { groupBySeason, seasonHref, seasonTitle, type SeasonGroup } from "@/lib/seasons";
+import { groupBySeason, seasonThumbs, type SeasonGroup, type SeasonThumb } from "@/lib/seasons";
 import type { Episode, MediaFile, Me, OverrideOut, SeriesDetail } from "@/lib/types";
 
 type Grouped = SeasonGroup<Episode>;
@@ -164,6 +163,10 @@ function SeriesHero({
     ["--ph" as never]: String(hueFromString(series.title)),
   };
   const grouped = useMemo(() => groupBySeason(series.episodes), [series.episodes]);
+  const thumbs = useMemo(
+    () => seasonThumbs(series.id, series.poster_path, series.episodes, series.seasons),
+    [series.id, series.poster_path, series.episodes, series.seasons],
+  );
   const epCount = series.episodes.length;
   const meta = joinMeta([
     series.year,
@@ -250,9 +253,7 @@ function SeriesHero({
               No episodes on disk yet.
             </div>
           ) : (
-            grouped.map((g, idx) => (
-              <SeasonSection key={g.season} seriesId={series.id} group={g} defaultOpen={idx === 0} />
-            ))
+            <SeasonGrid thumbs={thumbs} />
           )}
         </div>
       </div>
@@ -282,38 +283,23 @@ function findFirstEpisodeFile(groups: Grouped[]): MediaFile | null {
   return null;
 }
 
-function SeasonSection({
-  seriesId,
-  group,
-  defaultOpen,
-}: {
-  seriesId: string;
-  group: Grouped;
-  defaultOpen: boolean;
-}) {
-  const [open, setOpen] = useState(defaultOpen);
-  const title = seasonTitle(group.season);
+function SeasonGrid({ thumbs }: { thumbs: SeasonThumb[] }) {
   return (
-    <section className="episodes">
-      {/* The heading opens the season page (/series/<id>/season/<n>); the
-          chevron shows or hides the episodes here. */}
-      <h3 className="season-head">
-        <Link href={seasonHref(seriesId, group.season)}>
-          {title} · {group.episodes.length} ep{group.episodes.length === 1 ? "" : "s"}
-        </Link>
-        <button
-          type="button"
-          className="season-toggle"
-          aria-expanded={open}
-          aria-label={`${open ? "Hide" : "Show"} ${title} episodes`}
-          onClick={() => setOpen((o) => !o)}
-        >
-          <Icon icon={open ? ChevronUp : ChevronDown} size={16} />
-        </button>
-      </h3>
-      {open
-        ? group.episodes.map((ep) => <EpisodeRow key={ep.id} ep={ep} />)
-        : null}
+    <section className="episodes seasons" aria-label="Seasons">
+      <h3>Seasons</h3>
+      <div className="season-grid">
+        {thumbs.map((t, i) => (
+          <MediaCard
+            key={t.season}
+            href={t.href}
+            title={t.title}
+            subtitle={t.countLabel}
+            posterPath={t.poster}
+            kind="series"
+            priority={i < 6}
+          />
+        ))}
+      </div>
     </section>
   );
 }

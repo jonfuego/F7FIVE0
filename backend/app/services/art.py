@@ -28,7 +28,7 @@ from app.config import PROJECT_URL, settings
 from app.services import net_guard
 from app.models.art import (
     ArtOverride, ENTITY_ALBUM, ENTITY_ARTIST, ENTITY_MIX, ENTITY_MOVIE, ENTITY_MUSIC_VIDEO,
-    ENTITY_PODCAST, ENTITY_SERIES, ROLE_BACKDROP, ROLE_COVER, ROLE_POSTER, ROLE_THUMB,
+    ENTITY_PODCAST, ENTITY_SEASON, ENTITY_SERIES, ROLE_BACKDROP, ROLE_COVER, ROLE_POSTER, ROLE_THUMB,
     SOURCE_ARTIST_AUTO,
 )
 
@@ -83,6 +83,7 @@ _VALID_ROLES: dict[str, set[str]] = {
     ENTITY_MUSIC_VIDEO: {ROLE_THUMB},
     ENTITY_MOVIE: {ROLE_POSTER, ROLE_BACKDROP},
     ENTITY_SERIES: {ROLE_POSTER, ROLE_BACKDROP},
+    ENTITY_SEASON: {ROLE_POSTER},
     ENTITY_MIX: {ROLE_COVER},
     ENTITY_PODCAST: {ROLE_COVER},
 }
@@ -318,8 +319,10 @@ def fetch_url_bytes(url: str) -> bytes:
         ) as stream:
             resp = stream.response
             if resp.status_code >= 400:
+                # No query string in the message: an *arr image URL carries
+                # its API key there, and this message reaches logs.
                 raise ArtValidationError(
-                    f"upstream returned HTTP {resp.status_code} for {url}",
+                    f"upstream returned HTTP {resp.status_code} for {url.split('?', 1)[0]}",
                     status_code=502,
                 )
             return net_guard.read_limited(resp, _MAX_BYTES)
@@ -450,9 +453,12 @@ def download_art_on_sync(
         # *arr CDNs go flaky, return HTML error pages, redirect to login
         # walls, etc. None of that should crash the sync; leave whatever
         # was there (placeholder if nothing) and try again next pass.
+        # Nothing derived from the *arr URL or its settings is logged: the
+        # URL carries the API key, and the error message can quote it.
         log.warning(
-            "art download skipped: entity=%s/%s role=%s url=%s reason=%s",
-            entity_kind, entity_id, role, url, exc,
+            "art download skipped: entity=%s/%s role=%s source=%s status=%s",
+            entity_kind, entity_id, role, source_kind,
+            getattr(exc, "status_code", None),
         )
         return None
 

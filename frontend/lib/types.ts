@@ -91,9 +91,19 @@ export type Episode = {
   media_files: MediaFile[];
 };
 
+/** One season thumb on the show page. `poster_path` null means no season
+ * picture (the thumb uses the show poster). */
+export type SeasonSummary = {
+  season_number: number;
+  poster_path: string | null;
+  episode_count: number;
+};
+
 export type SeriesDetail = Series & {
   episodes: Episode[];
   sort_title: string | null;
+  // Older servers leave it out; the web then builds it from `episodes`.
+  seasons?: SeasonSummary[];
 };
 
 export type ExternalLink = {

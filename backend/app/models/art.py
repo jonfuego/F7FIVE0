@@ -30,6 +30,9 @@ ENTITY_SERIES = "series"
 ENTITY_MUSIC_VIDEO = "music_video"
 ENTITY_MIX = "mix"
 ENTITY_PODCAST = "podcast"
+# One season of a TV show (entity_id = seasons.id). Poster only; it backs the
+# season thumbs on the show page. See services/season_art.py.
+ENTITY_SEASON = "season"
 
 # role values.
 ROLE_THUMB = "thumb"

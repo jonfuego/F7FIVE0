@@ -64,7 +64,7 @@ from sqlalchemy.orm import Session
 
 from app import scheduler
 from app.models.art import (
-    ArtOverride, ENTITY_ALBUM, ENTITY_ARTIST, ENTITY_MOVIE, ENTITY_SERIES,
+    ArtOverride, ENTITY_ALBUM, ENTITY_ARTIST, ENTITY_MOVIE, ENTITY_SEASON, ENTITY_SERIES,
     ROLE_BACKDROP, ROLE_COVER, ROLE_POSTER, ROLE_THUMB, SOURCE_ARTIST_AUTO,
 )
 from app.models.media_file import MediaFile, MediaKind, ScanState
@@ -1108,6 +1108,11 @@ def _scan_tv_root(db: Session, root: str, art_done: set, stats: FolderScanStats,
                 series.first_aired = series.first_aired or _parse_date(match.get("first_air_date"))
 
         seasons: dict[int, Season] = {s.season_number: s for s in series.seasons}
+        # Folders holding each season's episodes, for a poster inside the
+        # season folder (season_art.find_season_poster).
+        season_dirs: dict[int, set[str]] = {}
+        for fe in episodes:
+            season_dirs.setdefault(fe.season, set()).add(os.path.dirname(fe.path))
         for fe in episodes:
             season = seasons.get(fe.season)
             if season is None:
@@ -1155,7 +1160,28 @@ def _scan_tv_root(db: Session, root: str, art_done: set, stats: FolderScanStats,
         if match:
             _fetch_tmdb_art(db, ENTITY_SERIES, series.id, ROLE_POSTER, match.get("poster_path"), stats)
             _fetch_tmdb_art(db, ENTITY_SERIES, series.id, ROLE_BACKDROP, match.get("backdrop_path"), stats)
+        _scan_season_posters(db, series, show_dir, seasons, season_dirs, art_done, stats)
     _mark_missing_under(db, MediaKind.episode, root, seen, stats)
+
+
+def _scan_season_posters(
+    db: Session, series: Series, show_dir: str, seasons: dict[int, Season],
+    season_dirs: dict[int, set[str]], art_done: set, stats: FolderScanStats,
+) -> None:
+    """Season thumbs on the show page: import `seasonNN-poster` (or a
+    poster inside the season folder) sidecars, then let TMDB fill seasons
+    that still have none. First folder wins, like the show poster."""
+    from app.services import season_art
+    for num, season in seasons.items():
+        key = (season.id, ENTITY_SEASON)
+        if key in art_done:
+            continue
+        side = season_art.find_season_poster(show_dir, num, season_dirs.get(num, ()))
+        if side:
+            art_done.add(key)
+            _import_art_file(db, entity_kind=ENTITY_SEASON, entity_id=season.id,
+                             role=ROLE_POSTER, image_path=side, stats=stats)
+    stats.art_imported += season_art.fill_tmdb_season_posters(db, series)
 
 
 # ---------------------------------------------------------------------------

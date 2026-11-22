@@ -47,6 +47,7 @@ from app.models.tv import Episode, Series
 from app.models.user import User
 from app.services import arr_settings, history_keys, library_access, scan_status
 from app.services.bio_excerpt import bio_excerpt
+from app.services.season_art import season_poster_urls
 from app.services.version_pick import sort_versions
 from app.services.art import resolve_art, resolve_art_batch
 
@@ -423,6 +424,10 @@ def get_series(
         episodes = [e for e in all_episodes if _visible_ready(files.get(e.id, []))]
         if not episodes:
             raise HTTPException(status_code=404, detail="series_not_found")
+    season_counts: dict[int, int] = {}
+    for e in episodes:
+        season_counts[e.season_number] = season_counts.get(e.season_number, 0) + 1
+    season_posters = season_poster_urls(db, series.id)
     return SeriesDetailOut.model_validate({
         **{k: getattr(series, k) for k in (
             "id", "overview", "tvdb_id", "tmdb_id", "sonarr_id",
@@ -451,6 +456,16 @@ def get_series(
                 "media_files": [_mf_out(f) for f in files.get(e.id, [])],
             })
             for e in episodes
+        ],
+        "seasons": [
+            {
+                "season_number": num,
+                "poster_path": season_posters.get(num),
+                "episode_count": count,
+            }
+            for num, count in sorted(
+                season_counts.items(), key=lambda kv: (kv[0] == 0, kv[0]),
+            )
         ],
     })
 

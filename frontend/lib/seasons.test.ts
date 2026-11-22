@@ -4,7 +4,9 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { episodesForSeason, groupBySeason, parseSeasonParam, seasonHref, seasonTitle } from "./seasons.ts";
+import {
+  episodesForSeason, groupBySeason, parseSeasonParam, seasonHref, seasonThumbs, seasonTitle,
+} from "./seasons.ts";
 
 const eps = [
   { id: "s2e2", season_number: 2, episode_number: 2 },
@@ -39,4 +41,24 @@ test("route segment parsing", () => {
   assert.equal(parseSeasonParam("two"), null);
   assert.equal(parseSeasonParam("-1"), null);
   assert.equal(parseSeasonParam(undefined), null);
+});
+
+test("season thumbs use the server list, season posters, show poster fallback", () => {
+  const thumbs = seasonThumbs("abc", "/show.jpg", eps, [
+    { season_number: 0, poster_path: "/sp.jpg", episode_count: 1 },
+    { season_number: 2, poster_path: null, episode_count: 2 },
+    { season_number: 1, poster_path: "/s1.jpg", episode_count: 1 },
+  ]);
+  assert.deepEqual(thumbs.map((t) => t.season), [1, 2, 0]);
+  assert.deepEqual(thumbs.map((t) => t.poster), ["/s1.jpg", "/show.jpg", "/sp.jpg"]);
+  assert.deepEqual(thumbs.map((t) => t.title), ["Season 1", "Season 2", "Specials"]);
+  assert.deepEqual(thumbs.map((t) => t.countLabel), ["1 episode", "2 episodes", "1 episode"]);
+  assert.equal(thumbs[0].href, "/series/abc/season/1");
+});
+
+test("season thumbs fall back to the episodes when the server sent no list", () => {
+  const thumbs = seasonThumbs("abc", null, eps);
+  assert.deepEqual(thumbs.map((t) => [t.season, t.episodeCount, t.poster]), [
+    [1, 2, null], [2, 2, null], [0, 1, null],
+  ]);
 });
