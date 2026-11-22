@@ -67,15 +67,26 @@ export function whatsNew(body: string | null | undefined): string {
     }
     text = kept.join("\n");
   }
-  // Drop HTML comments, repeating until none are left so a nested or split
-  // "<!--" can't survive one pass. Then drop any leftover opener the same way:
-  // removing one "<!--" can join the characters around it into a new one.
-  let prev: string;
-  do {
-    prev = text;
-    text = text.replace(/<!--[\s\S]*?-->/g, "").replace(/<!--/g, "");
-  } while (text !== prev);
-  text = text.trim();
+  // Drop HTML comments line by line (no string surgery on "<!--", so nothing
+  // can be glued back into a new opener): a line inside a comment, or one
+  // that opens or closes one, goes. The marker and the release script's
+  // comments always sit on their own lines.
+  const visible: string[] = [];
+  let inComment = false;
+  for (const line of text.split("\n")) {
+    const opens = line.includes("<!--");
+    const closes = line.includes("-->");
+    if (inComment) {
+      if (closes) inComment = false;
+      continue;
+    }
+    if (opens) {
+      inComment = !closes || line.lastIndexOf("<!--") > line.lastIndexOf("-->");
+      continue;
+    }
+    visible.push(line);
+  }
+  text = visible.join("\n").trim();
   // Headings with nothing under them (an empty "What's Changed") are no notes.
   const hasContent = text.split("\n").some((l) => l.trim() && !HEADING.test(l.trimEnd()));
   return hasContent ? text : "";
