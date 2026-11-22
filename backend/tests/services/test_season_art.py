@@ -336,5 +336,5 @@ def test_skipped_art_download_never_logs_the_arr_api_key(db_session, caplog, mon
         )
     assert row is None
     assert "art download skipped" in caplog.text
-    assert "http://sonarr:8989/MediaCover/12/season-1.jpg" in caplog.text
+    assert "source=sonarr status=502" in caplog.text
     assert "SECRET123" not in caplog.text

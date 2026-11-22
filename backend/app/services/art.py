@@ -426,7 +426,6 @@ def download_art_on_sync(
           the same URL, nothing to do.
     """
     validate_kind_role(entity_kind, role)
-    images = list(images or [])  # read twice (fetch URL, then the log URL)
     url = _pick_arr_image_url(images, cover_type, arr_base_url, arr_api_key)
     if url is None:
         return None
@@ -454,13 +453,11 @@ def download_art_on_sync(
         # *arr CDNs go flaky, return HTML error pages, redirect to login
         # walls, etc. None of that should crash the sync; leave whatever
         # was there (placeholder if nothing) and try again next pass.
-        # Nothing derived from the keyed URL is logged: the URL is rebuilt
-        # without the API key, and the reason is the error's status only
-        # (its message can quote the URL).
+        # Nothing derived from the *arr URL or its settings is logged: the
+        # URL carries the API key, and the error message can quote it.
         log.warning(
-            "art download skipped: entity=%s/%s role=%s url=%s status=%s",
-            entity_kind, entity_id, role,
-            _pick_arr_image_url(images, cover_type, arr_base_url, ""),
+            "art download skipped: entity=%s/%s role=%s source=%s status=%s",
+            entity_kind, entity_id, role, source_kind,
             getattr(exc, "status_code", None),
         )
         return None
