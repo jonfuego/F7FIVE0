@@ -56,6 +56,7 @@ import { metaFromTrack, nowPlayingFromTrack, type NowPlaying, type QueueMeta } f
 import { createPlayTokenSource } from "./playToken";
 import { loadQueueInStages } from "./queueLoad";
 import {
+  adoptNativeQueue,
   chooseSession,
   LAST_SESSION_KEY,
   parseLastSession,
@@ -1262,13 +1263,38 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     };
   }, [resumer]);
 
-  // Cold start: put the last session back, paused, so the mini player and the
-  // audio agree and Play (app, car, headset) carries on from the same place.
+  // On open: when the native player still holds a queue (Android closed the
+  // screen but not the player), take it over so the mini player, the queue
+  // panel and the podcast saves follow what is loaded. When it holds nothing
+  // (a cold start), put the last session back, paused, so the mini player and
+  // the audio agree and Play (app, car, headset) carries on from the same place.
   const restoredOnLaunch = useRef(false);
   useEffect(() => {
-    if (!ready || restoredOnLaunch.current || Platform.isTV) return;
+    if (!ready || restoredOnLaunch.current) return;
     restoredOnLaunch.current = true;
-    void resumer.resumeIfEmpty({ play: false });
+    void (async () => {
+      try {
+        const queue = await TrackPlayer.getQueue();
+        if (queue.length > 0) {
+          const adopted = adoptNativeQueue(queue, await TrackPlayer.getActiveTrackIndex());
+          if (!adopted || queueMeta.current.length > 0) return;
+          queueMeta.current = adopted.metas;
+          activeIndexRef.current = adopted.index;
+          if (adopted.episode) {
+            episodeRef.current = adopted.episode;
+            podcastModeRef.current = true;
+            setPodcastModeState(true);
+            await setPlayerMode("podcast").catch(() => {});
+          }
+          setHasQueue(true);
+          setQueueVersion((v) => v + 1);
+          return;
+        }
+      } catch {
+        return;
+      }
+      if (!Platform.isTV) void resumer.resumeIfEmpty({ play: false });
+    })();
   }, [ready, resumer]);
 
   const resumeIfEmpty = useCallback(() => resumer.resumeIfEmpty({ play: true }), [resumer]);

@@ -1,5 +1,6 @@
 import type { QueueDTO } from "@/api/types";
 import {
+  adoptNativeQueue,
   chooseSession,
   metasFromServerQueue,
   parseLastSession,
@@ -93,5 +94,31 @@ describe("helpers", () => {
     expect(resumePositionFor(2, 200)).toBe(0);
     expect(resumePositionFor(199, 200)).toBe(0);
     expect(resumePositionFor(500, null)).toBe(500);
+  });
+});
+
+describe("adoptNativeQueue", () => {
+  const song = (n: number) => ({ id: `t${n}`, title: `Track ${n}`, mediaFileId: `mf${n}`, trackId: `t${n}`, durationSec: 200 });
+
+  it("takes over a music queue at the playing track", () => {
+    const a = adoptNativeQueue([song(1), song(2), song(3)], 2);
+    expect(a?.index).toBe(2);
+    expect(a?.metas.map((m) => m.mediaFileId)).toEqual(["mf1", "mf2", "mf3"]);
+    expect(a?.episode).toBeNull();
+  });
+
+  it("an episode comes back in podcast mode with its details", () => {
+    const ep = { id: "ep1", title: "Ep", artist: "Show", mediaFileId: "ep1", episodeId: "ep1", kind: "podcast", podcastId: "p1", durationSec: 9598 };
+    expect(adoptNativeQueue([ep], 0)?.episode).toEqual({ id: "ep1", podcastId: "p1", title: "Ep", showTitle: "Show", coverPath: null, durationSec: 9598 });
+  });
+
+  it("nothing to take over: empty, or tracks the app did not make", () => {
+    expect(adoptNativeQueue([], 0)).toBeNull();
+    expect(adoptNativeQueue([{ id: "x", title: "x" }], 0)).toBeNull();
+  });
+
+  it("a bad index falls back to the first track", () => {
+    expect(adoptNativeQueue([song(1), song(2)], 7)?.index).toBe(0);
+    expect(adoptNativeQueue([song(1), song(2)], null)?.index).toBe(0);
   });
 });

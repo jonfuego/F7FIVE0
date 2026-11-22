@@ -11,7 +11,7 @@
  * Pure (no native imports), so it unit tests in Node. PlayerProvider stores it
  * in AsyncStorage under LAST_SESSION_KEY. */
 import type { QueueDTO, SongRow } from "@/api/types";
-import type { QueueMeta } from "./nowPlayingFromTrack";
+import { metaFromTrack, type QueueMeta, type TrackLike } from "./nowPlayingFromTrack";
 
 export const LAST_SESSION_KEY = "lastSession";
 
@@ -158,4 +158,33 @@ export function resumePositionFor(positionSec: number, durationSec?: number | nu
   if (!isNum(positionSec) || positionSec < 3) return 0;
   if (isNum(durationSec) && durationSec > 0 && positionSec >= durationSec - 2) return 0;
   return Math.floor(positionSec);
+}
+
+/** What the app takes over when it opens while the native player still holds
+ * a queue (Android closed the screen, not the player): the queue metas, the
+ * playing index, and the episode when it is a podcast. Without this the app
+ * started with an empty queue: no mini player, and no podcast saves, while the
+ * car went on playing. Null when the tracks are not ones the app made. */
+export function adoptNativeQueue(
+  queue: readonly TrackLike[],
+  activeIndex: number | null | undefined,
+): { metas: QueueMeta[]; index: number; episode: SessionEpisode | null } | null {
+  if (queue.length === 0) return null;
+  const metas = queue.map((t) => metaFromTrack(t));
+  if (metas.some((m) => m === null)) return null;
+  const all = metas as QueueMeta[];
+  const index = activeIndex != null && activeIndex >= 0 && activeIndex < all.length ? activeIndex : 0;
+  const active = all[index];
+  const episode: SessionEpisode | null =
+    active.kind === "podcast"
+      ? {
+          id: active.episodeId ?? active.mediaFileId,
+          podcastId: active.podcastId ?? null,
+          title: active.title,
+          showTitle: active.artist ?? "",
+          coverPath: active.artPath ?? null,
+          durationSec: active.durationSec ?? null,
+        }
+      : null;
+  return { metas: all, index, episode };
 }
