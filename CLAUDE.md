@@ -597,7 +597,8 @@ INSTALL.md for the operator view.
 - Pinned installer downloads (SEC-P0-2): every file Setup fetches by a direct
   URL is pinned in `installer/downloads.manifest.psd1` to an exact version, an
   immutable URL (never a "latest" or rolling URL), and its SHA-256. Entries now:
-  `node`, `ffmpeg` (used by `install.ps1`), and `cloudflared`, `caddy`,
+  `node`, `ffmpeg`, `python`, `postgresql`, `vcredist`, `nssm` (used by
+  `install.ps1`), and `cloudflared`, `caddy`,
   `tailscale` (used by `remote-access.ps1`). The scripts read specs with
   `Get-DownloadSpec` (in `common.ps1`) and pass Url + Sha256 (+ Publisher) to
   the `Download` helper, which REQUIRES a hash, verifies it with `Get-FileHash`,
@@ -605,19 +606,41 @@ INSTALL.md for the operator view.
   Tailscale MSI) also carry `Publisher`; `Download` then requires a Valid
   `Get-AuthenticodeSignature` whose subject contains it. Caddy ships as a zip
   (GitHub has no bare Windows exe), so `remote-access.ps1` extracts `caddy.exe`
-  after the hash check. Python is a pinned direct download too (`python`, the
-  python.org x64 installer, Publisher `Python Software Foundation`):
-  `install.ps1` `Install-PythonDirect` runs it `/quiet InstallAllUsers=1
-  PrependPath=0`, prints a line every 30 s, stops it after 15 minutes, waits 60 s
-  and retries on exit 1618 (another install running), logs to
-  `logs\python-install-*.log`, and judges success by `Find-Python`, never the
-  exit code. winget is not used for Python: on a clean VM it sat on "Cancelling
-  operation" for 29 minutes and failed with 0x80004004 after verifying the file.
-  PostgreSQL and NSSM are pinned direct downloads too (since 1.0.23): the
-  EnterpriseDB `postgresql-16.16-2-windows-x64.exe` (Publisher `EnterpriseDB
-  Corporation`, run `--mode unattended`, slow warning at 30 minutes, stopped at
-  90) and the nssm.cc `nssm-2.24-101-g897c7ad.zip` (`win64\nssm.exe` to `bin\`;
-  an nssm.exe already on PATH is reused). Setup never calls winget: under
+  after the hash check. Python, PostgreSQL, the VC++ runtime and NSSM are
+  pinned too, and a fresh install runs no third-party installer for Python or
+  PostgreSQL (PR #28: a fresh install went from about 20 minutes to 8 on the
+  FuegoTest VM). Python (`python`) is the official NuGet `python` package
+  (`api.nuget.org/.../python.<ver>.nupkg`, a zip with no signature of its own):
+  `install.ps1` unpacks its `tools\` into `runtime\python` with `Expand-Zip` and
+  then requires a Valid signature on `python.exe` whose subject contains
+  `InnerPublisher` (`Python Software Foundation`); the venv is built on it.
+  PostgreSQL (`postgresql`) is EnterpriseDB's
+  `postgresql-16.16-2-windows-x64-binaries.zip` (not signed; the SHA-256 is the
+  guarantee): only `pgsql/bin`, `pgsql/lib` and `pgsql/share` are unpacked into
+  `runtime\pgsql`, `initdb` (UTF8, scram-sha-256, password from a temp
+  `--pwfile`, saved first in `data\postgres-superuser.txt`) makes
+  `data\pgdata`, and `pg_ctl register` makes the service `F7FIVE0-Postgres`
+  (NETWORK SERVICE, Modify on `data\pgdata` only, `listen_addresses =
+  '127.0.0.1'`, port 5432 or the next free one, written into `DATABASE_URL`).
+  F7FIVE0-API and F7FIVE0-Stream depend on it. Every new install uses its own
+  cluster, even next to another PostgreSQL, so the wizard has no PostgreSQL
+  password page. `Get-PgPlan` (`common.ps1`, Pester in
+  `installer\tests\fast-install.Tests.ps1`) decides: an upgrade of an install
+  from 1.0.24 or older (system EDB PostgreSQL, venv on a system Python) keeps
+  both and touches nothing; a `data\pgdata\PG_VERSION` means the own cluster
+  exists, so initdb never runs over it (a folder without it is moved aside
+  with `Move-PgDataAside`), and a new pinned build only replaces the binaries.
+  `update.ps1` and the backup script find `pg_dump` through `Find-PgBinDir`
+  (`runtime\pgsql\bin` first, then Program Files); `uninstall.ps1` removes the
+  service. The binaries need the VC++ 2015-2022 x64 runtime (`vcredist`,
+  Microsoft's versioned download that winget-pkgs pins, Publisher
+  `CN=Microsoft Corporation`), installed `/install /quiet /norestart` only when
+  `Test-VcRuntimeNeeded` says it is missing or older than `MinVersion`. Zips
+  (Node, FFmpeg, NSSM, Python, PostgreSQL) unpack with `Expand-Zip`
+  (`%SystemRoot%\System32\tar.exe`, falls back to `Expand-Archive`);
+  `download-verify.ps1` fails if `install.ps1` calls `Expand-Archive`. NSSM is
+  the nssm.cc `nssm-2.24-101-g897c7ad.zip` (`win64\nssm.exe` to `bin\`; an
+  nssm.exe already on PATH is reused). Setup never calls winget: under
   `winget install jonfuego.F7FIVE0` an inner winget install waits on the outer
   one forever, and `download-verify.ps1` fails if install.ps1 calls winget
   again. To pin something winget used to install, take the exact file the
