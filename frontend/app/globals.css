@@ -1626,26 +1626,22 @@ button { border: 0; background: transparent; color: inherit; font: inherit; curs
 }
 /* Movie detail puts the File info 3-dot menu in the kicker, pushed to the right. */
 .detail .info .kicker .ep-menu { margin-left: auto; }
-/* Season heading on the show page: links to the season page, chevron toggles. */
-.detail .episodes h3.season-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+/* Show name above the season title on the season page links back. */
+.detail .info .kicker a { color: inherit; text-decoration: none; }
+.detail .info .kicker a:hover,
+.detail .info .kicker a:focus-visible { text-decoration: underline; }
+
+/* Season thumbs on the show page: poster, "Season N" and the episode count;
+   each opens the season page. */
+.detail .season-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 28px 24px;
 }
-.detail .episodes h3.season-head a { color: inherit; text-decoration: none; }
-.detail .episodes h3.season-head a:hover,
-.detail .episodes h3.season-head a:focus-visible { text-decoration: underline; }
-.detail .season-toggle {
-  width: 44px; height: 44px;
-  display: grid; place-items: center;
-  background: transparent;
-  border: none;
-  border-radius: var(--radius-2);
-  color: var(--ink-3);
-  cursor: pointer;
+.detail .season-grid .poster { width: auto; }
+@media (max-width: 720px) {
+  .detail .season-grid { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 20px 16px; }
 }
-.detail .season-toggle:hover { background: var(--surface-3); color: var(--ink); }
 .detail .card.synopsis p {
   margin: 0;
   font-size: 14px;

@@ -651,5 +651,8 @@ def enrich_series(
 
     _fetch_art(ROLE_POSTER, payload.get("poster_path"), "w780")
     _fetch_art(ROLE_BACKDROP, payload.get("backdrop_path"), "w1280")
+    # Season thumbs: TMDB season posters for seasons with no picture yet.
+    from app.services.season_art import apply_tmdb_season_posters
+    apply_tmdb_season_posters(db, series, payload)
     db.commit()
     return MetadataResult(status="ok", provider="tmdb")

@@ -1,6 +1,7 @@
-// Season page: /series/<id>/season/<n>. One season of a show: its episodes
-// (each row plays the episode and has the File info menu) and the Back arrow
-// to the show page. Reached from the season headings on the show page.
+// Season page: /series/<id>/season/<n>. One season of a show: its poster
+// (the show poster when the season has none), its episodes (each row plays
+// the episode and has the File info menu) and the Back arrow to the show
+// page. Reached from the season thumbs on the show page.
 
 "use client";
 
@@ -13,6 +14,7 @@ import { Backdrop } from "@/components/Backdrop";
 import { EpisodeRow } from "@/components/EpisodeRow";
 import { apiGet, ApiError } from "@/lib/client-api";
 import { colorForTitle, hueFromString } from "@/lib/format";
+import Link from "next/link";
 import { episodesForSeason, parseSeasonParam, seasonTitle } from "@/lib/seasons";
 import type { SeriesDetail } from "@/lib/types";
 
@@ -50,6 +52,11 @@ export default function SeasonPage() {
     [series, season],
   );
 
+  const poster =
+    (series && season !== null
+      ? series.seasons?.find((s) => s.season_number === season)?.poster_path
+      : null) ?? series?.poster_path ?? null;
+
   if (season === null || missing) notFound();
   if (series && episodes.length === 0) notFound();
 
@@ -85,12 +92,18 @@ export default function SeasonPage() {
             <BackButton href={`/series/${id}`} />
             <div className="poster-card">
               <div className="keyart-mini" />
-              {series?.poster_path ? (
-                <img className="real-art" src={series.poster_path} alt={series.title} />
+              {series && poster ? (
+                <img
+                  className="real-art"
+                  src={poster}
+                  alt={season !== null ? `${series.title} ${seasonTitle(season)}` : series.title}
+                />
               ) : null}
             </div>
             <div className="info">
-              <div className="kicker">{series ? series.title : "Loading…"}</div>
+              <div className="kicker">
+                {series ? <Link href={`/series/${id}`}>{series.title}</Link> : "Loading…"}
+              </div>
               <h1>{season !== null ? seasonTitle(season) : ""}</h1>
               {series ? (
                 <div className="meta">

@@ -230,8 +230,19 @@ class SeriesOut(BaseModel):
     sort_title: Optional[str] = None
 
 
+class SeasonOut(BaseModel):
+    """One season thumb on the show page: number, poster (null means the web
+    shows the show poster) and how many episodes the user can see."""
+
+    season_number: int
+    poster_path: Optional[str] = None
+    episode_count: int = 0
+
+
 class SeriesDetailOut(SeriesOut):
     episodes: list[EpisodeOut] = Field(default_factory=list)
+    # Seasons that have visible episodes, ascending with Specials (0) last.
+    seasons: list[SeasonOut] = Field(default_factory=list)
 
 
 class TrackOut(BaseModel):
