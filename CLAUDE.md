@@ -613,10 +613,18 @@ INSTALL.md for the operator view.
   `logs\python-install-*.log`, and judges success by `Find-Python`, never the
   exit code. winget is not used for Python: on a clean VM it sat on "Cancelling
   operation" for 29 minutes and failed with 0x80004004 after verifying the file.
-  Things installed by winget (PostgreSQL, NSSM) or bundled (the APK) are NOT
-  direct downloads and are NOT in the manifest. winget output goes through
-  `Format-WingetLine` (`common.ps1`, test `installer\tests\winget-line.ps1`):
-  progress bars and bare spinners are dropped and a repeated status prints once. The
+  PostgreSQL and NSSM are pinned direct downloads too (since 1.0.23): the
+  EnterpriseDB `postgresql-16.16-2-windows-x64.exe` (Publisher `EnterpriseDB
+  Corporation`, run `--mode unattended`, slow warning at 30 minutes, stopped at
+  90) and the nssm.cc `nssm-2.24-101-g897c7ad.zip` (`win64\nssm.exe` to `bin\`;
+  an nssm.exe already on PATH is reused). Setup never calls winget: under
+  `winget install jonfuego.F7FIVE0` an inner winget install waits on the outer
+  one forever, and `download-verify.ps1` fails if install.ps1 calls winget
+  again. To pin something winget used to install, take the exact file the
+  winget-pkgs manifest pins. The bundled APK is not in the manifest.
+  `Format-WingetLine` (`common.ps1`, test `installer\tests\winget-line.ps1`)
+  still formats any winget output: progress bars and bare spinners are dropped
+  and a repeated status prints once. The
   offline logic test is `installer/tests/download-verify.ps1` (no network: it
   serves a fixture over `file://`); keep it green. `build-dist.ps1` copies the
   manifest into `dist/installer` so releases carry it.
@@ -883,6 +891,54 @@ INSTALL.md for the operator view.
   player context drives the busy Play and Shuffle buttons. `togglePlay` asks
   `getPlaybackState()`, not a React ref. Detail screens use the shared
   `mobile/src/ui/BackButton.tsx`.
+- Passwords are argon2id (PR #21, `services/security.py`). Never write a bcrypt hash
+  again. `_legacy_prehash` stays only to verify older
+  bcrypt(SHA-256) hashes until each account signs in, and a good sign-in
+  rewrites the hash as argon2id. `verify_login_password` keeps running both
+  checks while both kinds exist, so response time doesn't reveal which usernames
+  exist. A test that needs an old hash uses a fixed hash string made by the old
+  code: rebuilding one with `hashlib.sha256` raises a CodeQL
+  `py/weak-sensitive-data-hashing` alert.
+- Car, headset and lock-screen resume (mobile, 1.0.24). The phone keeps its
+  last session in `mobile/src/player/lastSession.ts` (podcast episode and place,
+  or the music queue with its track and position). A remote Play with nothing
+  loaded rebuilds it through `sessionResume.ts` (used by `service.ts` and
+  `AndroidAutoBridge.tsx`). On open, the app first takes over a queue the native
+  player still holds, and only then restores the last session paused, so the
+  mini player and the audio agree. RemoteSeek ignores ExoPlayer's unset time
+  (Play on an ended track used to seek to it and restart a podcast from 0). The
+  podcast saver holds back an unexplained backward read for 60 s, saves on
+  Stopped (never a 0), and re-sends the phone's copy with its time at resume, so
+  the server keeps the newer place. Car Stop pauses; never call `stop()` there.
+  Android won't restart a fully killed app from a media key, so that case needs
+  one app open.
+- Release notes (1.0.24). Every release needs `release-notes/<version>.md`:
+  plain-language bullets for the people running F7FIVE0, no hashes, PR numbers
+  or code terms (`release-notes/README.md`). `scripts/release-body.ps1` (called
+  by `release.yml`) builds the GitHub release body: that file, then the line
+  `<!-- f7five0:download-guide -->`, then the "Which file do I need?" guide and
+  GitHub's generated notes. A missing notes file still publishes, with a
+  fallback line. Admin > Updates shows only the part above the marker, for
+  every version the install would get, newest first; older releases with no
+  marker lose the guide and the Full Changelog line. The marker must equal
+  `RELEASE_NOTES_MARKER` in `frontend/lib/release-notes.ts`: change both or
+  neither. `whatsNew` drops HTML comments line by line, never by string
+  replacement (CodeQL `js/incomplete-multi-character-sanitization`).
+- Season art (1.0.24). Season posters are `art_overrides` rows with entity
+  `season` (entity id = `seasons.id`, role `poster`), served at
+  `/api/art/season/<id>/poster`; `seasons.poster_path` is unused. Sources,
+  strongest first: admin pick, folder sidecar (`seasonNN-poster.*`,
+  `seasonN-poster.*`, `season-specials-poster.*` in the show folder, or
+  `poster|folder|cover.*` in the season folder), Sonarr season images, then TMDB
+  (only for seasons with no art). The web falls back to the show poster. Series
+  detail carries `seasons[]` (number, poster, visible episode count). The Home
+  hero album bio is up to 4 whole sentences within 480 characters
+  (`services/bio_excerpt.py`), beside the title, with no CSS line clamp.
+- Never let an *arr URL or key reach a log or an error message. An *arr image
+  URL carries `apikey=` in its query. CodeQL `py/clear-text-logging-sensitive-data`
+  follows *arr settings into the URL, a URL rebuilt without the key, and any
+  exception message that quotes it. Log entity, source and status only, and keep
+  query strings out of `ArtValidationError` messages.
 - Writing style for docs, comments, and commits: plain and direct, no em
   dashes.
 
@@ -1239,3 +1295,35 @@ is only proven by a real update on a VM: the tests use a stub Setup.
   answers a server with no account yet), Jon's update of the live server from
   Admin > Updates, and SignPath (application and `SIGNPATH_API_TOKEN`), so Setup
   is still unsigned.
+- 2026-11-21 (Hermes, v1.0.23): released from `main` `ced2659`. PR #24
+  (`fix/pg-nssm-direct`): under `winget install jonfuego.F7FIVE0` Setup hung
+  for good, because its own `winget install PostgreSQL.PostgreSQL.16` waited for
+  the outer winget. PostgreSQL and NSSM are now pinned direct downloads (see the
+  pinned downloads rule) and Setup never calls winget; `download-verify.ps1`
+  fails if install.ps1 does. FuegoTest VM from the "No F7FIVE0" snapshot: fresh
+  silent install exits 0 in 19 min with both files from the pinned URLs and no
+  winget process. Checks: installer parse clean, `download-verify`,
+  `winget-line`, `duckdns-migrate`, `update-verify` pass under Windows
+  PowerShell 5.1, Pester 93 of 93. Not done: a real winget install of a
+  published release, and SmartScreen still stops an unsigned Setup under winget.
+- 2026-11-21 (Hermes, v1.0.24): released from `main` `e53df86`. Merged `--no-ff`:
+  `fix/car-resume` (PR #25), `fix/whats-new` (PR #26), `feat/seasons-and-hero`
+  (PR #27) and `chore/app-1.0.24` (versionCode 25, `release-notes/1.0.24.md`).
+  New rules above: car resume, release notes, season art, and *arr URLs kept
+  out of logs and errors. The car-resume cause, from the live API log: Play on
+  an ended episode seeked to ExoPlayer's unset time and restarted it from 0,
+  which then overwrote the saved place; small 15 s steps back after a resume
+  came from the car's skip-back button, not a saving bug. Emulator (x86_64 test
+  build): podcast and music resume after a force-stop, take-over after the
+  screen closed, ended episode not restarted. CodeQL on PR #27 found the *arr
+  API key could reach the log through a failed art download's URL and error
+  message (no key was in Jon's live logs); fixed before merge. Checks on the
+  merged tree: pytest 1514 passed (9 skipped); web tsc, 433 tests, lint 0
+  errors, build; mobile tsc, jest 521 in 67 suites, eslint 0 errors; npm and
+  pip audit gates OK; installer parse clean, `download-verify`, `winget-line`,
+  `duckdns-migrate`, `update-verify` pass, Pester 93 of 93. CI and CodeQL green
+  with no new alerts; signed arm64 APK; the release has Setup, APK, zip, SBOMs
+  and `SHA256SUMS.txt`, and its body starts with the 1.0.24 notes. Not done: an
+  emulator rerun (same app code as PR #25's run), a clean-VM Setup (installer
+  unchanged), Jon's car test, and Sonarr/TMDB season images against real
+  services (tested with fake responses only).
