@@ -319,8 +319,10 @@ def fetch_url_bytes(url: str) -> bytes:
         ) as stream:
             resp = stream.response
             if resp.status_code >= 400:
+                # No query string in the message: an *arr image URL carries
+                # its API key there, and this message reaches logs.
                 raise ArtValidationError(
-                    f"upstream returned HTTP {resp.status_code} for {url}",
+                    f"upstream returned HTTP {resp.status_code} for {url.split('?', 1)[0]}",
                     status_code=502,
                 )
             return net_guard.read_limited(resp, _MAX_BYTES)
@@ -452,12 +454,14 @@ def download_art_on_sync(
         # *arr CDNs go flaky, return HTML error pages, redirect to login
         # walls, etc. None of that should crash the sync; leave whatever
         # was there (placeholder if nothing) and try again next pass.
+        # Nothing derived from the keyed URL is logged: the URL is rebuilt
+        # without the API key, and the reason is the error's status only
+        # (its message can quote the URL).
         log.warning(
-            "art download skipped: entity=%s/%s role=%s url=%s reason=%s",
-            # Built without the API key: an *arr image URL carries it in the
-            # query string, and it must never reach the log.
+            "art download skipped: entity=%s/%s role=%s url=%s status=%s",
             entity_kind, entity_id, role,
-            _pick_arr_image_url(images, cover_type, arr_base_url, ""), exc,
+            _pick_arr_image_url(images, cover_type, arr_base_url, ""),
+            getattr(exc, "status_code", None),
         )
         return None
 

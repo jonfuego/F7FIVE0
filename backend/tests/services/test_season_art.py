@@ -322,7 +322,9 @@ def test_skipped_art_download_never_logs_the_arr_api_key(db_session, caplog, mon
     from app.services import art
 
     def boom(*a, **k):
-        raise art.ArtValidationError("not an image")
+        raise art.ArtValidationError(
+            "upstream returned HTTP 401 for http://sonarr:8989/x.jpg?apikey=SECRET123", status_code=502,
+        )
 
     monkeypatch.setattr(art, "fetch_and_save_url", boom)
     images = [{"coverType": "poster", "url": "/MediaCover/12/season-1.jpg"}]
