@@ -311,3 +311,12 @@ def test_season_poster_is_served_with_size_copies(client, db_session, tv_root, s
     assert r.status_code == 200
     assert r.headers["content-type"] == "image/webp"
     assert client.get(f"/api/art/season/{season.id}/backdrop").status_code == 400
+
+
+def test_redact_url_hides_the_arr_api_key():
+    from app.services.art import redact_url
+
+    url = "http://sonarr:8989/MediaCover/12/season-1.jpg?apikey=SECRET123"
+    assert "SECRET123" not in redact_url(url)
+    assert redact_url(url).startswith("http://sonarr:8989/MediaCover/12/season-1.jpg?")
+    assert redact_url("https://image.tmdb.org/t/p/w780/x.jpg") == "https://image.tmdb.org/t/p/w780/x.jpg"
